@@ -46,17 +46,19 @@
         return;
       }
 
+      const FADE_MS = 3000;
       const count = 3 + Math.floor(Math.random() * 3);
+      const now = performance.now();
       for (let i = 0; i < count; i++) {
         stars.push({
           x: e.clientX + (Math.random() - 0.5) * 30,
           y: e.clientY + (Math.random() - 0.5) * 30,
-          size: 14 + Math.random() * 16,
+          size: 16 + Math.random() * 14,
           rotation: Math.random() * Math.PI * 2,
-          life: 1,
-          decay: 0.02 + Math.random() * 0.012,
-          driftX: (Math.random() - 0.5) * 1.2,
-          driftY: -0.8 - Math.random() * 1.5,
+          born: now,
+          fadeMs: FADE_MS,
+          driftX: (Math.random() - 0.5) * 0.6,
+          driftY: -0.4 - Math.random() * 0.8,
         });
       }
     });
@@ -76,18 +78,18 @@
       ctx.restore();
     }
 
-    function animate() {
+    function animate(now) {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       for (let i = stars.length - 1; i >= 0; i--) {
         const s = stars[i];
-        s.life -= s.decay;
+        const life = 1 - (now - s.born) / s.fadeMs;
         s.x += s.driftX;
         s.y += s.driftY;
-        s.rotation += 0.04;
-        if (s.life <= 0) {
+        s.rotation += 0.02;
+        if (life <= 0) {
           stars.splice(i, 1);
         } else {
-          drawStar(s.x, s.y, s.size, s.rotation, s.life);
+          drawStar(s.x, s.y, s.size, s.rotation, life);
         }
       }
       requestAnimationFrame(animate);
