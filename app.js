@@ -1,12 +1,6 @@
 (function () {
   const THEME_KEY = "yichuan-theme";
 
-  const STAR_GLYPHS = ["✦", "✧", "★", "⭐", "✨", "⋆"];
-  const STAR_COLORS = [
-    "#fde68a", "#f9a8d4", "#67e8f9", "#c4b5fd", "#fdba74",
-    "#86efac", "#fda4af", "#a5b4fc", "#fcd34d", "#e879f9",
-  ];
-
   let currentCategory = "all";
   let searchQuery = "";
 
@@ -32,16 +26,12 @@
     updateToggleLabel(next);
   }
 
-  function randomFrom(arr) {
-    return arr[Math.floor(Math.random() * arr.length)];
-  }
-
   function initStars() {
     const canvas = document.getElementById("star-canvas");
     if (!canvas) return;
 
     const ctx = canvas.getContext("2d");
-    const particles = [];
+    const stars = [];
 
     function resize() {
       canvas.width = window.innerWidth;
@@ -56,59 +46,45 @@
         return;
       }
 
-      const burst = 4 + Math.floor(Math.random() * 6);
-      const angleBase = Math.random() * Math.PI * 2;
-
-      for (let i = 0; i < burst; i++) {
-        const angle = angleBase + (Math.random() - 0.5) * 1.8;
-        const speed = 1.2 + Math.random() * 3.5;
-        particles.push({
-          x: e.clientX + (Math.random() - 0.5) * 16,
-          y: e.clientY + (Math.random() - 0.5) * 16,
-          vx: Math.cos(angle) * speed,
-          vy: Math.sin(angle) * speed - (1 + Math.random() * 2),
-          size: 10 + Math.random() * 18,
-          glyph: randomFrom(STAR_GLYPHS),
-          color: randomFrom(STAR_COLORS),
+      const count = 2 + Math.floor(Math.random() * 3);
+      for (let i = 0; i < count; i++) {
+        stars.push({
+          x: e.clientX + (Math.random() - 0.5) * 30,
+          y: e.clientY + (Math.random() - 0.5) * 30,
+          size: 10 + Math.random() * 14,
           rotation: Math.random() * Math.PI * 2,
-          spin: (Math.random() - 0.5) * 0.18,
           life: 1,
-          decay: 0.012 + Math.random() * 0.018,
-          gravity: 0.02 + Math.random() * 0.03,
+          decay: 0.018 + Math.random() * 0.012,
+          driftX: (Math.random() - 0.5) * 1.2,
+          driftY: -0.8 - Math.random() * 1.5,
         });
       }
     });
 
-    function drawParticle(p) {
+    function drawStar(x, y, size, rotation, alpha) {
       ctx.save();
-      ctx.translate(p.x, p.y);
-      ctx.rotate(p.rotation);
-      ctx.globalAlpha = p.life;
-      ctx.fillStyle = p.color;
-      ctx.shadowColor = p.color;
-      ctx.shadowBlur = 8 * p.life;
-      ctx.font = p.size + "px serif";
+      ctx.translate(x, y);
+      ctx.rotate(rotation);
+      ctx.globalAlpha = alpha;
+      ctx.font = size + "px serif";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      ctx.fillText(p.glyph, 0, 0);
+      ctx.fillText("⭐", 0, 0);
       ctx.restore();
     }
 
     function animate() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      for (let i = particles.length - 1; i >= 0; i--) {
-        const p = particles[i];
-        p.life -= p.decay;
-        p.vx *= 0.98;
-        p.vy += p.gravity;
-        p.x += p.vx;
-        p.y += p.vy;
-        p.rotation += p.spin;
-
-        if (p.life <= 0) {
-          particles.splice(i, 1);
+      for (let i = stars.length - 1; i >= 0; i--) {
+        const s = stars[i];
+        s.life -= s.decay;
+        s.x += s.driftX;
+        s.y += s.driftY;
+        s.rotation += 0.04;
+        if (s.life <= 0) {
+          stars.splice(i, 1);
         } else {
-          drawParticle(p);
+          drawStar(s.x, s.y, s.size, s.rotation, s.life);
         }
       }
       requestAnimationFrame(animate);

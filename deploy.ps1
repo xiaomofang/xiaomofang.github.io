@@ -1,4 +1,4 @@
-# Publish to https://xiaomofang.github.io
+# Publish to https://xiaomofang.github.io/myblog-codes
 $ErrorActionPreference = "Stop"
 
 $gh = "C:\Program Files\GitHub CLI\gh.exe"
@@ -35,7 +35,7 @@ if ($status) {
 
 git branch -M main
 
-$repo = "xiaomofang.github.io"
+$repo = "myblog-codes"
 $remote = git remote get-url origin 2>$null
 if (-not $remote) {
     & $gh repo create $repo --public --source=. --remote=origin --push
@@ -44,4 +44,4 @@ if (-not $remote) {
 }
 
 Write-Host ""
-Write-Host "Published → https://xiaomofang.github.io" -ForegroundColor Green
+Write-Host "Published → https://xiaomofang.github.io/myblog-codes" -ForegroundColor Green

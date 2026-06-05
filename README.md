@@ -1,34 +1,41 @@
-# 一川疯月
+# 一川疯月 · myblog-codes
 
-Personal blog · [xiaomofang.github.io](https://xiaomofang.github.io)
+Personal blog source code.
 
 | | |
 |---|---|
-| **Site** | https://xiaomofang.github.io |
-| **Repo (remote)** | `xiaomofang/xiaomofang.github.io` |
-| **Local folder** | `E:\AAA-LLM-CODE\tech-blog-github-pages` *(可重命名为 `xiaomofang.github.io`)* |
+| **Site** | https://xiaomofang.github.io/myblog-codes |
+| **Repo** | [xiaomofang/myblog-codes](https://github.com/xiaomofang/myblog-codes) |
+| **Local** | `E:\AAA-LLM-CODE\myblog-codes` |
 
 ---
 
 ## Publish
 
 ```powershell
-cd E:\AAA-LLM-CODE\tech-blog-github-pages
-.\deploy.ps1 "feat: add new post on attention"
+cd E:\AAA-LLM-CODE\myblog-codes
+git push
 ```
 
-Commit message style (optional prefix):
+Or with commit message:
 
-- `feat:` new post or feature
-- `style:` visual / layout changes
-- `fix:` bug fix
-- `chore:` minor updates
+```powershell
+.\deploy.ps1 "feat: add new post"
+```
+
+If push fails with proxy error (`127.0.0.1:7890`), run once:
+
+```powershell
+git config --global --unset http.proxy
+git config --global --unset https.proxy
+```
 
 ---
 
-## Add a post
+## Rename local folder (if still `tech-blog-github-pages`)
 
-1. Copy `posts/post-llm-benchmark.html`
-2. Edit title and body
-3. Add a card in `index.html`
-4. `.\deploy.ps1 "feat: post title here"`
+Close Cursor, then:
+
+```powershell
+Rename-Item "E:\AAA-LLM-CODE\tech-blog-github-pages" "myblog-codes"
+```

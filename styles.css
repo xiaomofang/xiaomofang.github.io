@@ -9,37 +9,37 @@
 }
 
 [data-theme="night"] {
-  --bg: #0a0c12;
-  --text: #eceef5;
-  --text-soft: #9ba3bb;
-  --text-faint: #5a6178;
-  --accent: #c4b5fd;
-  --accent-2: #7dd3fc;
-  --border: rgba(255, 255, 255, 0.07);
-  --card: rgba(255, 255, 255, 0.03);
-  --card-hover: rgba(255, 255, 255, 0.06);
-  --header: rgba(10, 12, 18, 0.75);
-  --orb-a: rgba(139, 92, 246, 0.18);
-  --orb-b: rgba(56, 189, 248, 0.12);
-  --input-bg: rgba(255, 255, 255, 0.04);
-  --code-bg: #07080d;
+  --bg: #0c0e0c;
+  --text: #e8ebe8;
+  --text-soft: #9aa89e;
+  --text-faint: #5c665c;
+  --accent: #6ee7a0;
+  --accent-2: #4ade80;
+  --border: rgba(110, 231, 160, 0.1);
+  --card: rgba(110, 231, 160, 0.04);
+  --card-hover: rgba(110, 231, 160, 0.08);
+  --header: rgba(12, 14, 12, 0.88);
+  --orb-a: rgba(74, 222, 128, 0.08);
+  --orb-b: rgba(52, 211, 153, 0.05);
+  --input-bg: rgba(255, 255, 255, 0.03);
+  --code-bg: #080a08;
 }
 
 [data-theme="day"] {
-  --bg: #faf8f5;
-  --text: #1c1917;
-  --text-soft: #6b6560;
-  --text-faint: #a8a29e;
-  --accent: #9a3412;
-  --accent-2: #b45309;
-  --border: rgba(0, 0, 0, 0.07);
-  --card: rgba(255, 255, 255, 0.7);
-  --card-hover: rgba(255, 255, 255, 0.95);
-  --header: rgba(250, 248, 245, 0.8);
-  --orb-a: rgba(251, 191, 36, 0.2);
-  --orb-b: rgba(244, 114, 182, 0.12);
-  --input-bg: rgba(255, 255, 255, 0.9);
-  --code-bg: #f5f0ea;
+  --bg: #f8faf8;
+  --text: #1a1f1a;
+  --text-soft: #5c6b5c;
+  --text-faint: #8a968a;
+  --accent: #16a34a;
+  --accent-2: #22c55e;
+  --border: rgba(22, 163, 74, 0.12);
+  --card: rgba(255, 255, 255, 0.85);
+  --card-hover: rgba(255, 255, 255, 1);
+  --header: rgba(248, 250, 248, 0.92);
+  --orb-a: rgba(74, 222, 128, 0.12);
+  --orb-b: rgba(34, 197, 94, 0.08);
+  --input-bg: #ffffff;
+  --code-bg: #f0f4f0;
 }
 
 *,
@@ -134,26 +134,20 @@ body {
   color: inherit;
 }
 
-.logo-mark {
-  width: 30px;
-  height: 30px;
-  border-radius: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-family: var(--font-serif);
-  font-size: 14px;
-  font-weight: 600;
-  border: 1px solid var(--border);
-  background: var(--card);
-  color: var(--accent);
+.logo-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 10px rgba(74, 222, 128, 0.5);
 }
 
 .logo-text {
-  font-family: var(--font-serif);
-  font-size: 16px;
-  font-weight: 600;
-  letter-spacing: 0.14em;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: lowercase;
+  color: var(--text-soft);
 }
 
 .header-actions {
@@ -231,56 +225,31 @@ body {
 }
 
 .hero {
-  margin-bottom: 36px;
+  margin-bottom: 32px;
   text-align: center;
-}
-
-.hero-eyebrow {
-  font-size: 11px;
-  letter-spacing: 0.22em;
-  text-transform: uppercase;
-  color: var(--text-faint);
-  margin: 0 0 18px;
-}
-
-.hero-brand {
-  font-family: var(--font-serif);
-  font-size: clamp(36px, 7vw, 52px);
-  font-weight: 600;
-  letter-spacing: 0.1em;
-  margin: 0 0 20px;
-  line-height: 1.1;
-  background: linear-gradient(135deg, var(--text) 30%, var(--accent) 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
 }
 
 .hero-slogan {
-  display: inline-block;
-  text-align: center;
-  padding: 0;
   margin: 0;
 }
 
 .slogan-primary {
   font-family: var(--font-serif);
-  font-size: clamp(17px, 2.8vw, 20px);
+  font-size: 17px;
   font-style: italic;
   font-weight: 500;
   color: var(--text);
   margin: 0;
-  line-height: 1.35;
-  letter-spacing: 0.01em;
+  line-height: 1.4;
 }
 
 .slogan-secondary {
   font-family: var(--font-serif);
-  font-size: 14px;
+  font-size: 13px;
   font-style: italic;
   color: var(--text-soft);
-  margin: 6px 0 0;
-  line-height: 1.4;
+  margin: 5px 0 0;
+  line-height: 1.45;
 }
 
 .tag-cloud {
