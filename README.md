@@ -6,14 +6,14 @@ Personal blog · [xiaomofang.github.io](https://xiaomofang.github.io)
 |---|---|
 | **Site** | https://xiaomofang.github.io |
 | **Repo (remote)** | `xiaomofang/xiaomofang.github.io` |
-| **Local folder** | `E:\AAA-LLM-CODE\xiaomofang.github.io` |
+| **Local folder** | `E:\AAA-LLM-CODE\tech-blog-github-pages` *(可重命名为 `xiaomofang.github.io`)* |
 
 ---
 
 ## Publish
 
 ```powershell
-cd E:\AAA-LLM-CODE\xiaomofang.github.io
+cd E:\AAA-LLM-CODE\tech-blog-github-pages
 .\deploy.ps1 "feat: add new post on attention"
 ```
 
