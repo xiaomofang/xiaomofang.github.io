@@ -1,4 +1,4 @@
-# 一键发布博客到 https://xiaomofang.github.io
+# Publish to https://xiaomofang.github.io
 $ErrorActionPreference = "Stop"
 
 $gh = "C:\Program Files\GitHub CLI\gh.exe"
@@ -6,13 +6,13 @@ if (-not (Test-Path $gh)) {
     $gh = "$env:LOCALAPPDATA\Programs\GitHub CLI\gh.exe"
 }
 if (-not (Test-Path $gh)) {
-    Write-Host "未找到 gh，请先安装 GitHub CLI" -ForegroundColor Red
+    Write-Host "GitHub CLI not found. Install from https://cli.github.com/" -ForegroundColor Red
     exit 1
 }
 
 & $gh auth status 2>&1 | Out-Null
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "请先登录 GitHub：" -ForegroundColor Yellow
+    Write-Host "Please login first:" -ForegroundColor Yellow
     Write-Host "  & `"$gh`" auth login" -ForegroundColor Cyan
     exit 1
 }
@@ -28,7 +28,9 @@ if (-not (Test-Path ".git")) {
 git add .
 $status = git status --porcelain
 if ($status) {
-    git commit -m "Update blog"
+    $msg = $args[0]
+    if (-not $msg) { $msg = "chore: update site content" }
+    git commit -m $msg
 }
 
 git branch -M main
@@ -42,5 +44,4 @@ if (-not $remote) {
 }
 
 Write-Host ""
-Write-Host "发布完成！约 1-2 分钟后访问：" -ForegroundColor Green
-Write-Host "  https://xiaomofang.github.io" -ForegroundColor Cyan
+Write-Host "Published → https://xiaomofang.github.io" -ForegroundColor Green
