@@ -51,12 +51,12 @@
         stars.push({
           x: e.clientX + (Math.random() - 0.5) * 30,
           y: e.clientY + (Math.random() - 0.5) * 30,
-          size: 10 + Math.random() * 14,
+          size: 14 + Math.random() * 16,
           rotation: Math.random() * Math.PI * 2,
           life: 1,
-          decay: 0.045 + Math.random() * 0.025,
+          decay: 0.02 + Math.random() * 0.012,
           driftX: (Math.random() - 0.5) * 1.2,
-          driftY: -1.2 - Math.random() * 1.5,
+          driftY: -0.8 - Math.random() * 1.5,
         });
       }
     });
