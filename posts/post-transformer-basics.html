@@ -2,7 +2,7 @@
 <html lang="zh-CN" data-theme="night">
 <head>
   <meta charset="UTF-8" />
-  <title>一次大模型推理性能压测的完整记录 · 一川疯月</title>
+  <title>Attention 到底在算什么？ · 一川疯月</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="stylesheet" href="../styles.css" />
 </head>
@@ -28,29 +28,30 @@
   <main class="site-main">
     <article class="post-page">
       <header class="post-page-header">
-        <p class="post-page-date">2026-06-01 · 推理加速</p>
-        <h1 class="post-page-title">一次大模型推理性能压测的完整记录</h1>
+        <p class="post-page-date">2026-05-28 · 大模型基础知识</p>
+        <h1 class="post-page-title">Attention 到底在算什么？</h1>
       </header>
 
       <section class="post-page-content">
         <p>
-          压测不是为了得到一个好看的数字，而是为了回答一个问题：
-          在当前硬件和框架下，系统的瓶颈在哪里？
+          很多人记住了 Attention 的公式，却没有回答一个更基本的问题：
+          它为什么有效？
         </p>
 
-        <h2>核心指标</h2>
+        <h2>直觉</h2>
         <p>
-          TTFT（首 token 延迟）、TPOT（每 token 耗时）、吞吐（tokens/s）
-          三者往往此消彼长，需要在固定场景下同时观测。
+          Query 是「我在找什么」，Key 是「我有什么特征」，Value 是「我的内容」。
+          Attention 做的是：根据相似度，从所有位置加权聚合信息。
         </p>
 
-        <h2>场景设计</h2>
-        <pre><code>python bench_serve.py --concurrency 1,4,8,16 --input-len 512 --output-len 128</code></pre>
+        <h2>公式</h2>
+        <pre><code>Attention(Q, K, V) = softmax(QK^T / √d_k) · V</code></pre>
 
-        <h2>一个更深的追问</h2>
+        <h2>更深的问题</h2>
         <p>
-          当并发升高、吞吐上升时，P99 延迟恶化了多少？
-          这个 trade-off 是否可接受——这才是压测真正要回答的问题。
+          如果去掉 softmax，直接用 QK^T · V 会怎样？
+          这个问题引出了 Linear Attention 与各种近似方案——
+          每一个答案背后，都藏着更深的问题。
         </p>
       </section>
     </article>

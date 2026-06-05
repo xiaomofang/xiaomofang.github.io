@@ -1,109 +1,120 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="night">
 <head>
   <meta charset="UTF-8" />
-  <title>来自火星的魔方 · 技术博客</title>
+  <title>一川疯月</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="description" content="记录 LLM、性能优化与工程实践的技术笔记。" />
+  <meta name="description" content="大模型学习随笔，一些底层问题探究。一次理解一个问题。" />
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
+  <canvas id="star-canvas"></canvas>
+
   <header class="site-header">
-    <div class="logo">
-      <span class="logo-dot"></span>
-      <span class="logo-text">来自火星的魔方</span>
+    <a href="index.html" class="logo">
+      <span class="logo-mark">川</span>
+      <span class="logo-text">一川疯月</span>
+    </a>
+    <div class="header-actions">
+      <nav class="site-nav">
+        <a href="#blog">随笔</a>
+        <a href="#guestbook">留言</a>
+      </nav>
+      <button id="theme-toggle" class="theme-toggle" type="button" aria-label="切换主题">
+        <span class="icon-sun">☀️</span>
+        <span class="icon-moon">🌙</span>
+      </button>
     </div>
-    <nav class="site-nav">
-      <a href="#blog">博客</a>
-      <a href="#notes">随笔</a>
-      <a href="#about">关于</a>
-    </nav>
   </header>
 
   <main class="site-main">
     <section class="hero">
-      <p class="hero-kicker">Personal Tech Blog</p>
-      <h1 class="hero-title">记录工程实践与思考。</h1>
-      <p class="hero-subtitle">
-        这里主要分享 LLM 推理、性能压测、Python 工程化等内容，
-        既是给自己看的笔记，也是给同行的参考。
+      <h1 class="hero-brand">一川疯月</h1>
+      <p class="hero-slogan-en">Understanding, One Question at a Time</p>
+      <p class="hero-slogan-en-sub">Every answer reveals a deeper question.</p>
+      <p class="hero-slogan-zh">
+        一次理解一个问题。<br />
+        因为每一个答案背后，都藏着更深的问题。
       </p>
-      <div class="hero-tags">
-        <span class="tag">LLM</span>
-        <span class="tag">vLLM</span>
-        <span class="tag">Python</span>
-        <span class="tag">性能优化</span>
-      </div>
+      <p class="hero-hint">点击空白处，撒落星光 ✦</p>
     </section>
+
+    <nav class="category-tabs" aria-label="文章分类">
+      <button class="category-tab active" data-category="all" type="button">全部</button>
+      <button class="category-tab" data-category="basics" type="button">大模型基础知识</button>
+      <button class="category-tab" data-category="inference" type="button">推理加速</button>
+      <button class="category-tab" data-category="rl" type="button">强化学习</button>
+    </nav>
 
     <section id="blog" class="section">
       <div class="section-header">
-        <h2>最新文章</h2>
-        <span class="section-subtitle">Latest Posts</span>
+        <h2>学习随笔</h2>
+        <span class="section-subtitle">Notes</span>
       </div>
 
       <div class="post-list">
-        <article class="post-card">
+        <article class="post-card" data-category="inference">
           <a href="posts/post-llm-benchmark.html" class="post-card-link">
             <div class="post-meta">
               <span class="post-date">2026-06-01</span>
-              <span class="post-tag">LLM</span>
+              <span class="post-tag">推理加速</span>
             </div>
             <h3 class="post-title">一次大模型推理性能压测的完整记录</h3>
             <p class="post-excerpt">
-              从指标选择、场景构造到数据分析，完整记录一次大模型推理性能压测的思考过程与踩坑。
+              从指标选择、场景构造到数据分析，记录一次推理压测中 TTFT、TPOT 与吞吐之间的权衡。
             </p>
           </a>
         </article>
 
-        <article class="post-card">
-          <a href="posts/post-python-tools.html" class="post-card-link">
+        <article class="post-card" data-category="basics">
+          <a href="posts/post-transformer-basics.html" class="post-card-link">
+            <div class="post-meta">
+              <span class="post-date">2026-05-28</span>
+              <span class="post-tag">大模型基础知识</span>
+            </div>
+            <h3 class="post-title">Attention 到底在算什么？</h3>
+            <p class="post-excerpt">
+              从 Q/K/V 的直觉出发，重新理解 Self-Attention 为什么能捕捉长程依赖。
+            </p>
+          </a>
+        </article>
+
+        <article class="post-card" data-category="rl">
+          <a href="posts/post-rl-basics.html" class="post-card-link">
             <div class="post-meta">
               <span class="post-date">2026-05-20</span>
-              <span class="post-tag">Python</span>
+              <span class="post-tag">强化学习</span>
             </div>
-            <h3 class="post-title">写给自己的 Python 工程实践清单</h3>
+            <h3 class="post-title">RLHF 与 DPO：对齐的两条路</h3>
             <p class="post-excerpt">
-              关于项目结构、依赖管理、测试、日志、配置等一套实践清单，让日常小项目也有工程感。
+              对比 RLHF 与 DPO 的优化目标差异，以及各自在大模型对齐中的适用场景。
             </p>
           </a>
         </article>
       </div>
     </section>
 
-    <section id="notes" class="section">
+    <section id="guestbook" class="section">
       <div class="section-header">
-        <h2>快速笔记</h2>
-        <span class="section-subtitle">Notes & Snippets</span>
+        <h2>留言</h2>
+        <span class="section-subtitle">Guestbook</span>
       </div>
-      <ul class="note-list">
-        <li>如何设计一个可扩展的日志规范？</li>
-        <li>LLM 评测指标：准确率之外还能看什么？</li>
-        <li>生产环境里的简单性能 Profiling 心法。</li>
-      </ul>
-    </section>
 
-    <section id="about" class="section section-about">
-      <div class="section-header">
-        <h2>关于我</h2>
-        <span class="section-subtitle">About</span>
+      <div class="guestbook">
+        <form id="guestbook-form" class="guestbook-form">
+          <input id="guest-name" type="text" placeholder="你的名字（可选）" maxlength="20" />
+          <textarea id="guest-text" placeholder="写下你的想法…" maxlength="500" required></textarea>
+          <button class="guestbook-submit" type="submit">留下星光</button>
+        </form>
+        <div id="guestbook-list" class="guestbook-list"></div>
       </div>
-      <p>
-        一名关注大模型推理与系统性能的工程师。日常记录实验、踩坑与可复用的工程经验。
-      </p>
-      <p>
-        <a href="https://github.com/xiaomofang" target="_blank" rel="noopener">GitHub</a> ·
-        <a href="mailto:2206635207@qq.com">Email</a>
-      </p>
     </section>
   </main>
 
   <footer class="site-footer">
-    <span>© <span id="year"></span> xiaomofang · Built on GitHub Pages</span>
+    <span>© <span id="year"></span> 一川疯月</span>
   </footer>
 
-  <script>
-    document.getElementById("year").textContent = new Date().getFullYear();
-  </script>
+  <script src="app.js"></script>
 </body>
 </html>
