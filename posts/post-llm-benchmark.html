@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>一次大模型推理性能压测的完整记录 · 来自火星的魔方</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="../styles.css" />
+</head>
+<body>
+  <header class="site-header">
+    <div class="logo">
+      <span class="logo-dot"></span>
+      <span class="logo-text">来自火星的魔方</span>
+    </div>
+    <nav class="site-nav">
+      <a href="../index.html">← 返回首页</a>
+    </nav>
+  </header>
+
+  <main class="site-main">
+    <article class="post-page">
+      <header class="post-page-header">
+        <p class="post-page-date">2026-06-01 · LLM</p>
+        <h1 class="post-page-title">一次大模型推理性能压测的完整记录</h1>
+      </header>
+
+      <section class="post-page-content">
+        <p>
+          这篇是示例文章。你可以把这里替换成自己的 Markdown 转 HTML 内容，
+          或直接把笔记粘贴进来。
+        </p>
+
+        <h2>压测目标</h2>
+        <p>
+          明确 TTFT、TPOT、吞吐、并发等核心指标，并固定输入输出长度分布，
+          避免「测到了数字但无法对比」的情况。
+        </p>
+
+        <h2>场景设计</h2>
+        <pre><code># 示例：固定 prompt 长度与并发梯度
+python bench_serve.py --concurrency 1,4,8,16 --input-len 512 --output-len 128</code></pre>
+
+        <h2>结论模板</h2>
+        <p>记录硬件、框架版本、batch 策略、瓶颈阶段，以及下一步优化方向。</p>
+      </section>
+    </article>
+  </main>
+
+  <footer class="site-footer">
+    <span>© <span id="year"></span> xiaomofang · Built on GitHub Pages</span>
+  </footer>
+
+  <script>
+    document.getElementById("year").textContent = new Date().getFullYear();
+  </script>
+</body>
+</html>

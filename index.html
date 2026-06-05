@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>来自火星的魔方 · 技术博客</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="记录 LLM、性能优化与工程实践的技术笔记。" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="site-header">
+    <div class="logo">
+      <span class="logo-dot"></span>
+      <span class="logo-text">来自火星的魔方</span>
+    </div>
+    <nav class="site-nav">
+      <a href="#blog">博客</a>
+      <a href="#notes">随笔</a>
+      <a href="#about">关于</a>
+    </nav>
+  </header>
+
+  <main class="site-main">
+    <section class="hero">
+      <p class="hero-kicker">Personal Tech Blog</p>
+      <h1 class="hero-title">记录工程实践与思考。</h1>
+      <p class="hero-subtitle">
+        这里主要分享 LLM 推理、性能压测、Python 工程化等内容，
+        既是给自己看的笔记，也是给同行的参考。
+      </p>
+      <div class="hero-tags">
+        <span class="tag">LLM</span>
+        <span class="tag">vLLM</span>
+        <span class="tag">Python</span>
+        <span class="tag">性能优化</span>
+      </div>
+    </section>
+
+    <section id="blog" class="section">
+      <div class="section-header">
+        <h2>最新文章</h2>
+        <span class="section-subtitle">Latest Posts</span>
+      </div>
+
+      <div class="post-list">
+        <article class="post-card">
+          <a href="posts/post-llm-benchmark.html" class="post-card-link">
+            <div class="post-meta">
+              <span class="post-date">2026-06-01</span>
+              <span class="post-tag">LLM</span>
+            </div>
+            <h3 class="post-title">一次大模型推理性能压测的完整记录</h3>
+            <p class="post-excerpt">
+              从指标选择、场景构造到数据分析，完整记录一次大模型推理性能压测的思考过程与踩坑。
+            </p>
+          </a>
+        </article>
+
+        <article class="post-card">
+          <a href="posts/post-python-tools.html" class="post-card-link">
+            <div class="post-meta">
+              <span class="post-date">2026-05-20</span>
+              <span class="post-tag">Python</span>
+            </div>
+            <h3 class="post-title">写给自己的 Python 工程实践清单</h3>
+            <p class="post-excerpt">
+              关于项目结构、依赖管理、测试、日志、配置等一套实践清单，让日常小项目也有工程感。
+            </p>
+          </a>
+        </article>
+      </div>
+    </section>
+
+    <section id="notes" class="section">
+      <div class="section-header">
+        <h2>快速笔记</h2>
+        <span class="section-subtitle">Notes & Snippets</span>
+      </div>
+      <ul class="note-list">
+        <li>如何设计一个可扩展的日志规范？</li>
+        <li>LLM 评测指标：准确率之外还能看什么？</li>
+        <li>生产环境里的简单性能 Profiling 心法。</li>
+      </ul>
+    </section>
+
+    <section id="about" class="section section-about">
+      <div class="section-header">
+        <h2>关于我</h2>
+        <span class="section-subtitle">About</span>
+      </div>
+      <p>
+        一名关注大模型推理与系统性能的工程师。日常记录实验、踩坑与可复用的工程经验。
+      </p>
+      <p>
+        <a href="https://github.com/xiaomofang" target="_blank" rel="noopener">GitHub</a> ·
+        <a href="mailto:2206635207@qq.com">Email</a>
+      </p>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <span>© <span id="year"></span> xiaomofang · Built on GitHub Pages</span>
+  </footer>
+
+  <script>
+    document.getElementById("year").textContent = new Date().getFullYear();
+  </script>
+</body>
+</html>
