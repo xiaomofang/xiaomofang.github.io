@@ -46,7 +46,7 @@
         return;
       }
 
-      const count = 2 + Math.floor(Math.random() * 3);
+      const count = 3 + Math.floor(Math.random() * 3);
       for (let i = 0; i < count; i++) {
         stars.push({
           x: e.clientX + (Math.random() - 0.5) * 30,
@@ -54,22 +54,25 @@
           size: 10 + Math.random() * 14,
           rotation: Math.random() * Math.PI * 2,
           life: 1,
-          decay: 0.018 + Math.random() * 0.012,
+          decay: 0.045 + Math.random() * 0.025,
           driftX: (Math.random() - 0.5) * 1.2,
-          driftY: -0.8 - Math.random() * 1.5,
+          driftY: -1.2 - Math.random() * 1.5,
         });
       }
     });
 
     function drawStar(x, y, size, rotation, alpha) {
+      const theme = document.documentElement.getAttribute("data-theme");
+      const color = theme === "night" ? "#ffe9a0" : "#e8a830";
       ctx.save();
       ctx.translate(x, y);
       ctx.rotate(rotation);
       ctx.globalAlpha = alpha;
+      ctx.fillStyle = color;
       ctx.font = size + "px serif";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      ctx.fillText("⭐", 0, 0);
+      ctx.fillText("✦", 0, 0);
       ctx.restore();
     }
 
