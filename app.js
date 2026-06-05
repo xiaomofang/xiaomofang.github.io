@@ -2,6 +2,10 @@
   const THEME_KEY = "yichuan-theme";
   const GUESTBOOK_KEY = "yichuan-guestbook";
 
+  let currentCategory = "all";
+  let currentSort = "date";
+  let searchQuery = "";
+
   function initTheme() {
     const saved = localStorage.getItem(THEME_KEY);
     const prefersNight = window.matchMedia("(prefers-color-scheme: dark)").matches;
@@ -42,29 +46,31 @@
 
     document.addEventListener("click", function (e) {
       if (
-        e.target.closest("a, button, input, textarea, .theme-toggle, .category-tab, .guestbook-submit")
+        e.target.closest(
+          "a, button, input, textarea, .theme-toggle, .tag-pill, .sort-btn, .guestbook-submit"
+        )
       ) {
         return;
       }
 
-      const count = 3 + Math.floor(Math.random() * 3);
+      const count = 2 + Math.floor(Math.random() * 2);
       for (let i = 0; i < count; i++) {
         stars.push({
-          x: e.clientX + (Math.random() - 0.5) * 30,
-          y: e.clientY + (Math.random() - 0.5) * 30,
-          size: 10 + Math.random() * 14,
+          x: e.clientX + (Math.random() - 0.5) * 24,
+          y: e.clientY + (Math.random() - 0.5) * 24,
+          size: 9 + Math.random() * 10,
           rotation: Math.random() * Math.PI * 2,
           life: 1,
-          decay: 0.018 + Math.random() * 0.012,
-          driftX: (Math.random() - 0.5) * 1.2,
-          driftY: -0.8 - Math.random() * 1.5,
+          decay: 0.02 + Math.random() * 0.015,
+          driftX: (Math.random() - 0.5) * 0.8,
+          driftY: -0.6 - Math.random() * 1.2,
         });
       }
     });
 
     function drawStar(x, y, size, rotation, alpha) {
       const theme = document.documentElement.getAttribute("data-theme");
-      const color = theme === "night" ? "#ffe9a0" : "#e8a830";
+      const color = theme === "night" ? "#ffe9a0" : "#d4954a";
       ctx.save();
       ctx.translate(x, y);
       ctx.rotate(rotation);
@@ -84,8 +90,7 @@
         s.life -= s.decay;
         s.x += s.driftX;
         s.y += s.driftY;
-        s.rotation += 0.04;
-
+        s.rotation += 0.03;
         if (s.life <= 0) {
           stars.splice(i, 1);
         } else {
@@ -126,11 +131,20 @@
     localStorage.setItem(GUESTBOOK_KEY, JSON.stringify(items));
   }
 
+  function escapeHtml(str) {
+    const div = document.createElement("div");
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
   function renderGuestbook() {
     const list = document.getElementById("guestbook-list");
     if (!list) return;
 
     const items = loadGuestbook();
+    const statGuests = document.getElementById("stat-guests");
+    if (statGuests) statGuests.textContent = items.length;
+
     if (items.length === 0) {
       list.innerHTML = '<p class="guestbook-empty">还没有留言，写下第一条吧 ✦</p>';
       return;
@@ -158,12 +172,6 @@
       .join("");
   }
 
-  function escapeHtml(str) {
-    const div = document.createElement("div");
-    div.textContent = str;
-    return div.innerHTML;
-  }
-
   function initGuestbook() {
     const form = document.getElementById("guestbook-form");
     if (!form) return;
@@ -176,7 +184,6 @@
       const textInput = document.getElementById("guest-text");
       const name = (nameInput.value || "访客").trim().slice(0, 20);
       const text = textInput.value.trim().slice(0, 500);
-
       if (!text) return;
 
       const items = loadGuestbook();
@@ -189,21 +196,80 @@
     });
   }
 
-  function initCategoryFilter() {
-    const tabs = document.querySelectorAll(".category-tab");
-    const cards = document.querySelectorAll(".post-card[data-category]");
-    if (!tabs.length || !cards.length) return;
+  function filterAndSortPosts() {
+    const cards = Array.from(document.querySelectorAll(".post-card[data-category]"));
+    const list = document.getElementById("post-list");
+    const empty = document.getElementById("empty-state");
+    const countEl = document.getElementById("result-count");
+    if (!list) return;
 
-    tabs.forEach((tab) => {
-      tab.addEventListener("click", function () {
-        const cat = tab.dataset.category;
-        tabs.forEach((t) => t.classList.toggle("active", t === tab));
-        cards.forEach((card) => {
-          const match = cat === "all" || card.dataset.category === cat;
-          card.classList.toggle("hidden", !match);
-        });
+    const q = searchQuery.toLowerCase().trim();
+    let visible = cards.filter((card) => {
+      const catMatch = currentCategory === "all" || card.dataset.category === currentCategory;
+      if (!catMatch) return false;
+      if (!q) return true;
+      const title = (card.dataset.title || "").toLowerCase();
+      const excerpt = (card.querySelector(".post-excerpt")?.textContent || "").toLowerCase();
+      return title.includes(q) || excerpt.includes(q);
+    });
+
+    visible.sort((a, b) => {
+      if (currentSort === "title") {
+        return (a.dataset.title || "").localeCompare(b.dataset.title || "", "zh");
+      }
+      return (b.dataset.date || "").localeCompare(a.dataset.date || "");
+    });
+
+    cards.forEach((c) => c.classList.add("hidden"));
+    visible.forEach((c) => {
+      c.classList.remove("hidden");
+      list.appendChild(c);
+    });
+
+    if (empty) empty.classList.toggle("hidden", visible.length > 0);
+    if (countEl) countEl.textContent = visible.length + " 篇";
+  }
+
+  function initFilters() {
+    const pills = document.querySelectorAll(".tag-pill");
+    pills.forEach((pill) => {
+      pill.addEventListener("click", function () {
+        currentCategory = pill.dataset.category;
+        pills.forEach((p) => p.classList.toggle("active", p === pill));
+        filterAndSortPosts();
       });
     });
+
+    const sortBtns = document.querySelectorAll(".sort-btn");
+    sortBtns.forEach((btn) => {
+      btn.addEventListener("click", function () {
+        currentSort = btn.dataset.sort;
+        sortBtns.forEach((b) => b.classList.toggle("active", b === btn));
+        filterAndSortPosts();
+      });
+    });
+
+    const search = document.getElementById("search-input");
+    if (search) {
+      search.addEventListener("input", function () {
+        searchQuery = search.value;
+        filterAndSortPosts();
+      });
+    }
+  }
+
+  function initStats() {
+    const cards = document.querySelectorAll(".post-card[data-date]");
+    const statPosts = document.getElementById("stat-posts");
+    const statUpdated = document.getElementById("stat-updated");
+
+    if (statPosts) statPosts.textContent = cards.length;
+
+    if (statUpdated && cards.length) {
+      const dates = Array.from(cards).map((c) => c.dataset.date);
+      dates.sort().reverse();
+      statUpdated.textContent = dates[0].slice(5);
+    }
   }
 
   function initYear() {
@@ -215,8 +281,10 @@
     initTheme();
     initStars();
     initGuestbook();
-    initCategoryFilter();
+    initFilters();
+    initStats();
     initYear();
+    filterAndSortPosts();
 
     const toggle = document.getElementById("theme-toggle");
     if (toggle) toggle.addEventListener("click", toggleTheme);

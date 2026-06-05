@@ -17,7 +17,8 @@
     </a>
     <div class="header-actions">
       <nav class="site-nav">
-        <a href="#blog">随笔</a>
+        <a href="#blog" class="nav-active">随笔</a>
+        <a href="#tags">标签</a>
         <a href="#guestbook">留言</a>
       </nav>
       <button id="theme-toggle" class="theme-toggle" type="button" aria-label="切换主题">
@@ -29,34 +30,70 @@
 
   <main class="site-main">
     <section class="hero">
+      <p class="hero-eyebrow">LLM Notes & Deep Dives</p>
       <h1 class="hero-brand">一川疯月</h1>
-      <p class="hero-slogan-en">Understanding, One Question at a Time</p>
-      <p class="hero-slogan-en-sub">Every answer reveals a deeper question.</p>
-      <p class="hero-slogan-zh">
-        一次理解一个问题。<br />
-        因为每一个答案背后，都藏着更深的问题。
-      </p>
+      <blockquote class="hero-quote">
+        <p class="hero-slogan-en">Understanding, One Question at a Time</p>
+        <p class="hero-slogan-en-sub">Every answer reveals a deeper question.</p>
+        <p class="hero-slogan-zh">一次理解一个问题。因为每一个答案背后，都藏着更深的问题。</p>
+      </blockquote>
       <p class="hero-hint">点击空白处，撒落星光 ✦</p>
     </section>
 
-    <nav class="category-tabs" aria-label="文章分类">
-      <button class="category-tab active" data-category="all" type="button">全部</button>
-      <button class="category-tab" data-category="basics" type="button">大模型基础知识</button>
-      <button class="category-tab" data-category="inference" type="button">推理加速</button>
-      <button class="category-tab" data-category="rl" type="button">强化学习</button>
-    </nav>
+    <section class="stats-row" aria-label="站点概览">
+      <div class="stat-card">
+        <span class="stat-value" id="stat-posts">3</span>
+        <span class="stat-label">随笔</span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-value">3</span>
+        <span class="stat-label">栏目</span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-value" id="stat-updated">—</span>
+        <span class="stat-label">最近更新</span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-value" id="stat-guests">0</span>
+        <span class="stat-label">留言</span>
+      </div>
+    </section>
+
+    <section class="toolbar">
+      <div class="search-box">
+        <span class="search-icon" aria-hidden="true">⌕</span>
+        <input id="search-input" type="search" placeholder="搜索标题或摘要…" autocomplete="off" />
+      </div>
+      <div class="sort-group" role="group" aria-label="排序">
+        <button class="sort-btn active" data-sort="date" type="button">最新</button>
+        <button class="sort-btn" data-sort="title" type="button">标题</button>
+      </div>
+    </section>
+
+    <section id="tags" class="section section-tags">
+      <div class="section-header">
+        <h2>标签</h2>
+        <span class="section-subtitle">Tags</span>
+      </div>
+      <nav class="tag-cloud" aria-label="文章分类">
+        <button class="tag-pill active" data-category="all" type="button">全部</button>
+        <button class="tag-pill" data-category="basics" type="button">大模型基础知识</button>
+        <button class="tag-pill" data-category="inference" type="button">推理加速</button>
+        <button class="tag-pill" data-category="rl" type="button">强化学习</button>
+      </nav>
+    </section>
 
     <section id="blog" class="section">
       <div class="section-header">
         <h2>学习随笔</h2>
-        <span class="section-subtitle">Notes</span>
+        <span class="section-subtitle" id="result-count">3 篇</span>
       </div>
 
-      <div class="post-list">
-        <article class="post-card" data-category="inference">
+      <div class="post-list" id="post-list">
+        <article class="post-card" data-category="inference" data-date="2026-06-01" data-title="一次大模型推理性能压测的完整记录">
           <a href="posts/post-llm-benchmark.html" class="post-card-link">
             <div class="post-meta">
-              <span class="post-date">2026-06-01</span>
+              <time class="post-date" datetime="2026-06-01">2026-06-01</time>
               <span class="post-tag">推理加速</span>
             </div>
             <h3 class="post-title">一次大模型推理性能压测的完整记录</h3>
@@ -66,10 +103,10 @@
           </a>
         </article>
 
-        <article class="post-card" data-category="basics">
+        <article class="post-card" data-category="basics" data-date="2026-05-28" data-title="Attention 到底在算什么？">
           <a href="posts/post-transformer-basics.html" class="post-card-link">
             <div class="post-meta">
-              <span class="post-date">2026-05-28</span>
+              <time class="post-date" datetime="2026-05-28">2026-05-28</time>
               <span class="post-tag">大模型基础知识</span>
             </div>
             <h3 class="post-title">Attention 到底在算什么？</h3>
@@ -79,10 +116,10 @@
           </a>
         </article>
 
-        <article class="post-card" data-category="rl">
+        <article class="post-card" data-category="rl" data-date="2026-05-20" data-title="RLHF 与 DPO：对齐的两条路">
           <a href="posts/post-rl-basics.html" class="post-card-link">
             <div class="post-meta">
-              <span class="post-date">2026-05-20</span>
+              <time class="post-date" datetime="2026-05-20">2026-05-20</time>
               <span class="post-tag">强化学习</span>
             </div>
             <h3 class="post-title">RLHF 与 DPO：对齐的两条路</h3>
@@ -92,6 +129,8 @@
           </a>
         </article>
       </div>
+
+      <p class="empty-state hidden" id="empty-state">没有匹配的文章，换个关键词或标签试试。</p>
     </section>
 
     <section id="guestbook" class="section">
