@@ -106,7 +106,8 @@
 
     const q = searchQuery.toLowerCase().trim();
     const visible = cards.filter((card) => {
-      const catMatch = currentCategory === "all" || card.dataset.category === currentCategory;
+      const categories = (card.dataset.category || "").split(/\s+/);
+      const catMatch = currentCategory === "all" || categories.includes(currentCategory);
       if (!catMatch) return false;
       if (!q) return true;
       const title = (card.dataset.title || "").toLowerCase();

@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="night">
+<head>
+  <meta charset="UTF-8" />
+  <title>temperature 设成 0，大模型两次输出会一样吗？</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="temperature=0 只关闭采样随机性，却不能保证大模型输出完全复现。真正的答案藏在 logits、batch invariance、推理服务和现代模型 API 的设计里。" />
+  <link rel="stylesheet" href="../../styles.css?v=12" />
+</head>
+<body>
+  <div class="ambient" aria-hidden="true"><span class="orb orb-a"></span><span class="orb orb-b"></span></div>
+  <canvas id="star-canvas"></canvas>
+
+  <header class="site-header">
+    <div class="header-inner">
+      <a href="../../index.html" class="logo">
+        <span class="logo-dot"></span>
+        <span class="logo-text">notes</span>
+      </a>
+      <div class="header-actions">
+        <nav class="site-nav">
+          <a href="../../index.html">← Back</a>
+        </nav>
+        <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle theme">
+          <span class="icon-sun">☀️</span>
+          <span class="icon-moon">🌙</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="site-main">
+    <article class="post-page">
+      <header class="post-page-header">
+        <p class="post-page-date">2026-06-08 · Inference Systems</p>
+        <h1 class="post-page-title">temperature 设成 0，大模型两次输出会一样吗？</h1>
+        <p class="post-lead">
+          面试官问：把 temperature 调成 0，同一个 prompt 连发两次，输出会不会一模一样？
+          很多人会立刻回答“会”。前半句对，后半句错。
+        </p>
+      </header>
+
+      <section class="post-page-content">
+        <p>
+          temperature=0 确实意味着贪婪解码：每一步都取概率最高的 token，不再从概率分布里随机抽样。
+          但这个结论只固定了“采样”这一步，没有固定前面那件更基础的事：模型每次前向计算出来的 logits 是否完全一样。
+        </p>
+
+        <p>
+          线上真发两次，你经常会看到不一致。Thinking Machines Lab 在 Qwen3-8B 上做过实验：
+          同一个 prompt、temperature=0、重复请求 1000 次，最终收到了 80 种不同回答。更有意思的是，前 102 个 token 完全一致，
+          到第 103 个 token 才开始分叉。某一步 top-1 和 top-2 只差一点点，浮点误差把 argmax 翻过去，后面的整段文本就沿着另一条路走了。
+        </p>
+
+        <div class="logic-map" aria-label="文章逻辑地图">
+          <div class="map-node">
+            <span>1</span>
+            <strong>temperature=0</strong>
+            <p>只关闭采样随机性。</p>
+          </div>
+          <div class="map-arrow">→</div>
+          <div class="map-node">
+            <span>2</span>
+            <strong>logits 微抖</strong>
+            <p>前向计算并不总是逐 bit 相同。</p>
+          </div>
+          <div class="map-arrow">→</div>
+          <div class="map-node">
+            <span>3</span>
+            <strong>batch 形状</strong>
+            <p>归约顺序随服务端负载变化。</p>
+          </div>
+          <div class="map-arrow">→</div>
+          <div class="map-node">
+            <span>4</span>
+            <strong>系统设计</strong>
+            <p>顶尖模型开始收回采样参数。</p>
+          </div>
+        </div>
+
+        <h2>一、temperature=0 到底固定了什么？</h2>
+        <p>
+          它固定的是解码策略，而不是整个推理系统。给定完全相同的概率分布，argmax 当然是确定的；
+          但只要这个分布在最后几位发生轻微变化，尤其是 top-1 和 top-2 接近打平时，结果就可能翻转。
+        </p>
+
+        <pre><code>from openai import OpenAI
+
+client = OpenAI()
+outs = set()
+
+for _ in range(20):
+    r = client.chat.completions.create(
+        model="your-model",
+        temperature=0,
+        messages=[{"role": "user", "content": "讲个关于纽约的冷知识，150 字以内"}],
+    )
+    outs.add(r.choices[0].message.content)
+
+print(len(outs))</code></pre>
+
+        <p>
+          这段代码不保证每次都能复现差异，但它能帮你建立一个直觉：temperature=0 不是“全链路确定性”的开关。
+          它只是把“按概率抽样”换成“取最大概率”。真正要问的是：最大概率这件事，是不是每次都算得一模一样？
+        </p>
+
+        <div class="callout">
+          <strong>一句话：</strong>
+          temperature=0 消除了 sampling randomness，没有消除 numerical nondeterminism。
+        </div>
+
+        <h2>二、波动不是“GPU 线程乱抢加法”这么简单</h2>
+        <p>
+          常见解释是：GPU 并行计算时，浮点加法不满足结合律，线程执行顺序不同，累加结果就不同。
+          这句话前半部分对，后半部分经常被说得太粗糙。
+        </p>
+
+        <p>
+          浮点加法确实不满足结合律。比如 x=1e30、y=-1e30、z=1，
+          先算 (x+y)+z 可能得到 1，先算 x+(y+z) 可能得到 0。累加顺序一变，末位误差就会变。
+          但现代推理里的矩阵乘 kernel 通常不是靠一堆线程随缘原子加来拼结果。把同一个 matmul 在 GPU 上原地跑很多次，
+          输入不变，结果往往可以逐 bit 一致。
+        </p>
+
+        <p>
+          更关键的根因是 batch invariance 的缺失。矩阵乘法、attention、RMSNorm 这类算子里都有 reduction：
+          它们要把一长串数加起来。GPU 不会从头到尾顺序累加，而会把它切块、并行、再合并。
+          当 batch=1 和 batch>1 时，kernel 可能选择不同的分块方式和累加顺序。于是同一个请求，单独跑和被拼进大 batch 里跑，
+          logits 就可能出现微小差异。
+        </p>
+
+        <p>
+          线上服务正好放大了这件事。你发出请求时，服务器上有多少并发、调度器把你和哪些请求拼成一个 batch、是否触发 chunked prefill 或 cache，
+          都不是你能完全控制的。负载改变 batch 形状，batch 形状改变 kernel 的数值路径，数值路径改变 logits，logits 再改变 argmax。
+        </p>
+
+        <h2>三、为什么顶尖模型开始不让你调 temperature 和 top_p？</h2>
+        <p>
+          这件事和“temperature=0 不保证复现”是同一条线上的两个现象。过去我们把 temperature、top_p、top_k 当成直接控制模型性格的旋钮：
+          想稳一点就降 temperature，想发散一点就升 temperature。现在越来越多顶级模型，尤其是带推理能力的模型，开始弱化甚至移除这些参数。
+        </p>
+
+        <p>
+          一个原因是安全和蒸馏。采样参数给了外部用户更高的可观测性：可以用低温获取稳定答案，用高温采样更多候选，
+          再把这些输出拿去训练另一个模型。对闭源模型公司来说，开放越多采样自由度，越像把模型行为的切面一层层暴露出去。
+          所以有些平台会收紧 sampling 参数，甚至连展示出来的 reasoning 也可能是经过整理和脱敏的版本。
+        </p>
+
+        <p>
+          另一个原因更工程化：现代推理并不只是“logits 上采一个 token”。尤其是推理模型，背后可能有多轮生成、验证、重排、拒绝采样、
+          工具调用或内部策略控制。模型在强化学习阶段已经学会了一套默认推理路径。此时外部强行把 temperature 拉低或拉高，
+          可能不是“更可控”，而是破坏了它被优化过的工作点。
+        </p>
+
+        <div class="callout muted">
+          也就是说，顶尖模型不再把“随机性控制权”完全交给用户，而是把它收回到模型和服务系统内部。
+          你看到的是一个参数被删除，背后是推理链路从简单采样走向复杂系统。
+        </div>
+
+        <h2>四、线上要复现，到底该怎么做？</h2>
+        <p>
+          seed 有用，但它不是承诺。OpenAI Cookbook 对 seed 的表述是 best-effort，并提醒使用 system_fingerprint 观察后端配置变化。
+          Azure 文档也提示，即使 seed 和 fingerprint 对上，长输出仍然可能波动；max_tokens 越大，越容易在某个位置踩中分叉点。
+        </p>
+
+        <ul class="note-list">
+          <li><strong>闭源 API：</strong>固定所有参数，传 seed，记录 system_fingerprint，同时把 max_tokens 控制在必要范围内。</li>
+          <li><strong>评测回归：</strong>不要只比最终文本，可以同时记录 token、logprob、模型版本、服务指纹和提示词版本。</li>
+          <li><strong>强复现需求：</strong>自建推理服务，使用 batch-invariant kernel，用吞吐换 bitwise determinism。</li>
+        </ul>
+
+        <p>
+          真正的 bitwise 复现，需要让带 reduction 的核心算子在不同 batch 形状下走同一条数值路径。
+          对 Transformer 来说，重点通常落在 RMSNorm、矩阵乘法和 attention。Thinking Machines 的 batch-invariant ops
+          以及后续 SGLang 的相关集成，说明这不是玄学，而是可以工程化解决的问题，只是要付出吞吐代价。
+        </p>
+
+        <h2>五、这件事为什么会影响 RL？</h2>
+        <p>
+          如果只是聊天回复偶尔换个词，很多业务可以接受。但在 RL 训练里，数值不一致会变得危险。
+          sampler 用 vLLM 或 SGLang 这类推理引擎生成轨迹，trainer 用 FSDP 或 Megatron 这类训练框架算梯度。
+          两边如果 kernel 数值路径不同，名义上是同一个 policy，实际上采样策略和更新策略已经有偏差。
+        </p>
+
+        <p>
+          这会让 on-policy 训练悄悄变成 off-policy。一个 token 的 logits 差异，在普通聊天里可能只是措辞变化；
+          在 RL 里则可能变成 KL 漂移、优势估计偏差，最后表现为 reward collapse。于是这道面试题从“API 输出是否固定”
+          一直追到了“训练系统是否真的在优化自己以为的那个策略”。
+        </p>
+
+        <h2>结论：确定性不是参数，是系统属性</h2>
+        <p>
+          temperature=0 的正确理解是：它让解码从采样变成 argmax，但没有保证 logits 本身逐 bit 相同。
+          logits 的微小差异来自浮点归约、kernel 选择、batch 形状、服务端调度，甚至 MoE 路由和推理框架实现。
+          当这些因素叠在一起，输出不一致就不再是意外，而是系统自然会发生的事。
+        </p>
+
+        <p>
+          所以这道题真正区分的不是“背没背过 temperature 定义”，而是有没有意识到：大模型推理不是一个孤立函数调用，
+          而是一套数值系统。调过 API 的人会说 temperature=0 就固定；理解推理系统的人会继续追问：
+          固定的是哪一层？没有固定的又是哪一层？
+        </p>
+
+        <div class="essay-ending">
+          默认你以为有的确定性，往往要从 kernel、batch、服务指纹和评测设计里一点点挣回来。
+        </div>
+      </section>
+    </article>
+  </main>
+
+  <footer class="site-footer">
+    <span>© <span id="year"></span></span>
+  </footer>
+
+  <script src="../../app.js?v=12"></script>
+</body>
+</html>

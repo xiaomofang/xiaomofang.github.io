@@ -5,7 +5,7 @@
   <title>notes</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="description" content="LLM notes — understanding, one question at a time." />
-  <link rel="stylesheet" href="styles.css?v=10" />
+  <link rel="stylesheet" href="styles.css?v=12" />
 </head>
 <body>
   <div class="ambient" aria-hidden="true">
@@ -44,9 +44,8 @@
     <div class="controls">
       <nav id="tags" class="tag-cloud" aria-label="Categories">
         <button class="tag-pill active" data-category="all" type="button">All</button>
-        <button class="tag-pill" data-category="basics" type="button">Basics</button>
         <button class="tag-pill" data-category="inference" type="button">Inference</button>
-        <button class="tag-pill" data-category="rl" type="button">RL</button>
+        <button class="tag-pill" data-category="systems" type="button">Systems</button>
       </nav>
       <div class="search-box">
         <input id="search-input" type="search" placeholder="Search…" autocomplete="off" />
@@ -55,41 +54,15 @@
 
     <section id="blog" class="section">
       <div class="post-list" id="post-list">
-        <article class="post-card" data-category="inference" data-date="2026-06-01" data-title="一次大模型推理性能压测的完整记录">
-          <a href="posts/post-llm-benchmark.html" class="post-card-link">
+        <article class="post-card" data-category="inference systems" data-date="2026-06-08" data-title="temperature 设成 0，大模型两次输出会一样吗？">
+          <a href="posts/inference-systems/temperature-zero-determinism.html" class="post-card-link">
             <div class="post-meta-row">
-              <time class="post-date" datetime="2026-06-01">Jun 01</time>
+              <time class="post-date" datetime="2026-06-08">Jun 08</time>
               <span class="post-tag">Inference</span>
             </div>
-            <h3 class="post-title">一次大模型推理性能压测的完整记录</h3>
+            <h3 class="post-title">temperature 设成 0，大模型两次输出会一样吗？</h3>
             <p class="post-excerpt">
-              TTFT、TPOT 与吞吐之间的权衡，以及压测中真正值得追问的问题。
-            </p>
-          </a>
-        </article>
-
-        <article class="post-card" data-category="basics" data-date="2026-05-28" data-title="Attention 到底在算什么？">
-          <a href="posts/post-transformer-basics.html" class="post-card-link">
-            <div class="post-meta-row">
-              <time class="post-date" datetime="2026-05-28">May 28</time>
-              <span class="post-tag">Basics</span>
-            </div>
-            <h3 class="post-title">Attention 到底在算什么？</h3>
-            <p class="post-excerpt">
-              从 Q/K/V 的直觉出发，重新理解 Self-Attention。
-            </p>
-          </a>
-        </article>
-
-        <article class="post-card" data-category="rl" data-date="2026-05-20" data-title="RLHF 与 DPO：对齐的两条路">
-          <a href="posts/post-rl-basics.html" class="post-card-link">
-            <div class="post-meta-row">
-              <time class="post-date" datetime="2026-05-20">May 20</time>
-              <span class="post-tag">RL</span>
-            </div>
-            <h3 class="post-title">RLHF 与 DPO：对齐的两条路</h3>
-            <p class="post-excerpt">
-              两种对齐思路的优化目标差异，以及各自的适用边界。
+              从贪婪解码、batch invariance 到顶尖模型移除采样参数：确定性从来不是一个参数能承诺的事。
             </p>
           </a>
         </article>
@@ -103,6 +76,6 @@
     <span>© <span id="year"></span></span>
   </footer>
 
-  <script src="app.js?v=10"></script>
+  <script src="app.js?v=12"></script>
 </body>
 </html>

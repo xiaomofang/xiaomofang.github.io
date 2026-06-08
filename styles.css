@@ -430,6 +430,8 @@ body {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 36px 32px;
+  max-width: 980px;
+  margin: 0 auto;
 }
 
 .post-page-header {
@@ -452,10 +454,22 @@ body {
   line-height: 1.35;
 }
 
+.post-lead {
+  margin: 18px 0 0;
+  max-width: 760px;
+  font-size: 1.08rem;
+  line-height: 1.75;
+  color: var(--text-soft);
+}
+
 .post-page-content {
   font-size: 1.05rem;
   line-height: 1.85;
   color: var(--text-soft);
+}
+
+.post-page-content p {
+  margin: 0 0 18px;
 }
 
 .post-page-content h2,
@@ -481,6 +495,99 @@ body {
   font-family: "JetBrains Mono", Menlo, monospace;
 }
 
+.logic-map {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr auto 1fr auto 1fr;
+  align-items: stretch;
+  gap: 12px;
+  margin: 30px 0 34px;
+}
+
+.map-node {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: rgba(110, 231, 160, 0.04);
+  padding: 16px;
+}
+
+.map-node span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  margin-bottom: 10px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--bg);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.map-node strong {
+  display: block;
+  color: var(--text);
+  font-size: 0.95rem;
+  margin-bottom: 4px;
+}
+
+.map-node p {
+  margin: 0;
+  font-size: 0.86rem;
+  line-height: 1.55;
+}
+
+.map-arrow {
+  display: flex;
+  align-items: center;
+  color: var(--accent);
+  font-family: var(--font-serif);
+  font-size: 1.3rem;
+}
+
+.callout {
+  margin: 26px 0;
+  border-left: 3px solid var(--accent);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  background: rgba(110, 231, 160, 0.06);
+  padding: 14px 18px;
+  color: var(--text);
+}
+
+.callout.muted {
+  color: var(--text-soft);
+}
+
+.note-list {
+  margin: 22px 0 24px;
+  padding: 0;
+  list-style: none;
+}
+
+.note-list li {
+  margin-bottom: 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(110, 231, 160, 0.035);
+  padding: 12px 14px;
+}
+
+.note-list strong {
+  color: var(--text);
+}
+
+.essay-ending {
+  margin-top: 34px;
+  padding-top: 22px;
+  border-top: 1px solid var(--border);
+  font-family: var(--font-serif);
+  font-size: 1.28rem;
+  font-style: italic;
+  line-height: 1.65;
+  color: var(--text);
+}
+
 @media (max-width: 640px) {
   html {
     font-size: 18px;
@@ -497,5 +604,18 @@ body {
 
   .post-card-link {
     padding: 18px 20px;
+  }
+
+  .post-page {
+    padding: 26px 20px;
+  }
+
+  .logic-map {
+    grid-template-columns: 1fr;
+  }
+
+  .map-arrow {
+    justify-content: center;
+    transform: rotate(90deg);
   }
 }

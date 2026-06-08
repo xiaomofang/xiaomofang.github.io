@@ -23,7 +23,7 @@ git push
 
 ## 发新文章
 
-1. 复制 `posts/post-llm-benchmark.html` 为新文件
-2. 修改标题和正文
-3. 在 `index.html` 添加一篇文章卡片
+1. 按主题放到对应目录，例如 `posts/inference-systems/`
+2. 复制同目录下的文章作为模板，修改标题和正文
+3. 在 `index.html` 添加一篇文章卡片，链接到新文章
 4. 按上面步骤 `git add` → `commit` → `push`
