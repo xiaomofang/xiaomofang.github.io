@@ -159,12 +159,25 @@
   }
 
   function highlightPython(code) {
-    const keywordPattern = /\b(from|import|for|in|if|else|elif|return|def|class|with|as|try|except|finally|while|break|continue|pass|True|False|None)\b/g;
-    return escapeHtml(code)
-      .replace(/(#.*)$/gm, '<span class="token-comment">$1</span>')
-      .replace(/(&quot;[^&]*?&quot;|"[^"\n]*"|'[^'\n]*')/g, '<span class="token-string">$1</span>')
-      .replace(/\b(\d+(?:\.\d+)?)\b/g, '<span class="token-number">$1</span>')
-      .replace(keywordPattern, '<span class="token-keyword">$1</span>');
+    const tokenPattern = /(#.*$)|("[^"\n]*"|'[^'\n]*')|\b(\d+(?:\.\d+)?)\b|\b(from|import|for|in|if|else|elif|return|def|class|with|as|try|except|finally|while|break|continue|pass|True|False|None)\b/gm;
+    let html = "";
+    let lastIndex = 0;
+
+    code.replace(tokenPattern, function (match, comment, string, number, keyword, offset) {
+      html += escapeHtml(code.slice(lastIndex, offset));
+      const className = comment
+        ? "token-comment"
+        : string
+          ? "token-string"
+          : number
+            ? "token-number"
+            : "token-keyword";
+      html += '<span class="' + className + '">' + escapeHtml(match) + "</span>";
+      lastIndex = offset + match.length;
+      return match;
+    });
+
+    return html + escapeHtml(code.slice(lastIndex));
   }
 
   function initCodeHighlighting() {
