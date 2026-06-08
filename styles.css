@@ -40,7 +40,18 @@
   --orb-a: rgba(74, 222, 128, 0.045);
   --orb-b: rgba(34, 197, 94, 0.025);
   --input-bg: #ffffff;
-  --code-bg: #f6f7f6;
+  --code-bg: #f8faf9;
+  --syntax-keyword: #2563eb;
+  --syntax-string: #047857;
+  --syntax-number: #b45309;
+  --syntax-comment: #64748b;
+}
+
+[data-theme="night"] {
+  --syntax-keyword: #7dd3fc;
+  --syntax-string: #86efac;
+  --syntax-number: #fbbf24;
+  --syntax-comment: #789282;
 }
 
 *,
@@ -509,14 +520,14 @@ body {
 .code-block {
   margin: 26px 0 28px;
   overflow: hidden;
-  border: 1px solid var(--border);
+  border: 1px solid rgba(127, 139, 130, 0.16);
   border-radius: var(--radius);
   background: var(--code-bg);
 }
 
 .code-block figcaption {
-  border-bottom: 1px solid var(--border);
-  background: rgba(127, 139, 130, 0.06);
+  border-bottom: 1px solid rgba(127, 139, 130, 0.14);
+  background: rgba(127, 139, 130, 0.045);
   padding: 10px 14px;
   color: var(--text-soft);
   font-size: 0.78rem;
@@ -532,20 +543,20 @@ body {
 }
 
 .language-python .token-keyword {
-  color: #7dd3fc;
+  color: var(--syntax-keyword);
   font-weight: 600;
 }
 
 .language-python .token-string {
-  color: #86efac;
+  color: var(--syntax-string);
 }
 
 .language-python .token-number {
-  color: #fbbf24;
+  color: var(--syntax-number);
 }
 
 .language-python .token-comment {
-  color: #789282;
+  color: var(--syntax-comment);
   font-style: italic;
 }
 
