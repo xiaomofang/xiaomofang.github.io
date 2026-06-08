@@ -23,7 +23,16 @@ git push
 
 ## 发新文章
 
-1. 按主题放到对应目录，例如 `posts/inference-systems/`
-2. 复制同目录下的文章作为模板，修改标题和正文
-3. 在 `index.html` 添加一篇文章卡片，链接到新文章
-4. 按上面步骤 `git add` → `commit` → `push`
+文章按主题放到对应目录：
+
+- `posts/basic/`：基础概念
+- `posts/rl/`：强化学习与对齐
+- `posts/training/`：训练系统
+- `posts/hardware-kernels/`：硬件与算子
+- `posts/inference-systems/`：推理系统
+
+发文步骤：
+
+1. 复制同类文章作为模板，修改标题和正文
+2. 在 `index.html` 添加文章卡片，链接到新文章
+3. 按上面步骤 `git add` → `commit` → `push`
