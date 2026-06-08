@@ -46,7 +46,7 @@
         return;
       }
 
-      const FADE_MS = 3000;
+      const FADE_MS = 1400;
       const count = 3 + Math.floor(Math.random() * 3);
       const now = performance.now();
       for (let i = 0; i < count; i++) {
@@ -57,8 +57,8 @@
           rotation: Math.random() * Math.PI * 2,
           born: now,
           fadeMs: FADE_MS,
-          driftX: (Math.random() - 0.5) * 0.6,
-          driftY: -0.4 - Math.random() * 0.8,
+          driftX: (Math.random() - 0.5) * 1.0,
+          driftY: -0.7 - Math.random() * 1.2,
         });
       }
     });
