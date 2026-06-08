@@ -151,11 +151,34 @@
     if (el) el.textContent = new Date().getFullYear();
   }
 
+  function escapeHtml(value) {
+    return value
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+  }
+
+  function highlightPython(code) {
+    const keywordPattern = /\b(from|import|for|in|if|else|elif|return|def|class|with|as|try|except|finally|while|break|continue|pass|True|False|None)\b/g;
+    return escapeHtml(code)
+      .replace(/(#.*)$/gm, '<span class="token-comment">$1</span>')
+      .replace(/(&quot;[^&]*?&quot;|"[^"\n]*"|'[^'\n]*')/g, '<span class="token-string">$1</span>')
+      .replace(/\b(\d+(?:\.\d+)?)\b/g, '<span class="token-number">$1</span>')
+      .replace(keywordPattern, '<span class="token-keyword">$1</span>');
+  }
+
+  function initCodeHighlighting() {
+    document.querySelectorAll("code.language-python").forEach((block) => {
+      block.innerHTML = highlightPython(block.textContent || "");
+    });
+  }
+
   document.addEventListener("DOMContentLoaded", function () {
     initTheme();
     initStars();
     initFilters();
     initYear();
+    initCodeHighlighting();
     filterPosts();
 
     const toggle = document.getElementById("theme-toggle");

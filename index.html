@@ -5,7 +5,7 @@
   <title>notes</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="description" content="LLM notes — understanding, one question at a time." />
-  <link rel="stylesheet" href="styles.css?v=13" />
+  <link rel="stylesheet" href="styles.css?v=15" />
 </head>
 <body>
   <div class="ambient" aria-hidden="true">
@@ -44,11 +44,11 @@
     <div class="controls">
       <nav id="tags" class="tag-cloud" aria-label="Categories">
         <button class="tag-pill active" data-category="all" type="button">All</button>
-        <button class="tag-pill" data-category="basic" type="button">Basic</button>
-        <button class="tag-pill" data-category="rl" type="button">RL</button>
+        <button class="tag-pill" data-category="basic" type="button">Basic Knowledge</button>
+        <button class="tag-pill" data-category="inference" type="button">Inference</button>
+        <button class="tag-pill" data-category="rl" type="button">Reinforcement Learning</button>
         <button class="tag-pill" data-category="training" type="button">Training</button>
         <button class="tag-pill" data-category="hardware-kernels" type="button">Hardware & Kernels</button>
-        <button class="tag-pill" data-category="inference-systems" type="button">Inference Systems</button>
       </nav>
       <div class="search-box">
         <input id="search-input" type="search" placeholder="Search…" autocomplete="off" />
@@ -57,15 +57,15 @@
 
     <section id="blog" class="section">
       <div class="post-list" id="post-list">
-        <article class="post-card" data-category="inference-systems" data-date="2026-06-08" data-title="temperature=0 时，大模型输出一定可复现吗？">
-          <a href="posts/inference-systems/temperature-zero-determinism.html" class="post-card-link">
+        <article class="post-card" data-category="inference" data-date="2026-06-08" data-title="temperature=0 时，大模型输出一定可复现吗？">
+          <a href="posts/inference/temperature-zero-determinism.html" class="post-card-link">
             <div class="post-meta-row">
               <time class="post-date" datetime="2026-06-08">Jun 08</time>
-              <span class="post-tag">Inference Systems</span>
+              <span class="post-tag">Inference</span>
             </div>
             <h3 class="post-title">temperature=0 时，大模型输出一定可复现吗？</h3>
             <p class="post-excerpt">
-              从贪婪解码、浮点归约、batch invariance 到闭源 API 参数收敛：确定性是一项系统属性。
+              从贪婪解码、浮点归约、动态 batching 到 RL 训练：确定性不是一个参数，而是一项系统属性。
             </p>
           </a>
         </article>
@@ -79,6 +79,6 @@
     <span>© <span id="year"></span></span>
   </footer>
 
-  <script src="app.js?v=13"></script>
+  <script src="app.js?v=15"></script>
 </body>
 </html>

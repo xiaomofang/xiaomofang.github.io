@@ -25,11 +25,11 @@ git push
 
 文章按主题放到对应目录：
 
-- `posts/basic/`：基础概念
-- `posts/rl/`：强化学习与对齐
+- `posts/basic/`：Basic Knowledge，基础概念
+- `posts/inference/`：Inference，推理系统
+- `posts/reinforcement-learning/`：Reinforcement Learning，强化学习与对齐
 - `posts/training/`：训练系统
 - `posts/hardware-kernels/`：硬件与算子
-- `posts/inference-systems/`：推理系统
 
 发文步骤：
 

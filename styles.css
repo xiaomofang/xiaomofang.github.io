@@ -531,6 +531,24 @@ body {
   padding: 18px 20px;
 }
 
+.language-python .token-keyword {
+  color: #7dd3fc;
+  font-weight: 600;
+}
+
+.language-python .token-string {
+  color: #86efac;
+}
+
+.language-python .token-number {
+  color: #fbbf24;
+}
+
+.language-python .token-comment {
+  color: #789282;
+  font-style: italic;
+}
+
 .logic-map {
   display: grid;
   grid-template-columns: 1fr auto 1fr auto 1fr auto 1fr;
