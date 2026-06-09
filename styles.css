@@ -484,6 +484,18 @@ body {
   margin: 0 0 18px;
 }
 
+.post-lead,
+.post-page-content > p,
+.callout,
+.note-list li,
+.decision-table td,
+.comments-header p {
+  text-align: justify;
+  text-align-last: left;
+  text-justify: inter-character;
+  overflow-wrap: break-word;
+}
+
 .post-page-content h2,
 .post-page-content h3 {
   font-family: var(--font-serif);
