@@ -5,7 +5,7 @@
   <title>notes</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="description" content="LLM notes — understanding, one question at a time." />
-  <link rel="stylesheet" href="styles.css?v=16" />
+  <link rel="stylesheet" href="styles.css?v=18" />
 </head>
 <body>
   <div class="ambient" aria-hidden="true">
@@ -57,15 +57,15 @@
 
     <section id="blog" class="section">
       <div class="post-list" id="post-list">
-        <article class="post-card" data-category="inference" data-date="2026-06-08" data-title="temperature=0 时，大模型输出一定可复现吗？">
+        <article class="post-card" data-category="inference" data-date="2026-06-08" data-title="Temperature=0 不等于确定性：从解码策略到 Batch Invariance">
           <a href="posts/inference/temperature-zero-determinism.html" class="post-card-link">
             <div class="post-meta-row">
               <time class="post-date" datetime="2026-06-08">Jun 08</time>
               <span class="post-tag">Inference</span>
             </div>
-            <h3 class="post-title">temperature=0 时，大模型输出一定可复现吗？</h3>
+            <h3 class="post-title">Temperature=0 不等于确定性：从解码策略到 Batch Invariance</h3>
             <p class="post-excerpt">
-              从贪婪解码、浮点归约、动态 batching 到 RL 训练：确定性不是一个参数，而是一项系统属性。
+              从 logits、argmax、dynamic batching 到 MoE 与 RL 训练：确定性不是采样参数，而是系统属性。
             </p>
           </a>
         </article>
@@ -79,6 +79,6 @@
     <span>© <span id="year"></span></span>
   </footer>
 
-  <script src="app.js?v=16"></script>
+  <script src="app.js?v=18"></script>
 </body>
 </html>

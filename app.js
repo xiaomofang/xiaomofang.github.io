@@ -24,6 +24,7 @@
     document.documentElement.setAttribute("data-theme", next);
     localStorage.setItem(THEME_KEY, next);
     updateToggleLabel(next);
+    updateUtterancesTheme(next);
   }
 
   function initStars() {
@@ -186,12 +187,45 @@
     });
   }
 
+  function getUtterancesTheme(theme) {
+    return theme === "night" ? "github-dark" : "github-light";
+  }
+
+  function initComments() {
+    const container = document.getElementById("utterances-container");
+    if (!container) return;
+
+    const theme = document.documentElement.getAttribute("data-theme") || "night";
+    const script = document.createElement("script");
+    script.src = "https://utteranc.es/client.js";
+    script.async = true;
+    script.crossOrigin = "anonymous";
+    script.setAttribute("repo", "xiaomofang/xiaomofang.github.io");
+    script.setAttribute("issue-term", "pathname");
+    script.setAttribute("label", "comment");
+    script.setAttribute("theme", getUtterancesTheme(theme));
+    container.appendChild(script);
+  }
+
+  function updateUtterancesTheme(theme) {
+    const iframe = document.querySelector(".utterances-frame");
+    if (!iframe) return;
+    iframe.contentWindow.postMessage(
+      {
+        type: "set-theme",
+        theme: getUtterancesTheme(theme),
+      },
+      "https://utteranc.es"
+    );
+  }
+
   document.addEventListener("DOMContentLoaded", function () {
     initTheme();
     initStars();
     initFilters();
     initYear();
     initCodeHighlighting();
+    initComments();
     filterPosts();
 
     const toggle = document.getElementById("theme-toggle");
