@@ -62,7 +62,7 @@
 
 html {
   scroll-behavior: smooth;
-  font-size: 25px;
+  font-size: 31px;
   height: 100%;
 }
 
@@ -266,13 +266,13 @@ body {
 }
 
 .brand-mascot--hero {
-  width: 1.2em;
-  height: 1.2em;
+  width: 1.64em;
+  height: 1.64em;
 }
 
 .brand-mascot--inline {
-  width: 1.05em;
-  height: 1.05em;
+  width: 1.44em;
+  height: 1.44em;
   vertical-align: -0.14em;
   margin-right: 0.12em;
 }
@@ -820,7 +820,7 @@ body {
 
 @media (max-width: 640px) {
   html {
-    font-size: 22px;
+    font-size: 28px;
   }
 
   .controls {

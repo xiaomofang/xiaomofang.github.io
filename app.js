@@ -32,15 +32,7 @@
     if (!canvas) return;
 
     const ctx = canvas.getContext("2d");
-    const sparks = [];
-    const mascotSrc = document.body.dataset.mascot || "assets/tiger-catstyle-bw-lines.png";
-    const mascotImg = new Image();
-    let mascotReady = false;
-
-    mascotImg.onload = function () {
-      mascotReady = true;
-    };
-    mascotImg.src = mascotSrc;
+    const stars = [];
 
     function resize() {
       canvas.width = window.innerWidth;
@@ -55,54 +47,50 @@
         return;
       }
 
-      const FADE_MS = 1500;
-      const count = 2 + Math.floor(Math.random() * 2);
+      const FADE_MS = 1400;
+      const count = 3 + Math.floor(Math.random() * 3);
       const now = performance.now();
       for (let i = 0; i < count; i++) {
-        sparks.push({
-          x: e.clientX + (Math.random() - 0.5) * 36,
-          y: e.clientY + (Math.random() - 0.5) * 36,
-          size: 30 + Math.random() * 16,
-          rotation: (Math.random() - 0.5) * 0.5,
+        stars.push({
+          x: e.clientX + (Math.random() - 0.5) * 30,
+          y: e.clientY + (Math.random() - 0.5) * 30,
+          size: 16 + Math.random() * 14,
+          rotation: Math.random() * Math.PI * 2,
           born: now,
           fadeMs: FADE_MS,
-          driftX: (Math.random() - 0.5) * 0.8,
-          driftY: -0.8 - Math.random() * 1.0,
+          driftX: (Math.random() - 0.5) * 1.0,
+          driftY: -0.7 - Math.random() * 1.2,
         });
       }
     });
 
-    function drawSpark(x, y, size, rotation, alpha) {
-      if (!mascotReady) return;
-
+    function drawStar(x, y, size, rotation, alpha) {
       const theme = document.documentElement.getAttribute("data-theme");
+      const color = theme === "night" ? "#ffe9a0" : "#e8a830";
       ctx.save();
       ctx.translate(x, y);
       ctx.rotate(rotation);
       ctx.globalAlpha = alpha;
-
-      if (theme === "night") {
-        ctx.beginPath();
-        ctx.arc(0, 0, size * 0.58, 0, Math.PI * 2);
-        ctx.fillStyle = "rgba(255, 255, 255, " + alpha * 0.96 + ")";
-        ctx.fill();
-      }
-
-      ctx.drawImage(mascotImg, -size / 2, -size / 2, size, size);
+      ctx.fillStyle = color;
+      ctx.font = size + "px serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("✦", 0, 0);
       ctx.restore();
     }
 
     function animate(now) {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      for (let i = sparks.length - 1; i >= 0; i--) {
-        const s = sparks[i];
+      for (let i = stars.length - 1; i >= 0; i--) {
+        const s = stars[i];
         const life = 1 - (now - s.born) / s.fadeMs;
         s.x += s.driftX;
         s.y += s.driftY;
+        s.rotation += 0.02;
         if (life <= 0) {
-          sparks.splice(i, 1);
+          stars.splice(i, 1);
         } else {
-          drawSpark(s.x, s.y, s.size, s.rotation, life);
+          drawStar(s.x, s.y, s.size, s.rotation, life);
         }
       }
       requestAnimationFrame(animate);
