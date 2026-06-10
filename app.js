@@ -232,8 +232,15 @@
     );
   }
 
+  function enableTransitions() {
+    requestAnimationFrame(function () {
+      document.documentElement.classList.remove("no-transition");
+    });
+  }
+
   document.addEventListener("DOMContentLoaded", function () {
     initTheme();
+    enableTransitions();
     initStars();
     initFilters();
     initYear();
