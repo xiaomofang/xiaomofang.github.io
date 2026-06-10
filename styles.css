@@ -688,6 +688,44 @@ body {
   font-weight: 500;
 }
 
+.references-section {
+  margin-top: 36px;
+  padding-top: 24px;
+  border-top: 1px solid var(--border);
+}
+
+.references-section h2 {
+  margin-top: 0;
+}
+
+.reference-list {
+  margin: 18px 0 0;
+  padding-left: 1.25rem;
+  color: var(--text-soft);
+}
+
+.reference-list li {
+  margin-bottom: 14px;
+  padding-left: 4px;
+}
+
+.reference-list a {
+  color: var(--text);
+  font-weight: 600;
+  text-decoration: none;
+  border-bottom: 1px solid rgba(110, 231, 160, 0.35);
+}
+
+.reference-list a:hover {
+  color: var(--accent);
+}
+
+.reference-list span {
+  display: block;
+  margin-top: 4px;
+  line-height: 1.7;
+}
+
 .essay-ending {
   margin-top: 34px;
   padding-top: 22px;

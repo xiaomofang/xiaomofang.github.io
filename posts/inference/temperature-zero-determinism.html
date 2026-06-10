@@ -5,7 +5,7 @@
   <title>Temperature=0 不等于确定性：从解码策略到 Batch Invariance</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="description" content="temperature=0 只能固定解码策略，不能保证大模型推理结果完全复现。本文从 logits、argmax、浮点归约、batch invariance、dynamic batching、MoE 路由和 RL 训练稳定性出发，解释确定性为什么是一项系统属性。" />
-  <link rel="stylesheet" href="../../styles.css?v=18" />
+  <link rel="stylesheet" href="../../styles.css?v=19" />
 </head>
 <body>
   <div class="ambient" aria-hidden="true"><span class="orb orb-a"></span><span class="orb orb-b"></span></div>
@@ -343,6 +343,60 @@ Expert 4 : 0.500000</code></pre>
         <div class="essay-ending">
           Temperature=0 不是确定性的终点，而是理解推理系统从哪一层开始失去确定性的起点。
         </div>
+
+        <section class="references-section" aria-label="参考与延伸阅读">
+          <h2>参考与延伸阅读</h2>
+          <p>
+            下面几份资料更适合继续追溯细节：Thinking Machines Lab 的文章是这条问题链的核心来源；
+            vLLM 文档给出了 batch invariance 的工程入口；OpenAI Cookbook 则说明了 seed 与 system_fingerprint
+            在闭源 API 里的边界。
+          </p>
+
+          <ol class="reference-list">
+            <li>
+              <a href="https://thinkingmachines.ai/blog/defeating-nondeterminism-in-llm-inference/" target="_blank" rel="noopener noreferrer">
+                Defeating Nondeterminism in LLM Inference
+              </a>
+              <span>Thinking Machines Lab. 系统解释 temperature=0 下仍不确定的根因，并提出 batch-invariant kernel 的实现思路。</span>
+            </li>
+            <li>
+              <a href="https://docs.vllm.ai/en/latest/features/batch_invariance/" target="_blank" rel="noopener noreferrer">
+                Batch Invariance - vLLM Documentation
+              </a>
+              <span>vLLM 官方文档，介绍 `VLLM_BATCH_INVARIANT=1`、在线/离线推理启用方式、硬件要求和性能权衡。</span>
+            </li>
+            <li>
+              <a href="https://docs.vllm.ai/en/latest/usage/reproducibility/" target="_blank" rel="noopener noreferrer">
+                Reproducibility - vLLM Documentation
+              </a>
+              <span>vLLM 关于 reproducibility 的说明，区分 offline scheduling、online serving 和 batch invariance 的作用边界。</span>
+            </li>
+            <li>
+              <a href="https://github.com/thinking-machines-lab/batch_invariant_ops" target="_blank" rel="noopener noreferrer">
+                thinking-machines-lab/batch_invariant_ops
+              </a>
+              <span>Thinking Machines Lab 开源实现，展示如何用 batch-invariant ops 替换部分 PyTorch/vLLM 推理算子。</span>
+            </li>
+            <li>
+              <a href="https://developers.openai.com/cookbook/examples/reproducible_outputs_with_the_seed_parameter" target="_blank" rel="noopener noreferrer">
+                OpenAI Cookbook: Reproducible Outputs with the Seed Parameter
+              </a>
+              <span>OpenAI 对 seed 和 system_fingerprint 的官方说明：seed 是 best-effort，determinism is not guaranteed。</span>
+            </li>
+            <li>
+              <a href="https://www.zansara.dev/posts/2026-03-24-temp-0-llm/" target="_blank" rel="noopener noreferrer">
+                Setting the temperature to zero will make an LLM deterministic?
+              </a>
+              <span>一篇面向工程读者的延伸博客，讨论 temperature=0、seed 与 batch context 对输出复现性的影响。</span>
+            </li>
+            <li>
+              <a href="https://github.com/vllm-project/vllm/issues/19491" target="_blank" rel="noopener noreferrer">
+                vLLM Issue #19491: outputs are not reproducible
+              </a>
+              <span>vLLM 社区关于 AsyncLLM / batch / seed 复现性的实际讨论，能看到工程问题如何暴露出来。</span>
+            </li>
+          </ol>
+        </section>
       </section>
 
       <section class="comments-section" id="comments" aria-label="留言与讨论">
@@ -363,6 +417,6 @@ Expert 4 : 0.500000</code></pre>
     <span>© <span id="year"></span></span>
   </footer>
 
-  <script src="../../app.js?v=18"></script>
+  <script src="../../app.js?v=19"></script>
 </body>
 </html>
