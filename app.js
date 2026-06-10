@@ -62,6 +62,7 @@
           driftY: -0.7 - Math.random() * 1.2,
         });
       }
+      ensureAnimate();
     });
 
     function drawStar(x, y, size, rotation, alpha) {
@@ -79,6 +80,8 @@
       ctx.restore();
     }
 
+    let animating = false;
+
     function animate(now) {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       for (let i = stars.length - 1; i >= 0; i--) {
@@ -93,10 +96,20 @@
           drawStar(s.x, s.y, s.size, s.rotation, life);
         }
       }
-      requestAnimationFrame(animate);
+
+      if (stars.length > 0) {
+        requestAnimationFrame(animate);
+      } else {
+        animating = false;
+      }
     }
 
-    animate();
+    function ensureAnimate() {
+      if (!animating) {
+        animating = true;
+        requestAnimationFrame(animate);
+      }
+    }
   }
 
   function filterPosts() {
