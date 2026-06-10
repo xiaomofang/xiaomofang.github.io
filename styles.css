@@ -1,6 +1,6 @@
 :root {
-  --font-sans: "Source Sans 3", system-ui, sans-serif;
-  --font-serif: "Cormorant Garamond", "Noto Serif SC", serif;
+  --font-sans: system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-serif: "Noto Serif SC", Georgia, "Times New Roman", serif;
   --radius: 12px;
   --transition: 0.35s ease;
   --content-width: min(92vw, 1080px);
@@ -85,13 +85,6 @@ body {
   background: var(--bg);
   color: var(--text);
   -webkit-font-smoothing: antialiased;
-}
-
-html.no-transition,
-html.no-transition *,
-html.no-transition *::before,
-html.no-transition *::after {
-  transition: none !important;
 }
 
 body {

@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN" data-theme="night" class="no-transition">
+<html lang="zh-CN" data-theme="night">
 <head>
   <meta charset="UTF-8" />
   <script>
@@ -12,16 +12,17 @@
     })();
   </script>
   <style>
-    html[data-theme="night"] { background: #0c0c0c; color: #ededed; }
-    html[data-theme="day"] { background: #ffffff; color: #1a1a1a; }
+    html { font-size: 16px; }
+    @media (min-width: 1024px) { html { font-size: 26px; } }
+    @media (min-width: 1200px) { html { font-size: 34px; } }
+    html, body { margin: 0; min-height: 100%; }
+    html[data-theme="night"], html[data-theme="night"] body { background: #0c0c0c; color: #ededed; color-scheme: dark; }
+    html[data-theme="day"], html[data-theme="day"] body { background: #ffffff; color: #1a1a1a; color-scheme: light; }
   </style>
+  <link rel="stylesheet" href="styles.css?v=35" />
   <title>MOFANG's Blog</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="description" content="LLM notes — understanding, one question at a time." />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;1,400&family=Source+Sans+3:wght@400;500;600&display=swap" />
-  <link rel="stylesheet" href="styles.css?v=34" />
 </head>
 <body class="home-page">
   <div class="ambient" aria-hidden="true">
@@ -113,6 +114,6 @@
     </span>
   </footer>
 
-  <script src="app.js?v=34"></script>
+  <script src="app.js?v=35"></script>
 </body>
 </html>
