@@ -1,0 +1,627 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="night">
+<head>
+  <meta charset="UTF-8" />
+  <script>
+    (function () {
+      try {
+        var saved = localStorage.getItem("yichuan-theme");
+        var theme = saved || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "night" : "day");
+        document.documentElement.setAttribute("data-theme", theme);
+      } catch (e) {}
+    })();
+  </script>
+  <style>
+    html { font-size: 16px; }
+    @media (min-width: 1024px) { html { font-size: 26px; } }
+    @media (min-width: 1200px) { html { font-size: 34px; } }
+    html, body { margin: 0; min-height: 100%; }
+    html[data-theme="night"], html[data-theme="night"] body { background: #0c0c0c; color: #ededed; color-scheme: dark; }
+    html[data-theme="day"], html[data-theme="day"] body { background: #ffffff; color: #1a1a1a; color-scheme: light; }
+  </style>
+  <link rel="stylesheet" href="../../styles.css?v=36" />
+  <title>FlashAttention 深度剖析：从存储层级到 IO-Aware Exact Attention</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="description" content="从 L1/L2/L3、SRAM、HBM 到 online softmax 与 kernel fusion：系统讲解 FlashAttention 的设计背景、动机、算法细节，以及 V1 到 V4 的演进脉络。" />
+</head>
+<body>
+  <div class="ambient" aria-hidden="true"><span class="orb orb-a"></span><span class="orb orb-b"></span></div>
+  <canvas id="star-canvas"></canvas>
+
+  <header class="site-header">
+    <div class="header-inner">
+      <a href="../../index.html" class="logo">
+        <span class="logo-dot"></span>
+        <span class="logo-text">MOFANG</span>
+      </a>
+      <div class="header-actions">
+        <nav class="site-nav">
+          <a href="../../index.html">← Back</a>
+        </nav>
+        <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle theme">
+          <span class="icon-sun">☀️</span>
+          <span class="icon-moon">🌙</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="site-main">
+    <article class="post-page">
+      <header class="post-page-header">
+        <p class="post-page-date">2026-06-10 · Inference</p>
+        <h1 class="post-page-title">FlashAttention 深度剖析：从存储层级到 IO-Aware Exact Attention</h1>
+        <p class="post-lead">
+          FlashAttention 没有改变 attention 的数学定义，却改变了数据在 HBM 与片上 SRAM 之间的流动方式。
+          理解它，需要先理解 GPU 的存储层级，再理解为什么标准 attention 是 memory-bound。
+        </p>
+      </header>
+
+      <section class="post-page-content">
+        <p>
+          论文标题是 <em>FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness</em>。
+          四个关键词分别对应四个问题：快、省显存、结果精确、对硬件 IO 有意识。
+          本文的目标，是像从第一性原理推导一样，把这条思路完整走一遍——
+          读完你应该能回答：<strong>为什么 attention 慢？FlashAttention 改了什么？V1 到 V4 各自在优化什么？</strong>
+        </p>
+
+        <div class="logic-map" aria-label="文章逻辑地图">
+          <div class="map-node">
+            <span>1</span>
+            <strong>存储层级</strong>
+            <p>L1/L2/L3、SRAM、HBM、SSD 的速度与容量 trade-off。</p>
+          </div>
+          <div class="map-arrow">→</div>
+          <div class="map-node">
+            <span>2</span>
+            <strong>标准 Attention</strong>
+            <p>物化 N×N 矩阵，HBM 往返过多，memory-bound。</p>
+          </div>
+          <div class="map-arrow">→</div>
+          <div class="map-node">
+            <span>3</span>
+            <strong>核心算法</strong>
+            <p>Tiling + online softmax + kernel fusion。</p>
+          </div>
+          <div class="map-arrow">→</div>
+          <div class="map-node">
+            <span>4</span>
+            <strong>版本演进</strong>
+            <p>V1 省 IO，V2 提并行，V3/V4 跟新硬件。</p>
+          </div>
+        </div>
+
+        <h2>一、先搞清存储层级：快、小、贵 vs 慢、大、便宜</h2>
+        <p>
+          计算机存储不是一块铁板，而是分层金字塔。越靠近计算单元，越快、越小、越贵；
+          越远离计算单元，越慢、越大、越便宜。FlashAttention 的全部设计，都建立在这个事实上。
+        </p>
+
+        <figure class="diagram-figure">
+          <svg viewBox="0 0 720 380" role="img" aria-label="存储层级金字塔">
+            <defs>
+              <marker id="arrowhead" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+                <polygon points="0 0, 8 3, 0 6" class="d-accent" />
+              </marker>
+            </defs>
+            <rect x="260" y="20" width="200" height="44" rx="8" class="d-box-accent" />
+            <text x="360" y="48" text-anchor="middle" class="d-label">Register · 最快 · 最小</text>
+
+            <rect x="220" y="78" width="280" height="44" rx="8" class="d-box-accent" />
+            <text x="360" y="106" text-anchor="middle" class="d-label">L1 / GPU Shared Memory (SRAM)</text>
+
+            <rect x="180" y="136" width="360" height="44" rx="8" class="d-box" />
+            <text x="360" y="164" text-anchor="middle" class="d-label">L2 Cache · CPU/GPU 共享缓存层</text>
+
+            <rect x="140" y="194" width="440" height="44" rx="8" class="d-box" />
+            <text x="360" y="222" text-anchor="middle" class="d-label">L3 Cache · 多核共享 · 仍由 SRAM 实现</text>
+
+            <rect x="80" y="252" width="560" height="44" rx="8" class="d-box" />
+            <text x="360" y="280" text-anchor="middle" class="d-label">HBM (GPU 显存) / DDR (CPU 主存)</text>
+
+            <rect x="40" y="310" width="640" height="44" rx="8" class="d-box" />
+            <text x="360" y="338" text-anchor="middle" class="d-label">SSD / NVMe · 持久化 · 不参与热路径计算</text>
+
+            <text x="620" y="50" class="d-muted">↑ 带宽高</text>
+            <text x="620" y="330" class="d-muted">↓ 容量大</text>
+            <line x1="600" y1="60" x2="600" y2="320" class="d-line" />
+          </svg>
+          <figcaption>存储层级金字塔：FlashAttention 的核心目标，是让热数据尽量停留在 SRAM/Register，少去 HBM 往返。</figcaption>
+        </figure>
+
+        <h3>CPU 侧：L1、L2、L3</h3>
+        <p>
+          <strong>L1 cache</strong> 最靠近 CPU 核心，容量通常几十 KB/核，延迟最低。
+          <strong>L2 cache</strong> 更大一些，仍多为每核私有，承接 L1 miss。
+          <strong>L3 cache</strong> 再上一层，多核共享，用来减少访问主存 DDR 的次数。
+          三者本质上都是 cache——用 SRAM 缓存热数据，不是持久存储。
+        </p>
+
+        <h3>GPU 侧：Register、Shared Memory、HBM</h3>
+        <p>
+          GPU 上每个线程有极小的 <strong>Register</strong>；每个 SM 有 <strong>Shared Memory</strong>（片上 SRAM，~192KB/SM 量级），
+          程序员可以显式控制数据布局。再往外是 <strong>L2 cache</strong>，最外层是 <strong>HBM</strong>（High Bandwidth Memory，GPU 显存）。
+        </p>
+
+        <p>
+          以 A100 为例：HBM 约 40–80 GB，带宽 ~1.5–2 TB/s；每个 SM 的 SRAM 约 192 KB，有效带宽可达 HBM 的 ~10 倍。
+          算力（FLOPS）增长比内存带宽快得多——软件必须主动适配这种失衡，这就是 IO-aware 的硬件背景。
+        </p>
+
+        <table class="decision-table">
+          <thead>
+            <tr>
+              <th>层级</th>
+              <th>典型容量</th>
+              <th>角色</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Register / SRAM</td>
+              <td>KB 级</td>
+              <td>FlashAttention tile 的工作区；online softmax 统计量也在这里维护。</td>
+            </tr>
+            <tr>
+              <td>HBM</td>
+              <td>几十 GB</td>
+              <td>存放 Q、K、V、O 全量张量；标准 attention 还会写入 N×N 的 S、P。</td>
+            </tr>
+            <tr>
+              <td>SSD</td>
+              <td>TB 级</td>
+              <td>模型权重、checkpoint；推理前加载到 HBM，不参与 attention kernel 内部。</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="callout">
+          <strong>一句话：</strong>
+          FlashAttention 不是“用了 cache”，而是<strong>算法层面主动决定哪些张量必须落 HBM、哪些只在 SRAM 中短暂存在</strong>。
+        </div>
+
+        <h2>二、标准 Attention 做了什么，又慢在哪里</h2>
+        <p>
+          Self-attention 的数学形式大家很熟悉。设序列长度 N、head 维度 d：
+        </p>
+
+        <pre><code>S = QK^T          # (N × N) 注意力分数
+P = softmax(S)    # (N × N) 注意力权重
+O = PV            # (N × d) 输出</code></pre>
+
+        <p>
+          当 N = 32k 时，S 和 P 各约 10 亿个元素。以 FP16 计，单个 N×N 矩阵就接近 2 GB。
+          更致命的是<strong> HBM 往返次数</strong>：标准实现把 S 写回 HBM，再读出来做 softmax，再把 P 写回 HBM，再读出来乘 V。
+        </p>
+
+        <figure class="diagram-figure">
+          <svg viewBox="0 0 720 300" role="img" aria-label="标准 Attention 的 HBM 数据流">
+            <defs>
+              <marker id="arrow-red" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+                <polygon points="0 0, 8 3, 0 6" fill="#f87171" />
+              </marker>
+            </defs>
+            <rect x="40" y="110" width="100" height="50" rx="8" class="d-box" />
+            <text x="90" y="140" text-anchor="middle" class="d-label">Q,K,V</text>
+            <text x="90" y="90" text-anchor="middle" class="d-muted">HBM</text>
+
+            <rect x="200" y="110" width="90" height="50" rx="8" class="d-box-accent" />
+            <text x="245" y="140" text-anchor="middle" class="d-label">MatMul</text>
+
+            <rect x="350" y="110" width="70" height="50" rx="8" class="d-box" />
+            <text x="385" y="140" text-anchor="middle" class="d-label">S</text>
+            <text x="385" y="90" text-anchor="middle" class="d-muted">写 HBM</text>
+
+            <rect x="480" y="110" width="80" height="50" rx="8" class="d-box-accent" />
+            <text x="520" y="140" text-anchor="middle" class="d-label">Softmax</text>
+
+            <rect x="610" y="110" width="70" height="50" rx="8" class="d-box" />
+            <text x="645" y="140" text-anchor="middle" class="d-label">P</text>
+            <text x="645" y="90" text-anchor="middle" class="d-muted">写 HBM</text>
+
+            <path d="M140 135 L195 135" stroke="#f87171" stroke-width="2" fill="none" marker-end="url(#arrow-red)" />
+            <path d="M290 135 L345 135" stroke="#f87171" stroke-width="2" fill="none" marker-end="url(#arrow-red)" />
+            <path d="M420 135 L475 135" stroke="#f87171" stroke-width="2" fill="none" marker-end="url(#arrow-red)" />
+            <path d="M560 135 L605 135" stroke="#f87171" stroke-width="2" fill="none" marker-end="url(#arrow-red)" />
+
+            <path d="M385 165 L385 210 L520 210 L520 165" stroke="#f87171" stroke-width="1.5" fill="none" stroke-dasharray="5 4" />
+            <text x="450" y="230" text-anchor="middle" class="d-muted">S 写回再读出 · P 写回再读出</text>
+
+            <text x="360" y="280" text-anchor="middle" class="d-muted">标准实现 = 多次 HBM round-trip + 物化 N×N 中间矩阵（materialization）</text>
+          </svg>
+          <figcaption>标准 Attention：MatMul 本身不是唯一瓶颈；softmax、mask 等 elementwise 操作同样 memory-bound，且中间矩阵占用 O(N²) 显存。</figcaption>
+        </figure>
+
+        <p>
+          论文中的一个关键观察：attention 运行时，softmax、mask、dropout 等 elementwise 操作占了大头时间，
+          尽管 FLOPS 主要集中在 MatMul。这类操作的<strong>算术强度</strong>（每字节内存访问对应的运算量）很低——
+          属于 <strong>memory-bound</strong>，不是 compute-bound。
+        </p>
+
+        <p>
+          编译器社区把「把多个 GPU 操作合并成一次 HBM 读写」叫做 <strong>kernel fusion</strong>。
+          「kernel」在这里指 GPU 上的一个计算核；「materialization」指把中间结果完整分配并写入内存——
+          标准 attention 物化了 S 和 P 两个 N×N 矩阵，这正是 FlashAttention 要消灭的。
+        </p>
+
+        <h2>三、FlashAttention 的两个核心思想</h2>
+        <p>
+          算法层面，FlashAttention 可以浓缩为两件事：
+        </p>
+
+        <ul class="note-list">
+          <li><strong>Tiling（分块）</strong>——前向和反向都用。把 N×N 的 softmax/score 矩阵切成小块，在 SRAM 内完成局部计算。</li>
+          <li><strong>Recomputation（重算）</strong>——反向专用。不保存 S、P，反向时从 Q/K/V 和 softmax 统计量重新算。</li>
+        </ul>
+
+        <figure class="diagram-figure">
+          <svg viewBox="0 0 720 260" role="img" aria-label="FlashAttention 融合数据流">
+            <defs>
+              <marker id="arrowhead-fa" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+                <polygon points="0 0, 8 3, 0 6" class="d-accent" />
+              </marker>
+            </defs>
+            <rect x="40" y="90" width="90" height="50" rx="8" class="d-box" />
+            <text x="85" y="120" text-anchor="middle" class="d-label">Q,K,V</text>
+            <text x="85" y="70" text-anchor="middle" class="d-muted">HBM</text>
+
+            <rect x="180" y="60" width="360" height="110" rx="12" class="d-box-accent" />
+            <text x="360" y="95" text-anchor="middle" class="d-label">Fused Kernel（SRAM 内）</text>
+            <text x="360" y="118" text-anchor="middle" class="d-muted">分块 MatMul → online softmax → 累积 O</text>
+            <text x="360" y="141" text-anchor="middle" class="d-muted">S、P 永不完整写入 HBM</text>
+
+            <rect x="590" y="90" width="90" height="50" rx="8" class="d-box" />
+            <text x="635" y="120" text-anchor="middle" class="d-label">O</text>
+            <text x="635" y="70" text-anchor="middle" class="d-muted">HBM</text>
+
+            <path d="M130 115 L175 115" class="d-arrow" marker-end="url(#arrowhead-fa)" />
+            <path d="M540 115 L585 115" class="d-arrow" marker-end="url(#arrowhead-fa)" />
+
+            <text x="360" y="210" text-anchor="middle" class="d-muted">一次 HBM 读入 Q/K/V 块 → 片上完成 → 只写回 O 和 softmax 统计量 (m, l)</text>
+          </svg>
+          <figcaption>Kernel Fusion：FlashAttention 把 attention 整条链路融合进单个 kernel，中间 S/P 只在 SRAM 中短暂存在。</figcaption>
+        </figure>
+
+        <h2>四、分块的最大障碍：Softmax 需要「看到整行」</h2>
+        <p>
+          矩阵乘法可以分块，因为加法满足结合律：把大矩阵拆成小块分别乘再相加，结果不变。
+          但 softmax 不行——第 i 个元素的 softmax 分母需要该行<strong>所有</strong> score：
+        </p>
+
+        <pre><code>softmax(z_i) = exp(z_i) / Σ_j exp(z_j)</code></pre>
+
+        <p>
+          分块时，一次只能看到一行中的 B 个 score，分母还不完整。
+          如果强行按局部块做 softmax 再拼接，结果会错。
+        </p>
+
+        <p>
+          突破口是 <strong>online softmax</strong>（也称 streaming softmax）。
+          它维护两个 running statistics：
+        </p>
+
+        <ul class="note-list">
+          <li><strong>m</strong>：当前已见 score 的行最大值（数值稳定用）</li>
+          <li><strong>l</strong>：归一化后的 exp 之和（softmax 分母的分子部分）</li>
+        </ul>
+
+        <p>
+          每处理一个新 block，用更新公式合并旧统计量与新 block 的统计量，输出 O 也同步 rescale。
+          递归处理完所有 block 后，得到与标准 softmax <strong>bit-exact 相同</strong> 的结果。
+        </p>
+
+        <figure class="diagram-figure">
+          <svg viewBox="0 0 720 320" role="img" aria-label="Online Softmax 分块合并">
+            <defs>
+              <marker id="arrowhead-os" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+                <polygon points="0 0, 8 3, 0 6" class="d-accent" />
+              </marker>
+            </defs>
+            <rect x="40" y="40" width="140" height="70" rx="8" class="d-box" />
+            <text x="110" y="68" text-anchor="middle" class="d-label">Block 1</text>
+            <text x="110" y="90" text-anchor="middle" class="d-muted">m₁, ℓ₁, Õ₁</text>
+
+            <rect x="220" y="40" width="140" height="70" rx="8" class="d-box" />
+            <text x="290" y="68" text-anchor="middle" class="d-label">Block 2</text>
+            <text x="290" y="90" text-anchor="middle" class="d-muted">m₂, ℓ₂, Õ₂</text>
+
+            <rect x="400" y="40" width="140" height="70" rx="8" class="d-box" />
+            <text x="470" y="68" text-anchor="middle" class="d-label">Block 3</text>
+            <text x="470" y="90" text-anchor="middle" class="d-muted">m₃, ℓ₃, Õ₃</text>
+
+            <text x="590" y="78" class="d-label">…</text>
+
+            <path d="M110 115 L110 155" class="d-arrow" marker-end="url(#arrowhead-os)" />
+            <path d="M290 115 L290 155" class="d-arrow" marker-end="url(#arrowhead-os)" />
+            <path d="M470 115 L470 155" class="d-arrow" marker-end="url(#arrowhead-os)" />
+
+            <rect x="160" y="165" width="400" height="80" rx="10" class="d-box-accent" />
+            <text x="360" y="198" text-anchor="middle" class="d-label">合并公式（核心）</text>
+            <text x="360" y="222" text-anchor="middle" class="d-muted">m_new = max(m_old, m_block)</text>
+            <text x="360" y="242" text-anchor="middle" class="d-muted">ℓ_new = e^(m_old−m_new)·ℓ_old + e^(m_block−m_new)·ℓ_block</text>
+
+            <rect x="220" y="270" width="280" height="44" rx="8" class="d-box" />
+            <text x="360" y="298" text-anchor="middle" class="d-label">最终正确的 softmax 与 O</text>
+          </svg>
+          <figcaption>Online Softmax：每处理一个 block 更新 (m, ℓ, O)，无需等整行 score 到齐。参考：Milakov &amp; Gimelshein (2018)、Online Softmax 系列工作。</figcaption>
+        </figure>
+
+        <div class="callout muted">
+          m(x) 的存在纯粹为了数值稳定（减最大值再 exp），不改变最终数学结果。
+          在假想的高精度硬件上，甚至可以省略——但在 FP16/BF16 的 GPU 上必不可少。
+        </div>
+
+        <h2>五、前向 Pass 算法：嵌套循环 + 分块</h2>
+        <p>
+          下面用单 head、batch=1、忽略 mask/dropout 的简化版说明。
+          记 B_r 为 Q 的行块大小，B_c 为 K/V 的列块大小，d 为 head 维度。
+        </p>
+
+        <figure class="diagram-figure">
+          <svg viewBox="0 0 720 340" role="img" aria-label="FlashAttention 分块嵌套循环">
+            <defs>
+              <marker id="arrowhead-tile" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+                <polygon points="0 0, 8 3, 0 6" class="d-accent" />
+              </marker>
+            </defs>
+            <text x="360" y="28" text-anchor="middle" class="d-label">Q 按行分块 · K/V 按列分块</text>
+
+            <rect x="80" y="50" width="200" height="160" rx="6" class="d-box" />
+            <text x="180" y="75" text-anchor="middle" class="d-muted">Q (N×d)</text>
+            <rect x="95" y="85" width="170" height="35" rx="4" fill="color-mix(in srgb, var(--accent) 25%, transparent)" stroke="var(--accent)" />
+            <text x="180" y="107" text-anchor="middle" class="d-label">Q_i</text>
+            <rect x="95" y="125" width="170" height="35" rx="4" class="d-box" />
+            <rect x="95" y="165" width="170" height="35" rx="4" class="d-box" />
+
+            <rect x="320" y="50" width="160" height="160" rx="6" class="d-box" />
+            <text x="400" y="75" text-anchor="middle" class="d-muted">K^T (d×N)</text>
+            <rect x="335" y="85" width="35" height="110" rx="4" class="d-box" />
+            <rect x="375" y="85" width="35" height="110" rx="4" fill="color-mix(in srgb, var(--accent) 25%, transparent)" stroke="var(--accent)" />
+            <text x="392" y="200" text-anchor="middle" class="d-muted">K_j</text>
+            <rect x="415" y="85" width="35" height="110" rx="4" class="d-box" />
+
+            <rect x="520" y="50" width="120" height="160" rx="6" class="d-box" />
+            <text x="580" y="75" text-anchor="middle" class="d-muted">S_ij</text>
+            <text x="580" y="130" text-anchor="middle" class="d-label">B_r × B_c</text>
+            <text x="580" y="155" text-anchor="middle" class="d-muted">仅片上</text>
+
+            <path d="M280 130 L315 130" class="d-arrow" marker-end="url(#arrowhead-tile)" />
+            <path d="M480 130 L515 130" class="d-arrow" marker-end="url(#arrowhead-tile)" />
+
+            <text x="360" y="240" text-anchor="middle" class="d-label">外层循环 j：遍历 K/V 列块</text>
+            <text x="360" y="265" text-anchor="middle" class="d-label">内层循环 i：遍历 Q 行块</text>
+            <text x="360" y="300" text-anchor="middle" class="d-muted">每轮：Load K_j,V_j → Load Q_i,O_i,m_i,l_i → S_ij=Q_i K_j^T → update m,l,O → 写回统计量</text>
+          </svg>
+          <figcaption>分块 MatMul：S 矩阵永远只有 B_r×B_c 大小在 SRAM 中，而非完整 N×N。</figcaption>
+        </figure>
+
+        <p>算法步骤概览：</p>
+
+        <pre><code>1. 在 HBM 中分配 Q, K, V, O；额外分配 softmax 统计量 m, l（各 N 维）
+2. 按 SRAM 容量计算块大小 B_r, B_c（约 ∝ M/4d，M 为 SRAM 容量）
+3. 初始化 O=0，l=0，m=-∞
+4. 外层 for j：加载 K_j, V_j 到 SRAM
+5.   内层 for i：加载 Q_i, O_i, m_i, l_i 到 SRAM
+6.     S_ij = Q_i @ K_j^T                    # 片上 B_r×B_c
+7.     计算 block 内 m̃, l̃, P̃
+8.     用 online softmax 公式更新 m_new, l_new, O_i
+9.     写回 m_i, l_i, O_i
+10. 循环结束 → O 即为最终 attention 输出</code></pre>
+
+        <p>
+          第 8 步是整个算法的心脏：它同时 rescale 之前累积的 O_i，并把当前 block 的贡献加进去。
+          那些 e<sup>m−m_new</sup> 因子看起来复杂，本质是在「取消旧归一化、应用新归一化」——
+          手算两三个 block 的 toy example，5 分钟就能建立直觉（Medium 原文 Aleksa Gordić 的 walkthrough 非常推荐）。
+        </p>
+
+        <h2>六、复杂度：从 O(N²) 显存到 O(N)</h2>
+        <p>
+          <strong>空间：</strong>标准 attention 需要 O(N²) 存 S 和 P；FlashAttention 只需 O(N·d) 存 Q/K/V/O，
+          外加 O(N) 存 m 和 l。当 N=64k、d=128 时，这是能否训练/推理长上下文的分水岭。
+        </p>
+
+        <p>
+          <strong>时间：</strong>渐近 FLOPs 仍是 O(N²)，但 wall-clock 时间看的是 HBM 访问次数。
+          标准实现 O(N²) 次 HBM 读写中间矩阵；FlashAttention 通过分块把 HBM 访问降到 O(N²·d²/M)，
+          M 为 SRAM 容量。典型配置下可达 <strong>9× 更少 HBM 访问</strong>——这才是实际加速的来源。
+        </p>
+
+        <div class="callout">
+          <strong>关键洞察：</strong>
+          减少 FLOPs ≠ 更快。Attention 是 memory-bound；优化 IO 比优化算术量更能缩短 wall-clock 时间。
+        </div>
+
+        <h2>七、反向 Pass：Recomputation 而非 Checkpoint</h2>
+        <p>
+          训练时需要 backward。标准做法在 forward 保存 S、P 供 backward 使用——又是 O(N²) 显存。
+          FlashAttention 的做法类似 gradient checkpointing：<strong>forward 只存 O 和 (m, l)，backward 时从 Q/K/V 分块重算 S、P</strong>。
+        </p>
+
+        <p>
+          与普通 checkpointing 不同，FlashAttention 的重算仍在 SRAM 分块内进行，
+          HBM 访问模式与前向一致——因此<strong>既省显存，又不显著拖慢 backward</strong>。
+          这是 IO-aware 重算，不是简单的「用算力换内存」。
+        </p>
+
+        <h2>八、从单 head 到生产：并行与扩展</h2>
+        <p>
+          上面的伪代码对应单个 CUDA thread block（跑在一个 SM 上）。
+          扩展到 batch × num_heads 时，每个 (batch, head) 对启动一个 thread block，并行跑在不同 SM 上。
+          A100 有 108 个 SM——越接近 SM 数量 × 并发度，利用率越高。
+        </p>
+
+        <p>
+          同一思路可扩展到 <strong>FlashAttention-2</strong> 的 work partitioning 优化，
+          以及 <strong>block-sparse FlashAttention</strong>：对 block 稀疏 mask 跳过部分 (i,j) 迭代，
+          稀疏度为 s 时可再快 ~1/s。
+        </p>
+
+        <h2>九、FlashAttention V1 → V4 演进脉络</h2>
+
+        <figure class="diagram-figure">
+          <svg viewBox="0 0 720 200" role="img" aria-label="FlashAttention 版本时间线">
+            <line x1="60" y1="100" x2="660" y2="100" class="d-line" />
+
+            <circle cx="100" cy="100" r="10" class="d-accent" />
+            <text x="100" y="75" text-anchor="middle" class="d-label">V1</text>
+            <text x="100" y="135" text-anchor="middle" class="d-muted">IO-aware</text>
+            <text x="100" y="155" text-anchor="middle" class="d-muted">tiling + online softmax</text>
+
+            <circle cx="260" cy="100" r="10" class="d-accent" />
+            <text x="260" y="75" text-anchor="middle" class="d-label">V2</text>
+            <text x="260" y="135" text-anchor="middle" class="d-muted">并行度</text>
+            <text x="260" y="155" text-anchor="middle" class="d-muted">更少非 MatMul 开销</text>
+
+            <circle cx="420" cy="100" r="10" class="d-accent" />
+            <text x="420" y="75" text-anchor="middle" class="d-label">V3</text>
+            <text x="420" y="135" text-anchor="middle" class="d-muted">Hopper (H100)</text>
+            <text x="420" y="155" text-anchor="middle" class="d-muted">TMA · warp spec</text>
+
+            <circle cx="580" cy="100" r="10" class="d-accent" />
+            <text x="580" y="75" text-anchor="middle" class="d-label">V4</text>
+            <text x="580" y="135" text-anchor="middle" class="d-muted">Blackwell+</text>
+            <text x="580" y="155" text-anchor="middle" class="d-muted">新 Tensor Core</text>
+          </svg>
+          <figcaption>版本演进：算法思想在 V1 确立，后续版本主要是工程化与硬件适配。</figcaption>
+        </figure>
+
+        <table class="decision-table">
+          <thead>
+            <tr>
+              <th>版本</th>
+              <th>核心贡献</th>
+              <th>解决什么问题</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>V1 (2022)</td>
+              <td>IO-aware exact attention；tiling + online softmax + recomputation</td>
+              <td>N×N 中间矩阵 O(N²) 显存；HBM 带宽瓶颈</td>
+            </tr>
+            <tr>
+              <td>V2 (2023)</td>
+              <td>更好的 work partitioning；减少 rescale/同步；提高 Tensor Core 利用率</td>
+              <td>V1 在某些 shape 下 GPU 并行度不足、算力吃不满</td>
+            </tr>
+            <tr>
+              <td>V3 (2024)</td>
+              <td>面向 Hopper：异步 TMA、warp-specialization、流水化 load/compute</td>
+              <td>新架构上继续逼近 roofline 峰值</td>
+            </tr>
+            <tr>
+              <td>V4 (2025)</td>
+              <td>面向 Blackwell 及更新架构；新 Tensor Core 调度与内存管线</td>
+              <td>更大上下文、更多 attention 变体、新硬件代际</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <p>
+          可以这么记：<strong>V1 改算法，V2 改并行，V3/V4 改硬件适配</strong>。
+          思想一脉相承——都是让数据尽量留在快内存里，少碰 HBM。
+        </p>
+
+        <h2>十、工程现实：为什么还需要 Triton / CUDA 专家</h2>
+        <p>
+          FlashAttention 的力量来自手写 CUDA kernel，这也意味着代价：
+          每个 attention 变体（不同 mask、不同 head dim、不同 GPU 架构）可能需要新 kernel；
+          代码难维护、难跨架构移植。
+        </p>
+
+        <p>
+          这正是 Triton、CUTLASS、FlashInfer 等项目的价值——
+          在 Python/DSL 层写算法，编译器生成接近手写 CUDA 性能的 IO-aware kernel。
+          PyTorch 2.x 的 <code>torch.nn.functional.scaled_dot_product_attention</code> 在支持的硬件上也会自动 dispatch 到 FlashAttention 后端。
+        </p>
+
+        <h2>结论：FlashAttention 改变了什么，又没改变什么</h2>
+        <p>
+          <strong>没改变：</strong>attention 的数学定义、输出精度（exact，非近似）、O(N²) 的渐近 FLOPs。
+        </p>
+        <p>
+          <strong>改变了：</strong>中间矩阵是否 materialize 到 HBM；HBM 访问次数；可支持的序列长度上限；
+          训练/推理的 wall-clock 时间。
+        </p>
+
+        <p>
+          如果把 Transformer 推理看成一条数据流水线，FlashAttention 做的就是在最热的算子——attention——上，
+          重新设计「什么数据必须过 HBM、什么数据可以在 SRAM 里生灭」。
+          这不是 cache 优化技巧，而是<strong>算法与硬件存储层级 co-design</strong> 的范例。
+        </p>
+
+        <div class="essay-ending">
+          算力可以指数增长，但 HBM 带宽追不上。FlashAttention 的回答是：别和硬件赛跑，改算法让它少跑 HBM。
+        </div>
+
+        <section class="references-section" aria-label="参考与扩展阅读">
+          <h2>参考与扩展阅读</h2>
+          <ol class="reference-list">
+            <li>
+              <a href="https://arxiv.org/abs/2205.14135" target="_blank" rel="noopener noreferrer">
+                FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness (Dao et al., 2022)
+              </a>
+              <span>FlashAttention V1 原论文，IO-aware tiling 与 online softmax 的完整推导。</span>
+            </li>
+            <li>
+              <a href="https://arxiv.org/abs/2307.08691" target="_blank" rel="noopener noreferrer">
+                FlashAttention-2: Faster Attention with Better Parallelism and Work Partitioning
+              </a>
+              <span>V2 论文，重点在并行策略与 Tensor Core 利用率。</span>
+            </li>
+            <li>
+              <a href="https://gordicaleksa.medium.com/eli5-flash-attention-5c44017022ad" target="_blank" rel="noopener noreferrer">
+                ELI5: FlashAttention — Aleksa Gordić
+              </a>
+              <span>本文结构的重要参考：从第一性原理、逐步拆解 forward pass 与 online softmax。</span>
+            </li>
+            <li>
+              <a href="https://courses.cs.washington.edu/courses/cse599m/23sp/notes/flashattn.pdf" target="_blank" rel="noopener noreferrer">
+                From Online Softmax to FlashAttention (UW CSE599M Notes)
+              </a>
+              <span>从 online softmax 到 FlashAttention 的数学推导，适合补齐公式细节。</span>
+            </li>
+            <li>
+              <a href="https://horace.io/brrr_intro.html" target="_blank" rel="noopener noreferrer">
+                Making Deep Learning Go Brrrr — Horace He
+              </a>
+              <span>理解 compute-bound vs memory-bound、roofline 模型的绝佳入门。</span>
+            </li>
+            <li>
+              <a href="https://github.com/Dao-AILab/flash-attention" target="_blank" rel="noopener noreferrer">
+                Dao-AILab/flash-attention
+              </a>
+              <span>官方实现仓库，含 V2/V3 CUDA kernel 与 benchmark。</span>
+            </li>
+          </ol>
+        </section>
+      </section>
+
+      <section class="comments-section" id="comments" aria-label="Discussion">
+        <div class="comments-header">
+          <h2>Discussion</h2>
+        </div>
+        <div id="utterances-container" class="utterances-container"></div>
+        <noscript>请启用 JavaScript 后查看评论区。</noscript>
+      </section>
+    </article>
+  </main>
+
+  <footer class="site-footer">
+    <span class="footer-credit">
+      <span class="footer-prefix">© 2026 by</span>
+      <a href="../../index.html" class="footer-brand">
+        <span class="brand-mascot-frame brand-mascot-frame--inline" aria-hidden="true">
+          <picture>
+            <source srcset="../../assets/tiger-mascot.webp" type="image/webp" />
+            <img src="../../assets/tiger-mascot.png" alt="" class="brand-mascot" width="27" height="18" decoding="async" />
+          </picture>
+        </span>
+        <span>MOFANG</span>
+      </a>
+    </span>
+  </footer>
+
+  <script src="../../app.js?v=36"></script>
+</body>
+</html>

@@ -19,7 +19,7 @@
     html[data-theme="night"], html[data-theme="night"] body { background: #0c0c0c; color: #ededed; color-scheme: dark; }
     html[data-theme="day"], html[data-theme="day"] body { background: #ffffff; color: #1a1a1a; color-scheme: light; }
   </style>
-  <link rel="stylesheet" href="styles.css?v=35" />
+  <link rel="stylesheet" href="styles.css?v=36" />
   <title>MOFANG's Blog</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="description" content="LLM notes — understanding, one question at a time." />
@@ -81,6 +81,19 @@
 
     <section id="blog" class="section">
       <div class="post-list" id="post-list">
+        <article class="post-card" data-category="inference" data-date="2026-06-10" data-title="FlashAttention 深度剖析：从存储层级到 IO-Aware Exact Attention">
+          <a href="posts/inference/flash-attention-deep-dive.html" class="post-card-link">
+            <div class="post-meta-row">
+              <time class="post-date" datetime="2026-06-10">Jun 10</time>
+              <span class="post-tag">Inference</span>
+            </div>
+            <h3 class="post-title">FlashAttention 深度剖析：从存储层级到 IO-Aware Exact Attention</h3>
+            <p class="post-excerpt">
+              从 L1/L2/L3、SRAM、HBM 到 online softmax 与 kernel fusion：为什么 attention 是 memory-bound，FlashAttention 又如何把 O(N²) 中间矩阵留在片上。
+            </p>
+          </a>
+        </article>
+
         <article class="post-card" data-category="inference" data-date="2026-06-08" data-title="Temperature=0 不等于确定性：从解码策略到 Batch Invariance">
           <a href="posts/inference/temperature-zero-determinism.html" class="post-card-link">
             <div class="post-meta-row">
@@ -114,6 +127,6 @@
     </span>
   </footer>
 
-  <script src="app.js?v=35"></script>
+  <script src="app.js?v=36"></script>
 </body>
 </html>
