@@ -5,7 +5,9 @@
   <title>MOFANG's Blog</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="description" content="LLM notes — understanding, one question at a time." />
-  <link rel="stylesheet" href="styles.css?v=30" />
+  <link rel="preload" as="image" href="assets/tiger-mascot.webp" type="image/webp" />
+  <link rel="preload" as="image" href="assets/tiger-mascot.png" type="image/png" />
+  <link rel="stylesheet" href="styles.css?v=31" />
 </head>
 <body class="home-page">
   <div class="ambient" aria-hidden="true">
@@ -34,7 +36,10 @@
       <div class="hero-slogan">
         <h1 class="blog-title">
           <span class="blog-title-brand">
-            <img src="assets/tiger-catstyle-bw-lines.png" alt="" class="brand-mascot brand-mascot--hero" />
+            <picture>
+              <source srcset="assets/tiger-mascot.webp" type="image/webp" />
+              <img src="assets/tiger-mascot.png" alt="" class="brand-mascot brand-mascot--hero" width="128" height="85" decoding="async" fetchpriority="high" />
+            </picture>
             <span class="blog-title-text">MOFANG's Blog</span>
           </span>
         </h1>
@@ -81,12 +86,15 @@
     <span class="footer-credit">
       <span class="footer-prefix">© 2026 by</span>
       <a href="index.html" class="footer-brand">
-        <img src="assets/tiger-catstyle-bw-lines.png" alt="" class="brand-mascot brand-mascot--inline" width="27" height="27" />
+        <picture>
+          <source srcset="assets/tiger-mascot.webp" type="image/webp" />
+          <img src="assets/tiger-mascot.png" alt="" class="brand-mascot brand-mascot--inline" width="27" height="18" decoding="async" />
+        </picture>
         <span>MOFANG</span>
       </a>
     </span>
   </footer>
 
-  <script src="app.js?v=30"></script>
+  <script src="app.js?v=31"></script>
 </body>
 </html>
