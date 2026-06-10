@@ -280,38 +280,56 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 0.22em;
+  gap: 0.35em;
   max-width: 100%;
 }
 
 .blog-title-text {
   white-space: nowrap;
+  line-height: 1;
+  display: flex;
+  align-items: center;
 }
 
-.brand-mascot {
-  display: inline-block;
-  object-fit: contain;
+.brand-mascot-frame {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   flex-shrink: 0;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 0 0 1px var(--border);
+  overflow: hidden;
+  line-height: 0;
 }
 
-.brand-mascot--hero {
+.brand-mascot-frame picture {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+}
+
+.brand-mascot-frame--hero {
   width: 1.64em;
   height: 1.64em;
   max-width: 72px;
   max-height: 72px;
+  padding: 0.1em;
 }
 
-.brand-mascot--inline {
+.brand-mascot-frame--inline {
   width: 1.44em;
   height: 1.44em;
-  margin: 0;
-  vertical-align: middle;
+  padding: 0.08em;
 }
 
-[data-theme="night"] .brand-mascot {
-  border-radius: 50%;
-  background: #ffffff;
-  padding: 0.06em;
+.brand-mascot {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
 }
 
 .slogan-primary {
@@ -355,7 +373,7 @@ body {
     line-height: 1.25;
   }
 
-  .home-page .brand-mascot--hero {
+  .home-page .brand-mascot-frame--hero {
     width: 44px;
     height: 44px;
     max-width: 44px;
@@ -1018,9 +1036,17 @@ body {
     gap: 0.2em;
   }
 
-  .brand-mascot--inline {
+  .brand-mascot-frame--inline {
     width: 1.28em;
     height: 1.28em;
+  }
+}
+
+@media (min-width: 1024px) {
+  .home-page .blog-title-brand {
+    flex-direction: row;
+    align-items: center;
+    gap: 0.35em;
   }
 }
 

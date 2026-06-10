@@ -21,7 +21,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;1,400&family=Source+Sans+3:wght@400;500;600&display=swap" />
-  <link rel="stylesheet" href="styles.css?v=33" />
+  <link rel="stylesheet" href="styles.css?v=34" />
 </head>
 <body class="home-page">
   <div class="ambient" aria-hidden="true">
@@ -50,10 +50,12 @@
       <div class="hero-slogan">
         <h1 class="blog-title">
           <span class="blog-title-brand">
-            <picture>
-              <source srcset="assets/tiger-mascot.webp" type="image/webp" />
-              <img src="assets/tiger-mascot.png" alt="" class="brand-mascot brand-mascot--hero" width="128" height="85" decoding="async" />
-            </picture>
+            <span class="brand-mascot-frame brand-mascot-frame--hero" aria-hidden="true">
+              <picture>
+                <source srcset="assets/tiger-mascot.webp" type="image/webp" />
+                <img src="assets/tiger-mascot.png" alt="" class="brand-mascot" width="128" height="85" decoding="async" />
+              </picture>
+            </span>
             <span class="blog-title-text">MOFANG's Blog</span>
           </span>
         </h1>
@@ -100,15 +102,17 @@
     <span class="footer-credit">
       <span class="footer-prefix">© 2026 by</span>
       <a href="index.html" class="footer-brand">
-        <picture>
-          <source srcset="assets/tiger-mascot.webp" type="image/webp" />
-          <img src="assets/tiger-mascot.png" alt="" class="brand-mascot brand-mascot--inline" width="27" height="18" decoding="async" />
-        </picture>
+        <span class="brand-mascot-frame brand-mascot-frame--inline" aria-hidden="true">
+          <picture>
+            <source srcset="assets/tiger-mascot.webp" type="image/webp" />
+            <img src="assets/tiger-mascot.png" alt="" class="brand-mascot" width="27" height="18" decoding="async" />
+          </picture>
+        </span>
         <span>MOFANG</span>
       </a>
     </span>
   </footer>
 
-  <script src="app.js?v=33"></script>
+  <script src="app.js?v=34"></script>
 </body>
 </html>
