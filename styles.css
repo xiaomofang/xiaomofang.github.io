@@ -62,8 +62,26 @@
 
 html {
   scroll-behavior: smooth;
-  font-size: 34px;
+  font-size: 17px;
   height: 100%;
+}
+
+@media (min-width: 641px) {
+  html {
+    font-size: 22px;
+  }
+}
+
+@media (min-width: 900px) {
+  html {
+    font-size: 28px;
+  }
+}
+
+@media (min-width: 1100px) {
+  html {
+    font-size: 34px;
+  }
 }
 
 html,
@@ -246,9 +264,10 @@ body {
 }
 
 .blog-title {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   justify-content: center;
+  flex-wrap: wrap;
   gap: 0.22em;
   margin: 0 0 20px;
   color: var(--text);
@@ -837,25 +856,108 @@ body {
 }
 
 @media (max-width: 640px) {
-  html {
-    font-size: 30px;
+  :root {
+    --side-padding: 16px;
+  }
+
+  .header-inner {
+    height: 52px;
+  }
+
+  .site-main {
+    padding: 22px var(--side-padding) 32px;
+  }
+
+  .hero {
+    margin-bottom: 22px;
+    padding: 6px 0 10px;
+  }
+
+  .blog-title {
+    flex-direction: column;
+    flex-wrap: nowrap;
+    gap: 0.35em;
+    font-size: 1.42rem;
+    margin-bottom: 12px;
+  }
+
+  .brand-mascot--hero {
+    width: 2.4em;
+    height: 2.4em;
+  }
+
+  .slogan-primary {
+    font-size: 1.02rem;
+    line-height: 1.5;
+  }
+
+  .slogan-secondary {
+    font-size: 0.86rem;
+    margin-top: 6px;
   }
 
   .controls {
     flex-direction: column;
     align-items: stretch;
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+
+  .tag-cloud {
+    width: 100%;
+    max-width: none;
+    justify-content: center;
+    gap: 6px;
+  }
+
+  .tag-pill {
+    font-size: 0.72rem;
+    padding: 6px 11px;
   }
 
   .search-box {
     max-width: none;
+    min-width: 0;
+  }
+
+  .post-list {
+    gap: 14px;
   }
 
   .post-card-link {
-    padding: 18px 20px;
+    padding: 16px 14px;
+  }
+
+  .post-title {
+    font-size: 1.08rem;
+  }
+
+  .post-excerpt {
+    font-size: 0.88rem;
   }
 
   .post-page {
-    padding: 26px 20px;
+    padding: 18px 14px;
+    max-width: none;
+    border-radius: 10px;
+  }
+
+  .post-page-title {
+    font-size: 1.32rem;
+  }
+
+  .post-page-content {
+    font-size: 0.94rem;
+  }
+
+  .post-lead {
+    font-size: 0.98rem;
+  }
+
+  .decision-table {
+    display: block;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
   }
 
   .logic-map {
@@ -865,5 +967,14 @@ body {
   .map-arrow {
     justify-content: center;
     transform: rotate(90deg);
+  }
+
+  .footer-credit {
+    gap: 0.2em;
+  }
+
+  .brand-mascot--inline {
+    width: 1.28em;
+    height: 1.28em;
   }
 }
