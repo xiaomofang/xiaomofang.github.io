@@ -245,8 +245,18 @@ body {
 
 .hero {
   margin-bottom: 32px;
-  padding: 8px 0 16px;
-  text-align: left;
+  padding: 18px 0 18px;
+  text-align: center;
+}
+
+.blog-title {
+  margin: 0 0 18px;
+  color: var(--text);
+  font-family: var(--font-serif);
+  font-size: clamp(2rem, 5vw, 3rem);
+  font-weight: 600;
+  line-height: 1.15;
+  letter-spacing: 0.01em;
 }
 
 .slogan-primary {
@@ -434,7 +444,19 @@ body {
   max-width: var(--content-width);
   margin: 0 auto;
   padding: 0 var(--side-padding);
-  text-align: left;
+  text-align: center;
+}
+
+.site-footer a {
+  color: var(--text-soft);
+  text-decoration: none;
+  border-bottom: 1px solid rgba(110, 231, 160, 0.28);
+  transition: color 0.2s, border-color 0.2s;
+}
+
+.site-footer a:hover {
+  color: var(--accent);
+  border-color: var(--accent);
 }
 
 .post-page {
@@ -744,16 +766,7 @@ body {
 }
 
 .comments-header {
-  margin-bottom: 18px;
-}
-
-.comments-kicker {
-  margin: 0 0 6px;
-  color: var(--accent);
-  font-size: 0.72rem;
-  font-weight: 600;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
+  margin-bottom: 12px;
 }
 
 .comments-header h2 {
