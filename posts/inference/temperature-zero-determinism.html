@@ -5,7 +5,7 @@
   <title>Temperature=0 不等于确定性：从解码策略到 Batch Invariance</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="description" content="temperature=0 只能固定解码策略，不能保证大模型推理结果完全复现。本文从 logits、argmax、浮点归约、batch invariance、dynamic batching、MoE 路由和 RL 训练稳定性出发，解释确定性为什么是一项系统属性。" />
-  <link rel="stylesheet" href="../../styles.css?v=26" />
+  <link rel="stylesheet" href="../../styles.css?v=27" />
 </head>
 <body>
   <div class="ambient" aria-hidden="true"><span class="orb orb-a"></span><span class="orb orb-b"></span></div>
@@ -398,9 +398,15 @@ Expert 4 : 0.500000</code></pre>
   </main>
 
   <footer class="site-footer">
-    <span>© 2026 by <a href="../../index.html"><img src="../../assets/tiger-catstyle-bw-lines.png" alt="" class="brand-mascot brand-mascot--inline" width="27" height="27" />MOFANG</a></span>
+    <span class="footer-credit">
+      <span class="footer-prefix">© 2026 by</span>
+      <a href="../../index.html" class="footer-brand">
+        <img src="../../assets/tiger-catstyle-bw-lines.png" alt="" class="brand-mascot brand-mascot--inline" width="27" height="27" />
+        <span>MOFANG</span>
+      </a>
+    </span>
   </footer>
 
-  <script src="../../app.js?v=26"></script>
+  <script src="../../app.js?v=27"></script>
 </body>
 </html>
