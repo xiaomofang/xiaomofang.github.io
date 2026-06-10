@@ -10,37 +10,35 @@
 }
 
 [data-theme="night"] {
-  --bg: #0b0d0c;
-  --text: #eef2ef;
-  --text-soft: #b4beb7;
-  --text-faint: #6c756f;
+  --bg: #0c0c0c;
+  --text: #ededed;
+  --text-soft: #b0b0b0;
+  --text-faint: #707070;
   --accent: #6ee7a0;
   --accent-2: #4ade80;
-  --border: rgba(162, 184, 170, 0.14);
-  --card: rgba(255, 255, 255, 0.035);
-  --card-hover: rgba(255, 255, 255, 0.055);
-  --header: rgba(11, 13, 12, 0.92);
-  --orb-a: rgba(74, 222, 128, 0.04);
-  --orb-b: rgba(52, 211, 153, 0.025);
-  --input-bg: rgba(255, 255, 255, 0.03);
-  --code-bg: #0f1210;
+  --border: rgba(255, 255, 255, 0.1);
+  --card: rgba(255, 255, 255, 0.04);
+  --card-hover: rgba(255, 255, 255, 0.06);
+  --header: rgba(12, 12, 12, 0.92);
+  --surface-muted: rgba(255, 255, 255, 0.04);
+  --input-bg: rgba(255, 255, 255, 0.04);
+  --code-bg: #141414;
 }
 
 [data-theme="day"] {
-  --bg: #fbfbfa;
-  --text: #1c211e;
-  --text-soft: #505a54;
-  --text-faint: #8b948e;
+  --bg: #ffffff;
+  --text: #1a1a1a;
+  --text-soft: #4a4a4a;
+  --text-faint: #8a8a8a;
   --accent: #16a34a;
   --accent-2: #22c55e;
-  --border: rgba(31, 45, 37, 0.1);
+  --border: rgba(0, 0, 0, 0.08);
   --card: #ffffff;
   --card-hover: #ffffff;
-  --header: rgba(251, 251, 250, 0.94);
-  --orb-a: rgba(74, 222, 128, 0.045);
-  --orb-b: rgba(34, 197, 94, 0.025);
+  --header: rgba(255, 255, 255, 0.94);
+  --surface-muted: rgba(0, 0, 0, 0.03);
   --input-bg: #ffffff;
-  --code-bg: #f8faf9;
+  --code-bg: #f5f5f5;
   --syntax-keyword: #2563eb;
   --syntax-string: #047857;
   --syntax-number: #b45309;
@@ -87,11 +85,7 @@ body {
 }
 
 .ambient {
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  z-index: 0;
-  overflow: hidden;
+  display: none;
 }
 
 .orb {
@@ -450,7 +444,7 @@ body {
 .site-footer a {
   color: var(--text-soft);
   text-decoration: none;
-  border-bottom: 1px solid rgba(110, 231, 160, 0.28);
+  border-bottom: 1px solid var(--border);
   transition: color 0.2s, border-color 0.2s;
 }
 
@@ -545,7 +539,7 @@ body {
 .post-page-content p code {
   border: 1px solid var(--border);
   border-radius: 5px;
-  background: rgba(127, 139, 130, 0.08);
+  background: var(--surface-muted);
   padding: 0.08em 0.32em;
   color: var(--text);
 }
@@ -553,14 +547,14 @@ body {
 .code-block {
   margin: 26px 0 28px;
   overflow: hidden;
-  border: 1px solid rgba(127, 139, 130, 0.16);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--code-bg);
 }
 
 .code-block figcaption {
-  border-bottom: 1px solid rgba(127, 139, 130, 0.14);
-  background: rgba(127, 139, 130, 0.045);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-muted);
   padding: 10px 14px;
   color: var(--text-soft);
   font-size: 0.78rem;
@@ -605,7 +599,7 @@ body {
   min-width: 0;
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: rgba(127, 139, 130, 0.045);
+  background: var(--surface-muted);
   padding: 16px;
 }
 
@@ -648,7 +642,7 @@ body {
   margin: 26px 0;
   border-left: 3px solid var(--accent);
   border-radius: 0 var(--radius) var(--radius) 0;
-  background: rgba(127, 139, 130, 0.055);
+  background: var(--surface-muted);
   padding: 14px 18px;
   color: var(--text);
 }
@@ -667,7 +661,7 @@ body {
   margin-bottom: 10px;
   border: 1px solid var(--border);
   border-radius: 10px;
-  background: rgba(127, 139, 130, 0.04);
+  background: var(--surface-muted);
   padding: 12px 14px;
 }
 
@@ -695,7 +689,7 @@ body {
 }
 
 .decision-table th {
-  background: rgba(127, 139, 130, 0.055);
+  background: var(--surface-muted);
   color: var(--text);
   font-weight: 600;
 }
@@ -735,7 +729,7 @@ body {
   color: var(--text);
   font-weight: 600;
   text-decoration: none;
-  border-bottom: 1px solid rgba(110, 231, 160, 0.35);
+  border-bottom: 1px solid var(--border);
 }
 
 .reference-list a:hover {
