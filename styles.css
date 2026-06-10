@@ -5,8 +5,10 @@
   --font-serif: "Cormorant Garamond", "Noto Serif SC", serif;
   --radius: 12px;
   --transition: 0.35s ease;
-  --content-width: min(90vw, 1120px);
-  --side-padding: clamp(20px, 5vw, 48px);
+  --content-width: min(92vw, 1080px);
+  --side-padding: clamp(24px, 4.5vw, 52px);
+  --line-body: 1.78;
+  --line-tight: 1.45;
 }
 
 [data-theme="night"] {
@@ -60,7 +62,7 @@
 
 html {
   scroll-behavior: smooth;
-  font-size: 20px;
+  font-size: 25px;
   height: 100%;
 }
 
@@ -139,7 +141,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 60px;
+  height: 64px;
   padding: 0 var(--side-padding);
 }
 
@@ -234,23 +236,51 @@ body {
   width: 100%;
   max-width: var(--content-width);
   margin: 0 auto;
-  padding: 32px var(--side-padding) 48px;
+  padding: 36px var(--side-padding) 52px;
 }
 
 .hero {
-  margin-bottom: 32px;
-  padding: 18px 0 18px;
+  margin-bottom: 36px;
+  padding: 12px 0 20px;
   text-align: center;
 }
 
 .blog-title {
-  margin: 0 0 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4em;
+  margin: 0 0 20px;
   color: var(--text);
   font-family: var(--font-serif);
-  font-size: clamp(2rem, 5vw, 3rem);
+  font-size: clamp(1.85rem, 4.2vw, 2.6rem);
   font-weight: 600;
-  line-height: 1.15;
+  line-height: var(--line-tight);
   letter-spacing: 0.01em;
+}
+
+.brand-mascot {
+  display: inline-block;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+
+.brand-mascot--hero {
+  width: 1.2em;
+  height: 1.2em;
+}
+
+.brand-mascot--inline {
+  width: 1.05em;
+  height: 1.05em;
+  vertical-align: -0.14em;
+  margin-right: 0.12em;
+}
+
+[data-theme="night"] .brand-mascot {
+  border-radius: 50%;
+  background: #ffffff;
+  padding: 0.06em;
 }
 
 .slogan-primary {
@@ -260,16 +290,16 @@ body {
   font-weight: 500;
   color: var(--text);
   margin: 0;
-  line-height: 1.45;
+  line-height: var(--line-tight);
 }
 
 .slogan-secondary {
   font-family: var(--font-serif);
-  font-size: 1.1rem;
+  font-size: 1.05rem;
   font-style: italic;
   color: var(--text-soft);
-  margin: 8px 0 0;
-  line-height: 1.5;
+  margin: 10px 0 0;
+  line-height: var(--line-tight);
 }
 
 .controls {
@@ -278,7 +308,7 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  margin-bottom: 28px;
+  margin-bottom: 32px;
 }
 
 .tag-cloud {
@@ -344,7 +374,7 @@ body {
 .post-list {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 22px;
 }
 
 .post-card {
@@ -442,6 +472,8 @@ body {
 }
 
 .site-footer a {
+  display: inline-flex;
+  align-items: center;
   color: var(--text-soft);
   text-decoration: none;
   border-bottom: 1px solid var(--border);
@@ -457,8 +489,8 @@ body {
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 36px 32px;
-  max-width: 980px;
+  padding: 40px 36px;
+  max-width: 920px;
   margin: 0 auto;
 }
 
@@ -491,8 +523,8 @@ body {
 }
 
 .post-page-content {
-  font-size: 1.05rem;
-  line-height: 1.85;
+  font-size: 1rem;
+  line-height: var(--line-body);
   color: var(--text-soft);
 }
 
@@ -788,7 +820,7 @@ body {
 
 @media (max-width: 640px) {
   html {
-    font-size: 18px;
+    font-size: 22px;
   }
 
   .controls {

@@ -5,9 +5,9 @@
   <title>Temperature=0 不等于确定性：从解码策略到 Batch Invariance</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="description" content="temperature=0 只能固定解码策略，不能保证大模型推理结果完全复现。本文从 logits、argmax、浮点归约、batch invariance、dynamic batching、MoE 路由和 RL 训练稳定性出发，解释确定性为什么是一项系统属性。" />
-  <link rel="stylesheet" href="../../styles.css?v=24" />
+  <link rel="stylesheet" href="../../styles.css?v=25" />
 </head>
-<body>
+<body data-mascot="../../assets/tiger-catstyle-bw-lines.png">
   <div class="ambient" aria-hidden="true"><span class="orb orb-a"></span><span class="orb orb-b"></span></div>
   <canvas id="star-canvas"></canvas>
 
@@ -348,7 +348,7 @@ Expert 4 : 0.500000</code></pre>
           <h2>参考与扩展阅读</h2>
           <p>
             下面几份资料更适合继续追溯细节：Thinking Machines Lab 的文章是这条问题链的核心来源；
-            vLLM 文档给出了 batch invariance 的工程入口；OpenAI Cookbook 则说明了 seed 与 system_fingerprint
+            vLLM 可复现性文档与开源实现给出了工程入口；OpenAI Cookbook 则说明了 seed 与 system_fingerprint
             在闭源 API 里的边界。
           </p>
 
@@ -358,12 +358,6 @@ Expert 4 : 0.500000</code></pre>
                 Defeating Nondeterminism in LLM Inference
               </a>
               <span>Thinking Machines Lab. 系统解释 temperature=0 下仍不确定的根因，并提出 batch-invariant kernel 的实现思路。</span>
-            </li>
-            <li>
-              <a href="https://docs.vllm.ai/en/latest/features/batch_invariance/" target="_blank" rel="noopener noreferrer">
-                Batch Invariance - vLLM Documentation
-              </a>
-              <span>vLLM 官方文档，介绍 `VLLM_BATCH_INVARIANT=1`、在线/离线推理启用方式、硬件要求和性能权衡。</span>
             </li>
             <li>
               <a href="https://docs.vllm.ai/en/latest/usage/reproducibility/" target="_blank" rel="noopener noreferrer">
@@ -389,12 +383,6 @@ Expert 4 : 0.500000</code></pre>
               </a>
               <span>一篇面向工程读者的延伸博客，讨论 temperature=0、seed 与 batch context 对输出复现性的影响。</span>
             </li>
-            <li>
-              <a href="https://github.com/vllm-project/vllm/issues/19491" target="_blank" rel="noopener noreferrer">
-                vLLM Issue #19491: outputs are not reproducible
-              </a>
-              <span>vLLM 社区关于 AsyncLLM / batch / seed 复现性的实际讨论，能看到工程问题如何暴露出来。</span>
-            </li>
           </ol>
         </section>
       </section>
@@ -410,9 +398,9 @@ Expert 4 : 0.500000</code></pre>
   </main>
 
   <footer class="site-footer">
-    <span>© 2026 by <a href="../../index.html">⭐MOFANG</a></span>
+    <span>© 2026 by <a href="../../index.html"><img src="../../assets/tiger-catstyle-bw-lines.png" alt="" class="brand-mascot brand-mascot--inline" width="20" height="20" />MOFANG</a></span>
   </footer>
 
-  <script src="../../app.js?v=24"></script>
+  <script src="../../app.js?v=25"></script>
 </body>
 </html>
