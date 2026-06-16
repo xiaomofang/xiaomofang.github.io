@@ -825,6 +825,207 @@ body {
   fill: none;
 }
 
+.diagram-figure.diagram-figure--wide svg {
+  max-width: 900px;
+}
+
+.diagram-figure .d-title {
+  fill: var(--text);
+  font-size: 15px;
+  font-weight: 600;
+  font-family: var(--font-sans);
+}
+
+.diagram-figure .d-tag {
+  fill: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+  font-family: var(--font-sans);
+  letter-spacing: 0.04em;
+}
+
+.diagram-figure .d-dim {
+  fill: var(--text-faint);
+  font-size: 11px;
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+}
+
+.diagram-figure .d-zone {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  stroke-dasharray: 6 4;
+  opacity: 0.55;
+}
+
+.diagram-figure .d-cell {
+  fill: var(--code-bg);
+  stroke: var(--border);
+  stroke-width: 1;
+}
+
+.diagram-figure .d-cell-active {
+  fill: color-mix(in srgb, var(--accent) 22%, var(--code-bg));
+  stroke: var(--accent);
+  stroke-width: 1.5;
+}
+
+.diagram-figure .d-op-circle {
+  fill: var(--surface-muted);
+  stroke: var(--border);
+  stroke-width: 1.5;
+}
+
+.diagram-figure .d-result {
+  fill: color-mix(in srgb, var(--accent) 18%, var(--code-bg));
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+
+.diagram-figure .d-flow-box {
+  fill: var(--code-bg);
+  stroke: var(--border);
+  stroke-width: 1;
+}
+
+.diagram-figure .d-flow-box-active {
+  fill: color-mix(in srgb, var(--accent) 12%, var(--code-bg));
+  stroke: var(--accent);
+  stroke-width: 1.5;
+}
+
+.diagram-figure .d-flow-arrow {
+  stroke: var(--text-faint);
+  stroke-width: 1.5;
+  fill: none;
+}
+
+.diagram-figure foreignObject .svg-math {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--text-soft);
+  overflow: visible;
+}
+
+.diagram-figure foreignObject .katex {
+  font-size: 0.82rem;
+  color: var(--text-soft);
+}
+
+.math-block,
+.math-merge {
+  margin: 20px auto 24px;
+  max-width: 760px;
+  padding: 16px 20px;
+  border-radius: var(--radius);
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  overflow-x: auto;
+  text-align: center;
+}
+
+.math-merge {
+  margin-top: 12px;
+  margin-bottom: 0;
+  background: color-mix(in srgb, var(--accent) 14%, var(--code-bg));
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+}
+
+/* math-merge placed directly inside diagram-figure removes double border */
+.diagram-figure .math-merge {
+  margin-top: 14px;
+  border-radius: var(--radius);
+}
+
+.math-block .katex-display,
+.math-merge .katex-display {
+  margin: 0.35rem 0;
+}
+
+.math-block .katex-display:first-child,
+.math-merge .katex-display:first-child {
+  margin-top: 0;
+}
+
+.math-block .katex-display:last-child,
+.math-merge .katex-display:last-child {
+  margin-bottom: 0;
+}
+
+.katex {
+  color: var(--text);
+  font-size: 1.05em;
+}
+
+.katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.algo-steps {
+  list-style: none;
+  margin: 26px 0 30px;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.algo-step {
+  display: grid;
+  grid-template-columns: 36px 1fr;
+  gap: 14px;
+  align-items: start;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-muted);
+  padding: 14px 16px;
+}
+
+.algo-step-num {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--accent) 18%, var(--code-bg));
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
+  color: var(--accent);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.algo-step-body strong {
+  display: block;
+  color: var(--text);
+  font-size: 0.92rem;
+  margin-bottom: 4px;
+}
+
+.algo-step-body p {
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 0.86rem;
+  line-height: 1.6;
+}
+
+.algo-step-body code {
+  font-size: 0.82rem;
+}
+
+.algo-step--core {
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
+  background: color-mix(in srgb, var(--accent) 7%, var(--surface-muted));
+}
+
+.algo-step--core .algo-step-num {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--bg);
+}
+
 .logic-map {
   display: grid;
   grid-template-columns: 1fr auto 1fr auto 1fr auto 1fr;
@@ -1084,6 +1285,17 @@ body {
 
   .logic-map {
     grid-template-columns: 1fr;
+  }
+
+  .algo-step {
+    grid-template-columns: 30px 1fr;
+    padding: 12px 14px;
+  }
+
+  .algo-step-num {
+    width: 28px;
+    height: 28px;
+    font-size: 0.72rem;
   }
 
   .map-arrow {

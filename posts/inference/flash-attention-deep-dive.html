@@ -19,7 +19,8 @@
     html[data-theme="night"], html[data-theme="night"] body { background: #0c0c0c; color: #ededed; color-scheme: dark; }
     html[data-theme="day"], html[data-theme="day"] body { background: #ffffff; color: #1a1a1a; color-scheme: light; }
   </style>
-  <link rel="stylesheet" href="../../styles.css?v=36" />
+  <link rel="stylesheet" href="../../styles.css?v=38" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous" />
   <title>FlashAttention 深度剖析：从存储层级到 IO-Aware Exact Attention</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="description" content="从 L1/L2/L3、SRAM、HBM 到 online softmax 与 kernel fusion：系统讲解 FlashAttention 的设计背景、动机、算法细节，以及 V1 到 V4 的演进脉络。" />
@@ -185,9 +186,18 @@
           Self-attention 的数学形式大家很熟悉。设序列长度 N、head 维度 d：
         </p>
 
-        <pre><code>S = QK^T          # (N × N) 注意力分数
-P = softmax(S)    # (N × N) 注意力权重
-O = PV            # (N × d) 输出</code></pre>
+        <div class="math-block" aria-label="标准 Attention 公式">
+          \[
+            S = QK^{\mathsf T} \qquad
+            P = \mathrm{softmax}(S) \qquad
+            O = PV
+          \]
+          \[
+            S \in \mathbb{R}^{N \times N},\;
+            P \in \mathbb{R}^{N \times N},\;
+            O \in \mathbb{R}^{N \times d}
+          \]
+        </div>
 
         <p>
           当 N = 32k 时，S 和 P 各约 10 亿个元素。以 FP16 计，单个 N×N 矩阵就接近 2 GB。
@@ -288,7 +298,11 @@ O = PV            # (N × d) 输出</code></pre>
           但 softmax 不行——第 i 个元素的 softmax 分母需要该行<strong>所有</strong> score：
         </p>
 
-        <pre><code>softmax(z_i) = exp(z_i) / Σ_j exp(z_j)</code></pre>
+        <div class="math-block" aria-label="标准 Softmax 定义">
+          \[
+            \mathrm{softmax}(z_i) = \frac{\exp(z_i)}{\sum_j \exp(z_j)}
+          \]
+        </div>
 
         <p>
           分块时，一次只能看到一行中的 B 个 score，分母还不完整。
@@ -301,8 +315,8 @@ O = PV            # (N × d) 输出</code></pre>
         </p>
 
         <ul class="note-list">
-          <li><strong>m</strong>：当前已见 score 的行最大值（数值稳定用）</li>
-          <li><strong>l</strong>：归一化后的 exp 之和（softmax 分母的分子部分）</li>
+          <li><strong>\(m\)</strong>：当前已见 score 的行最大值（数值稳定用）</li>
+          <li><strong>\(\ell\)</strong>：归一化后的 exp 之和（softmax 分母部分）</li>
         </ul>
 
         <p>
@@ -319,15 +333,21 @@ O = PV            # (N × d) 输出</code></pre>
             </defs>
             <rect x="40" y="40" width="140" height="70" rx="8" class="d-box" />
             <text x="110" y="68" text-anchor="middle" class="d-label">Block 1</text>
-            <text x="110" y="90" text-anchor="middle" class="d-muted">m₁, ℓ₁, Õ₁</text>
+            <foreignObject x="35" y="78" width="150" height="28">
+              <div xmlns="http://www.w3.org/1999/xhtml" class="svg-math">\(m_1,\ \ell_1,\ \tilde{O}_1\)</div>
+            </foreignObject>
 
             <rect x="220" y="40" width="140" height="70" rx="8" class="d-box" />
             <text x="290" y="68" text-anchor="middle" class="d-label">Block 2</text>
-            <text x="290" y="90" text-anchor="middle" class="d-muted">m₂, ℓ₂, Õ₂</text>
+            <foreignObject x="215" y="78" width="150" height="28">
+              <div xmlns="http://www.w3.org/1999/xhtml" class="svg-math">\(m_2,\ \ell_2,\ \tilde{O}_2\)</div>
+            </foreignObject>
 
             <rect x="400" y="40" width="140" height="70" rx="8" class="d-box" />
             <text x="470" y="68" text-anchor="middle" class="d-label">Block 3</text>
-            <text x="470" y="90" text-anchor="middle" class="d-muted">m₃, ℓ₃, Õ₃</text>
+            <foreignObject x="395" y="78" width="150" height="28">
+              <div xmlns="http://www.w3.org/1999/xhtml" class="svg-math">\(m_3,\ \ell_3,\ \tilde{O}_3\)</div>
+            </foreignObject>
 
             <text x="590" y="78" class="d-label">…</text>
 
@@ -335,82 +355,201 @@ O = PV            # (N × d) 输出</code></pre>
             <path d="M290 115 L290 155" class="d-arrow" marker-end="url(#arrowhead-os)" />
             <path d="M470 115 L470 155" class="d-arrow" marker-end="url(#arrowhead-os)" />
 
-            <rect x="160" y="165" width="400" height="80" rx="10" class="d-box-accent" />
-            <text x="360" y="198" text-anchor="middle" class="d-label">合并公式（核心）</text>
-            <text x="360" y="222" text-anchor="middle" class="d-muted">m_new = max(m_old, m_block)</text>
-            <text x="360" y="242" text-anchor="middle" class="d-muted">ℓ_new = e^(m_old−m_new)·ℓ_old + e^(m_block−m_new)·ℓ_block</text>
+            <rect x="160" y="165" width="400" height="44" rx="10" class="d-box-accent" />
+            <text x="360" y="194" text-anchor="middle" class="d-label">合并公式（核心）</text>
 
-            <rect x="220" y="270" width="280" height="44" rx="8" class="d-box" />
-            <text x="360" y="298" text-anchor="middle" class="d-label">最终正确的 softmax 与 O</text>
+            <rect x="220" y="230" width="280" height="44" rx="8" class="d-box" />
+            <text x="360" y="258" text-anchor="middle" class="d-label">最终正确的 softmax 与 O</text>
           </svg>
-          <figcaption>Online Softmax：每处理一个 block 更新 (m, ℓ, O)，无需等整行 score 到齐。参考：Milakov &amp; Gimelshein (2018)、Online Softmax 系列工作。</figcaption>
+          <div class="math-merge" aria-label="Online Softmax 合并公式">
+            \[
+              m_{\text{new}} = \max(m_{\text{old}}, m_{\text{block}})
+            \]
+            \[
+              \ell_{\text{new}} = e^{m_{\text{old}} - m_{\text{new}}} \cdot \ell_{\text{old}} + e^{m_{\text{block}} - m_{\text{new}}} \cdot \ell_{\text{block}}
+            \]
+          </div>
+          <figcaption>Online Softmax：每处理一个 block 更新 \((m, \ell, O)\)，无需等整行 score 到齐。参考：Milakov &amp; Gimelshein (2018)、Online Softmax 系列工作。</figcaption>
         </figure>
 
         <div class="callout muted">
-          m(x) 的存在纯粹为了数值稳定（减最大值再 exp），不改变最终数学结果。
+          \(m(x)\) 的存在纯粹为了数值稳定（减最大值再 \(\exp\)），不改变最终数学结果。
           在假想的高精度硬件上，甚至可以省略——但在 FP16/BF16 的 GPU 上必不可少。
         </div>
 
         <h2>五、前向 Pass 算法：嵌套循环 + 分块</h2>
         <p>
           下面用单 head、batch=1、忽略 mask/dropout 的简化版说明。
-          记 B_r 为 Q 的行块大小，B_c 为 K/V 的列块大小，d 为 head 维度。
+          记 \(B_r\) 为 \(Q\) 的行块大小，\(B_c\) 为 \(K/V\) 的列块大小，\(d\) 为 head 维度。
         </p>
 
-        <figure class="diagram-figure">
-          <svg viewBox="0 0 720 340" role="img" aria-label="FlashAttention 分块嵌套循环">
+        <figure class="diagram-figure diagram-figure--wide">
+          <svg viewBox="0 0 840 420" role="img" aria-label="FlashAttention 分块嵌套循环">
             <defs>
-              <marker id="arrowhead-tile" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
-                <polygon points="0 0, 8 3, 0 6" class="d-accent" />
+              <marker id="arrowhead-tile" markerWidth="7" markerHeight="7" refX="5" refY="3" orient="auto">
+                <polygon points="0 0, 7 3, 0 6" fill="var(--accent)" />
               </marker>
             </defs>
-            <text x="360" y="28" text-anchor="middle" class="d-label">Q 按行分块 · K/V 按列分块</text>
 
-            <rect x="80" y="50" width="200" height="160" rx="6" class="d-box" />
-            <text x="180" y="75" text-anchor="middle" class="d-muted">Q (N×d)</text>
-            <rect x="95" y="85" width="170" height="35" rx="4" fill="color-mix(in srgb, var(--accent) 25%, transparent)" stroke="var(--accent)" />
-            <text x="180" y="107" text-anchor="middle" class="d-label">Q_i</text>
-            <rect x="95" y="125" width="170" height="35" rx="4" class="d-box" />
-            <rect x="95" y="165" width="170" height="35" rx="4" class="d-box" />
+            <!-- SRAM zone -->
+            <rect x="24" y="18" width="792" height="248" rx="14" class="d-zone" />
+            <text x="44" y="42" class="d-tag">SRAM · 片上计算区</text>
 
-            <rect x="320" y="50" width="160" height="160" rx="6" class="d-box" />
-            <text x="400" y="75" text-anchor="middle" class="d-muted">K^T (d×N)</text>
-            <rect x="335" y="85" width="35" height="110" rx="4" class="d-box" />
-            <rect x="375" y="85" width="35" height="110" rx="4" fill="color-mix(in srgb, var(--accent) 25%, transparent)" stroke="var(--accent)" />
-            <text x="392" y="200" text-anchor="middle" class="d-muted">K_j</text>
-            <rect x="415" y="85" width="35" height="110" rx="4" class="d-box" />
+            <!-- Q matrix -->
+            <text x="108" y="72" text-anchor="middle" class="d-title">Q</text>
+            <text x="108" y="88" text-anchor="middle" class="d-dim">N × d</text>
+            <rect x="48" y="96" width="120" height="144" rx="8" class="d-box" />
+            <rect x="56" y="104" width="104" height="30" rx="4" class="d-cell-active" />
+            <text x="108" y="124" text-anchor="middle" class="d-label">Q_i</text>
+            <rect x="56" y="138" width="104" height="30" rx="4" class="d-cell" />
+            <rect x="56" y="172" width="104" height="30" rx="4" class="d-cell" />
+            <rect x="56" y="206" width="104" height="30" rx="4" class="d-cell" />
+            <text x="108" y="252" text-anchor="middle" class="d-muted">按行分块 · B_r 行</text>
 
-            <rect x="520" y="50" width="120" height="160" rx="6" class="d-box" />
-            <text x="580" y="75" text-anchor="middle" class="d-muted">S_ij</text>
-            <text x="580" y="130" text-anchor="middle" class="d-label">B_r × B_c</text>
-            <text x="580" y="155" text-anchor="middle" class="d-muted">仅片上</text>
+            <!-- multiply -->
+            <circle cx="248" cy="168" r="22" class="d-op-circle" />
+            <text x="248" y="174" text-anchor="middle" class="d-title">×</text>
 
-            <path d="M280 130 L315 130" class="d-arrow" marker-end="url(#arrowhead-tile)" />
-            <path d="M480 130 L515 130" class="d-arrow" marker-end="url(#arrowhead-tile)" />
+            <!-- K^T matrix -->
+            <text x="392" y="72" text-anchor="middle" class="d-title">Kᵀ</text>
+            <text x="392" y="88" text-anchor="middle" class="d-dim">d × N</text>
+            <rect x="300" y="96" width="184" height="144" rx="8" class="d-box" />
+            <rect x="308" y="104" width="36" height="128" rx="4" class="d-cell" />
+            <rect x="348" y="104" width="36" height="128" rx="4" class="d-cell-active" />
+            <text x="366" y="248" text-anchor="middle" class="d-label">K_j</text>
+            <rect x="388" y="104" width="36" height="128" rx="4" class="d-cell" />
+            <rect x="428" y="104" width="36" height="128" rx="4" class="d-cell" />
+            <text x="392" y="252" text-anchor="middle" class="d-muted">按列分块 · B_c 列</text>
 
-            <text x="360" y="240" text-anchor="middle" class="d-label">外层循环 j：遍历 K/V 列块</text>
-            <text x="360" y="265" text-anchor="middle" class="d-label">内层循环 i：遍历 Q 行块</text>
-            <text x="360" y="300" text-anchor="middle" class="d-muted">每轮：Load K_j,V_j → Load Q_i,O_i,m_i,l_i → S_ij=Q_i K_j^T → update m,l,O → 写回统计量</text>
+            <!-- equals arrow -->
+            <path d="M500 168 L528 168" class="d-arrow" marker-end="url(#arrowhead-tile)" />
+
+            <!-- S_ij result -->
+            <rect x="548" y="118" width="100" height="100" rx="10" class="d-result" />
+            <text x="598" y="152" text-anchor="middle" class="d-title">S_ij</text>
+            <text x="598" y="172" text-anchor="middle" class="d-dim">B_r × B_c</text>
+            <text x="598" y="198" text-anchor="middle" class="d-tag">永不完整落 HBM</text>
+
+            <!-- V note -->
+            <rect x="688" y="118" width="108" height="100" rx="8" class="d-box" />
+            <text x="742" y="152" text-anchor="middle" class="d-title">V_j</text>
+            <text x="742" y="172" text-anchor="middle" class="d-dim">同列块</text>
+            <text x="742" y="198" text-anchor="middle" class="d-muted">与 K_j 同步加载</text>
+
+            <!-- loop flow -->
+            <text x="420" y="296" text-anchor="middle" class="d-title">每轮迭代流水线</text>
+
+            <rect x="40" y="312" width="148" height="56" rx="8" class="d-flow-box-active" />
+            <text x="114" y="336" text-anchor="middle" class="d-label">外层 for j</text>
+            <text x="114" y="354" text-anchor="middle" class="d-muted">Load K_j, V_j</text>
+
+            <path d="M192 340 L214 340" class="d-flow-arrow" marker-end="url(#arrowhead-tile)" />
+
+            <rect x="218" y="312" width="148" height="56" rx="8" class="d-flow-box-active" />
+            <text x="292" y="336" text-anchor="middle" class="d-label">内层 for i</text>
+            <text x="292" y="354" text-anchor="middle" class="d-muted">Load Q_i, O_i, m_i, l_i</text>
+
+            <path d="M370 340 L392 340" class="d-flow-arrow" marker-end="url(#arrowhead-tile)" />
+
+            <rect x="396" y="312" width="148" height="56" rx="8" class="d-flow-box" />
+            <text x="470" y="336" text-anchor="middle" class="d-label">MatMul</text>
+            <text x="470" y="354" text-anchor="middle" class="d-muted">S_ij = Q_i K_jᵀ</text>
+
+            <path d="M548 340 L570 340" class="d-flow-arrow" marker-end="url(#arrowhead-tile)" />
+
+            <rect x="574" y="312" width="148" height="56" rx="8" class="d-flow-box" />
+            <text x="648" y="336" text-anchor="middle" class="d-label">Online Softmax</text>
+            <text x="648" y="354" text-anchor="middle" class="d-muted">update m, l, O</text>
+
+            <path d="M726 340 L748 340" class="d-flow-arrow" marker-end="url(#arrowhead-tile)" />
+
+            <rect x="752" y="312" width="64" height="56" rx="8" class="d-flow-box" />
+            <text x="784" y="344" text-anchor="middle" class="d-label">写回</text>
           </svg>
-          <figcaption>分块 MatMul：S 矩阵永远只有 B_r×B_c 大小在 SRAM 中，而非完整 N×N。</figcaption>
+          <figcaption>
+            分块 MatMul：每次只在 SRAM 中持有 \(B_r \times B_c\) 大小的 \(S_{ij}\)，而非完整 \(N \times N\) 矩阵。
+            绿色高亮块对应当前 (i, j) 迭代正在处理的 tile。
+          </figcaption>
         </figure>
 
         <p>算法步骤概览：</p>
 
-        <pre><code>1. 在 HBM 中分配 Q, K, V, O；额外分配 softmax 统计量 m, l（各 N 维）
-2. 按 SRAM 容量计算块大小 B_r, B_c（约 ∝ M/4d，M 为 SRAM 容量）
-3. 初始化 O=0，l=0，m=-∞
-4. 外层 for j：加载 K_j, V_j 到 SRAM
-5.   内层 for i：加载 Q_i, O_i, m_i, l_i 到 SRAM
-6.     S_ij = Q_i @ K_j^T                    # 片上 B_r×B_c
-7.     计算 block 内 m̃, l̃, P̃
-8.     用 online softmax 公式更新 m_new, l_new, O_i
-9.     写回 m_i, l_i, O_i
-10. 循环结束 → O 即为最终 attention 输出</code></pre>
+        <ol class="algo-steps">
+          <li class="algo-step">
+            <span class="algo-step-num">1</span>
+            <div class="algo-step-body">
+              <strong>分配 HBM 缓冲区</strong>
+              <p>分配 Q、K、V、O（各 N×d），以及 softmax 统计量 m、l（各 N 维）。</p>
+            </div>
+          </li>
+          <li class="algo-step">
+            <span class="algo-step-num">2</span>
+            <div class="algo-step-body">
+              <strong>计算块大小</strong>
+              <p>按 SRAM 容量 M 确定 B_r、B_c，典型量级约 M/4d，确保 Q_i、K_j、V_j、O_i 能同时驻留片上。</p>
+            </div>
+          </li>
+          <li class="algo-step">
+            <span class="algo-step-num">3</span>
+            <div class="algo-step-body">
+              <strong>初始化</strong>
+              <p><code>O = 0</code>，<code>l = 0</code>，<code>m = −∞</code>（m 取 −∞ 以便后续 max 更新）。</p>
+            </div>
+          </li>
+          <li class="algo-step">
+            <span class="algo-step-num">4</span>
+            <div class="algo-step-body">
+              <strong>外层循环 j</strong>
+              <p>从 HBM 加载 K_j、V_j 到 SRAM，固定当前 key/value 列块。</p>
+            </div>
+          </li>
+          <li class="algo-step">
+            <span class="algo-step-num">5</span>
+            <div class="algo-step-body">
+              <strong>内层循环 i</strong>
+              <p>加载 Q_i、O_i、m_i、l_i 到 SRAM，与当前 K_j 块配对计算。</p>
+            </div>
+          </li>
+          <li class="algo-step">
+            <span class="algo-step-num">6</span>
+            <div class="algo-step-body">
+              <strong>片上 MatMul</strong>
+              <p><code>S_ij = Q_i @ K_jᵀ</code>，结果大小 B_r×B_c，仅在 SRAM 中存在。</p>
+            </div>
+          </li>
+          <li class="algo-step">
+            <span class="algo-step-num">7</span>
+            <div class="algo-step-body">
+              <strong>块内统计量</strong>
+              <p>在当前块内计算 \(\tilde{m}\)、\(\tilde{\ell}\)、\(\tilde{P}\)（局部 softmax 中间量）。</p>
+            </div>
+          </li>
+          <li class="algo-step algo-step--core">
+            <span class="algo-step-num">8</span>
+            <div class="algo-step-body">
+              <strong>Online Softmax 更新（核心）</strong>
+              <p>用 \(m_{\text{new}}\)、\(\ell_{\text{new}}\) 公式合并历史与当前块，同步 rescale \(O_i\) 并累加 \(\tilde{P} \cdot V_j\) 的贡献。</p>
+            </div>
+          </li>
+          <li class="algo-step">
+            <span class="algo-step-num">9</span>
+            <div class="algo-step-body">
+              <strong>写回 HBM</strong>
+              <p>将更新后的 \(m_i\)、\(\ell_i\)、\(O_i\) 写回 HBM（维度分别为 \(B_r\) 和 \(B_r \times d\)）。</p>
+            </div>
+          </li>
+          <li class="algo-step">
+            <span class="algo-step-num">10</span>
+            <div class="algo-step-body">
+              <strong>输出</strong>
+              <p>双层循环结束后，O 即为最终 attention 输出，全程未物化完整 N×N 矩阵。</p>
+            </div>
+          </li>
+        </ol>
 
         <p>
           第 8 步是整个算法的心脏：它同时 rescale 之前累积的 O_i，并把当前 block 的贡献加进去。
-          那些 e<sup>m−m_new</sup> 因子看起来复杂，本质是在「取消旧归一化、应用新归一化」——
+          那些 \(e^{m - m_{\text{new}}}\) 因子看起来复杂，本质是在「取消旧归一化、应用新归一化」——
           手算两三个 block 的 toy example，5 分钟就能建立直觉（Medium 原文 Aleksa Gordić 的 walkthrough 非常推荐）。
         </p>
 
@@ -622,6 +761,15 @@ O = PV            # (N × d) 输出</code></pre>
     </span>
   </footer>
 
-  <script src="../../app.js?v=36"></script>
+  <script src="../../app.js?v=37"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" crossorigin="anonymous"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js" crossorigin="anonymous"
+    onload="renderMathInElement(document.body, {
+      delimiters: [
+        {left: '\\[', right: '\\]', display: true},
+        {left: '\\(', right: '\\)', display: false}
+      ],
+      throwOnError: false
+    });"></script>
 </body>
 </html>

@@ -1,4 +1,4 @@
-# Publish to https://xiaomofang.github.io/myblog-codes
+# Publish to https://xiaomofang.github.io
 $ErrorActionPreference = "Stop"
 
 $gh = "C:\Program Files\GitHub CLI\gh.exe"
@@ -44,4 +44,4 @@ if (-not $remote) {
 }
 
 Write-Host ""
-Write-Host "Published → https://xiaomofang.github.io/myblog-codes" -ForegroundColor Green
+Write-Host "Published → https://xiaomofang.github.io" -ForegroundColor Green
