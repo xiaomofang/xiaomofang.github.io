@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="robots" content="noindex, nofollow" />
   <title>夏日计划卡 · 2026.7.13 – 8.23</title>
   <style>
     :root {
@@ -469,10 +470,8 @@
 <div class="toolbar">
   <div class="toolbar-inner">
     <div class="toolbar-group">
-      <a class="btn" href="../index.html" style="text-decoration:none">← 博客</a>
-      <button class="btn btn-primary" id="btn-save">保存到文件</button>
-      <button class="btn" id="btn-open">打开文件</button>
       <span class="save-status" id="save-status">就绪</span>
+      <button class="btn" id="btn-export" title="可选：导出 JSON 备份">导出备份</button>
     </div>
     <div class="week-tabs" id="week-tabs"></div>
     <div class="toolbar-group">
@@ -515,7 +514,7 @@
 </main>
 
 <footer class="footer">
-  编辑后点击 <em>保存到文件</em> · 上方打卡记录生活，下方对照学科日计划执行
+  修改后自动保存到本浏览器 · 换设备或清缓存前可点 <em>导出备份</em>
 </footer>
 
 <script type="application/json" id="planner-data">{
@@ -966,15 +965,32 @@ function showStudyWeek(wi) {
   document.querySelectorAll(".study-week-tab").forEach((t, i) => t.classList.toggle("active", i === wi));
 }
 
-let state = loadEmbedded();
-let dirty = false;
-let fileHandle = null;
+const STORAGE_KEY = "summer-planner-2026-v2";
+
+let state = loadState();
+let saveTimer = null;
 let activeWeek = 0;
 
 function defaultDay() {
   const d = {};
   CATEGORIES.forEach(c => { d[c.key] = { text: "", done: false }; });
   return d;
+}
+
+function normalizeState(raw) {
+  if (raw.days && !raw.days["2026-07-13"]?.study) migrateOld(raw);
+  if (!raw.weeks) raw.weeks = {};
+  return raw;
+}
+
+function loadState() {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) return normalizeState(JSON.parse(saved));
+  } catch (_) {}
+  const raw = loadEmbedded();
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(raw)); } catch (_) {}
+  return raw;
 }
 
 function loadEmbedded() {
@@ -1042,17 +1058,33 @@ function migrateOld(raw) {
 }
 
 function markDirty() {
-  dirty = true;
   const s = document.getElementById("save-status");
-  s.textContent = "未保存";
+  s.textContent = "保存中…";
   s.className = "save-status dirty";
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      markSaved();
+    } catch (_) {
+      s.textContent = "无法保存（浏览器限制）";
+      s.className = "save-status dirty";
+    }
+  }, 350);
 }
 
-function markSaved(name) {
-  dirty = false;
+function markSaved() {
   const s = document.getElementById("save-status");
-  s.textContent = name ? `已保存 · ${name}` : "已保存";
+  s.textContent = "已自动保存";
   s.className = "save-status saved";
+}
+
+function exportBackup() {
+  const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `夏日计划备份_${new Date().toISOString().slice(0, 10)}.json`;
+  a.click();
 }
 
 function dateKey(d) {
@@ -1113,67 +1145,6 @@ function esc(s) {
   const d = document.createElement("div");
   d.textContent = s || "";
   return d.innerHTML;
-}
-
-function buildHTML() {
-  const dataJson = JSON.stringify(state);
-  const raw = document.documentElement.outerHTML;
-  return raw.replace(
-    /<script type="application\/json" id="planner-data">[\s\S]*?<\/script>/,
-    `<script type="application/json" id="planner-data">${dataJson}<\/script>`
-  );
-}
-
-async function saveToFile() {
-  const html = "<!DOCTYPE html>\n" + buildHTML();
-  const blob = new Blob([html], { type: "text/html;charset=utf-8" });
-  if (fileHandle?.createWritable) {
-    try {
-      const w = await fileHandle.createWritable();
-      await w.write(blob); await w.close();
-      markSaved(fileHandle.name); return;
-    } catch (_) { fileHandle = null; }
-  }
-  if ("showSaveFilePicker" in window) {
-    try {
-      const h = await window.showSaveFilePicker({
-        suggestedName: "夏日计划卡.html",
-        types: [{ description: "HTML", accept: { "text/html": [".html"] } }],
-      });
-      const w = await h.createWritable();
-      await w.write(blob); await w.close();
-      fileHandle = h; markSaved(h.name); return;
-    } catch (e) { if (e.name === "AbortError") return; }
-  }
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = "夏日计划卡.html";
-  a.click();
-  markSaved("已下载");
-}
-
-async function openFile() {
-  if (!("showOpenFilePicker" in window)) {
-    alert("请使用 Chrome / Edge 打开并保存文件");
-    return;
-  }
-  try {
-    const [h] = await window.showOpenFilePicker({
-      types: [{ description: "HTML", accept: { "text/html": [".html"] } }],
-    });
-    const text = await h.getFile().then(f => f.text());
-    const m = text.match(/<script type="application\/json" id="planner-data">([\s\S]*?)<\/script>/);
-    if (!m) { alert("未找到数据"); return; }
-    try {
-      state = JSON.parse(m[1]);
-    } catch (_) {
-      state = JSON.parse(repairPlannerJson(m[1]));
-    }
-    fileHandle = h;
-    dirty = false;
-    renderAll();
-    markSaved(h.name);
-  } catch (e) { if (e.name !== "AbortError") alert("打开失败"); }
 }
 
 function updatePreview(card, key) {
@@ -1395,16 +1366,15 @@ function jumpToday() {
   setTimeout(() => document.getElementById(`day-${key}`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 80);
 }
 
-document.getElementById("btn-save").addEventListener("click", saveToFile);
-document.getElementById("btn-open").addEventListener("click", openFile);
+document.getElementById("btn-export").addEventListener("click", exportBackup);
 document.getElementById("btn-print").addEventListener("click", () => window.print());
 document.getElementById("btn-today").addEventListener("click", jumpToday);
 document.getElementById("btn-study").addEventListener("click", () => {
   document.getElementById("study-plan").scrollIntoView({ behavior: "smooth", block: "start" });
 });
-window.addEventListener("beforeunload", e => { if (dirty) { e.preventDefault(); e.returnValue = ""; } });
 
 renderAll();
+markSaved();
 </script>
 </body>
 </html>
