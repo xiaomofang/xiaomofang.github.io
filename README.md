@@ -77,6 +77,7 @@ git push
 - `posts/reinforcement-learning/`：Reinforcement Learning，强化学习与对齐
 - `posts/training/`：Training，训练系统
 - `posts/hardware-kernels/`：Hardware & Kernels，硬件与算子
+- `tools/`：在线小工具（如夏日计划卡）
 
 发文步骤：
 

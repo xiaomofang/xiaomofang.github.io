@@ -1,0 +1,1410 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>夏日计划卡 · 2026.7.13 – 8.23</title>
+  <style>
+    :root {
+      --bg: #eef6f7;
+      --surface: #ffffff;
+      --ink: #1a2e35;
+      --ink-soft: #4a6570;
+      --ink-faint: #8aa3ad;
+      --teal: #0d9488;
+      --teal-light: #5eead4;
+      --teal-pale: #ccfbf1;
+      --sea: #0891b2;
+      --sea-pale: #e0f7fa;
+      --border: #d6e4e8;
+      --border-soft: #e8f0f2;
+      --radius: 14px;
+      --card-radius: 12px;
+      --max: 1120px;
+      --sans: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: var(--sans);
+      background: var(--bg);
+      color: var(--ink);
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    /* Header */
+    .header {
+      background: linear-gradient(160deg, #0f766e 0%, #0891b2 55%, #06b6d4 100%);
+      color: #fff;
+      padding: 28px 24px 32px;
+      text-align: center;
+    }
+    .header h1 { font-size: 1.65rem; font-weight: 700; letter-spacing: 0.02em; }
+    .header p { opacity: 0.88; font-size: 0.88rem; margin-top: 6px; }
+    .header-stats {
+      display: flex; justify-content: center; flex-wrap: wrap; gap: 16px;
+      margin-top: 16px; font-size: 0.82rem;
+    }
+    .header-stats b { font-size: 1.05rem; }
+
+    /* Toolbar */
+    .toolbar {
+      position: sticky; top: 0; z-index: 50;
+      background: rgba(255,255,255,0.94);
+      backdrop-filter: blur(10px);
+      border-bottom: 1px solid var(--border);
+      padding: 8px 16px;
+    }
+    .toolbar-inner {
+      max-width: var(--max); margin: 0 auto;
+      display: flex; flex-wrap: wrap; align-items: center; gap: 8px; justify-content: space-between;
+    }
+    .toolbar-group { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+
+    .btn {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 6px 12px;
+      font-size: 0.78rem;
+      font-weight: 500;
+      cursor: pointer;
+      font-family: inherit;
+      background: var(--surface);
+      color: var(--ink-soft);
+      transition: all 0.15s;
+    }
+    .btn:hover { border-color: var(--teal); color: var(--teal); }
+    .btn-primary { background: var(--teal); border-color: var(--teal); color: #fff; }
+    .btn-primary:hover { background: #0f766e; color: #fff; }
+
+    .save-status { font-size: 0.72rem; color: var(--ink-faint); }
+    .save-status.dirty { color: #b45309; }
+    .save-status.saved { color: var(--teal); }
+
+    .week-tabs { display: flex; gap: 4px; flex-wrap: wrap; }
+    .week-tab {
+      border: none; border-radius: 8px;
+      padding: 6px 14px;
+      font-size: 0.78rem; font-weight: 600;
+      cursor: pointer; font-family: inherit;
+      background: #f0f9fa; color: var(--ink-faint);
+      transition: all 0.15s;
+    }
+    .week-tab:hover { background: var(--sea-pale); color: var(--sea); }
+    .week-tab.active { background: var(--teal); color: #fff; }
+
+    /* Main */
+    .main { max-width: var(--max); margin: 0 auto; padding: 20px 16px 60px; }
+
+    /* Heatmap mini */
+    .overview {
+      background: var(--surface);
+      border: 1px solid var(--border-soft);
+      border-radius: var(--radius);
+      padding: 14px 18px;
+      margin-bottom: 18px;
+    }
+    .overview-title { font-size: 0.68rem; letter-spacing: 0.08em; color: var(--ink-faint); font-weight: 600; margin-bottom: 10px; }
+    .heatmap { display: flex; flex-wrap: wrap; gap: 3px; }
+    .heat {
+      width: 22px; height: 22px; border-radius: 4px;
+      font-size: 0.55rem; font-weight: 700;
+      display: flex; align-items: center; justify-content: center;
+      cursor: pointer; border: 2px solid transparent;
+    }
+    .heat:hover { transform: scale(1.15); }
+    .heat.today { border-color: var(--teal); }
+    .heat.in-week { outline: 1px dashed var(--teal-light); }
+    .h0 { background: #e8f0f2; color: #a0b4bc; }
+    .h1 { background: #b2f0e8; color: #0f766e; }
+    .h2 { background: #5eead4; color: #115e59; }
+    .h3 { background: #2dd4bf; color: #fff; }
+    .h4 { background: #0d9488; color: #fff; }
+
+    /* Week panel */
+    .week-panel { display: none; animation: fade 0.25s ease; }
+    .week-panel.active { display: block; }
+    @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+
+    /* Weekly overview card */
+    .week-overview {
+      background: var(--surface);
+      border: 1px solid var(--border-soft);
+      border-radius: var(--radius);
+      padding: 18px 20px;
+      margin-bottom: 16px;
+      border-left: 4px solid var(--teal);
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+    @media (max-width: 640px) { .week-overview { grid-template-columns: 1fr; } }
+
+    .overview-field label {
+      display: block;
+      font-size: 0.68rem;
+      letter-spacing: 0.06em;
+      color: var(--teal);
+      font-weight: 700;
+      margin-bottom: 6px;
+      text-transform: uppercase;
+    }
+    .overview-field input,
+    .overview-field textarea {
+      width: 100%;
+      border: 1px solid var(--border-soft);
+      border-radius: 8px;
+      padding: 8px 10px;
+      font-family: inherit;
+      font-size: 0.88rem;
+      color: var(--ink);
+      background: #fafcfc;
+      transition: border-color 0.2s;
+    }
+    .overview-field input:focus,
+    .overview-field textarea:focus { outline: none; border-color: var(--teal-light); background: #fff; }
+    .overview-field textarea { resize: vertical; min-height: 56px; line-height: 1.5; }
+    .overview-field input::placeholder,
+    .overview-field textarea::placeholder { color: #c5d5da; }
+
+    .week-range {
+      grid-column: 1 / -1;
+      font-size: 0.78rem;
+      color: var(--ink-faint);
+      padding-bottom: 4px;
+      border-bottom: 1px solid var(--border-soft);
+      margin-bottom: -4px;
+    }
+    .week-range strong { color: var(--ink-soft); }
+
+    /* Day cards grid */
+    .cards-grid {
+      display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      gap: 10px;
+    }
+    @media (max-width: 1000px) { .cards-grid { grid-template-columns: repeat(4, 1fr); } }
+    @media (max-width: 640px)  { .cards-grid { grid-template-columns: repeat(2, 1fr); } }
+    @media (max-width: 400px)  { .cards-grid { grid-template-columns: 1fr; } }
+
+    /* Day card */
+    .day-card {
+      background: var(--surface);
+      border: 1px solid var(--border-soft);
+      border-radius: var(--card-radius);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      transition: box-shadow 0.2s, border-color 0.2s;
+    }
+    .day-card:hover { box-shadow: 0 4px 16px rgba(8,145,178,0.08); }
+    .day-card.is-today { border-color: var(--teal); box-shadow: 0 0 0 2px var(--teal-pale); }
+    .day-card.is-weekend .card-head { background: #f6fbfb; }
+
+    .card-head {
+      padding: 8px 10px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--border-soft);
+      background: #fafcfc;
+    }
+    .card-date { font-weight: 700; font-size: 0.92rem; color: var(--ink); }
+    .card-weekday { font-size: 0.68rem; color: var(--ink-faint); }
+    .card-dots { display: flex; gap: 3px; }
+    .dot {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: var(--border);
+    }
+    .dot.on { background: var(--teal); }
+
+    .card-body { padding: 6px 8px 8px; flex: 1; }
+
+    /* Category row */
+    .cat-row {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      margin-bottom: 4px;
+      padding: 3px 5px;
+      border-radius: 6px;
+      transition: background 0.15s;
+    }
+    .cat-row:last-child { margin-bottom: 0; }
+    .cat-row.done { opacity: 0.72; }
+    .cat-row.done .cat-input { text-decoration: line-through; color: var(--ink-faint); }
+
+    .cat-icon {
+      width: 18px; text-align: center;
+      font-size: 0.72rem; flex-shrink: 0;
+    }
+    .cat-input {
+      flex: 1;
+      border: none;
+      border-bottom: 1px solid transparent;
+      padding: 2px 0;
+      font-family: inherit;
+      font-size: 0.72rem;
+      background: transparent;
+      color: var(--ink);
+      min-width: 0;
+    }
+    .cat-input:focus {
+      outline: none;
+      border-bottom-color: var(--cat-color, var(--teal));
+    }
+    .cat-input::placeholder { color: #d1dde2; font-size: 0.68rem; }
+
+    .cat-check {
+      width: 14px; height: 14px;
+      accent-color: var(--cat-color, var(--teal));
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+
+    /* Card preview strip (filled summary) */
+    .card-preview {
+      padding: 4px 8px 6px;
+      border-top: 1px dashed var(--border-soft);
+      font-size: 0.62rem;
+      color: var(--ink-faint);
+      line-height: 1.4;
+      min-height: 18px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .card-preview.has-content { color: var(--teal); }
+
+    /* Legend */
+    .legend {
+      display: flex; flex-wrap: wrap; gap: 10px;
+      margin-top: 14px; font-size: 0.72rem; color: var(--ink-faint);
+    }
+    .legend-item { display: flex; align-items: center; gap: 4px; }
+    .legend-dot { width: 8px; height: 8px; border-radius: 50%; }
+
+    .footer {
+      text-align: center; padding: 24px;
+      font-size: 0.75rem; color: var(--ink-faint);
+      max-width: var(--max); margin: 0 auto;
+    }
+    .footer em { color: var(--teal); font-style: normal; }
+
+    /* ── Study plan section ── */
+    .section-divider {
+      margin: 48px 0 28px;
+      padding-top: 32px;
+      border-top: 2px solid var(--border);
+    }
+    .study-header {
+      background: linear-gradient(160deg, #1e3a5f 0%, #0e7490 100%);
+      color: #fff;
+      border-radius: var(--radius);
+      padding: 22px 24px;
+      margin-bottom: 18px;
+    }
+    .study-header h2 { font-size: 1.25rem; font-weight: 700; margin-bottom: 6px; }
+    .study-header p { font-size: 0.82rem; opacity: 0.9; line-height: 1.6; }
+    .study-goals {
+      display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px;
+    }
+    .study-goal-pill {
+      background: rgba(255,255,255,0.15);
+      border: 1px solid rgba(255,255,255,0.25);
+      border-radius: 8px;
+      padding: 5px 12px;
+      font-size: 0.75rem;
+    }
+
+    .study-week-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 16px; }
+    .study-week-tab {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 7px 14px;
+      font-size: 0.78rem;
+      font-weight: 600;
+      cursor: pointer;
+      background: var(--surface);
+      color: var(--ink-soft);
+      font-family: inherit;
+      transition: all 0.15s;
+    }
+    .study-week-tab:hover { border-color: var(--sea); color: var(--sea); }
+    .study-week-tab.active { background: #1e3a5f; border-color: #1e3a5f; color: #fff; }
+
+    .study-panel { display: none; }
+    .study-panel.active { display: block; animation: fade 0.25s ease; }
+
+    .study-week-summary {
+      background: var(--surface);
+      border: 1px solid var(--border-soft);
+      border-radius: var(--radius);
+      padding: 16px 18px;
+      margin-bottom: 14px;
+      border-left: 4px solid #1e3a5f;
+    }
+    .study-week-summary h3 {
+      font-size: 0.95rem; color: #1e3a5f; margin-bottom: 10px;
+    }
+    .study-week-summary .theme-tag {
+      display: inline-block;
+      background: var(--sea-pale);
+      color: var(--sea);
+      font-size: 0.72rem;
+      font-weight: 600;
+      padding: 3px 10px;
+      border-radius: 6px;
+      margin-bottom: 12px;
+    }
+    .subject-summary-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 8px;
+    }
+    @media (max-width: 800px) { .subject-summary-grid { grid-template-columns: repeat(2, 1fr); } }
+    .subject-summary {
+      background: #fafcfc;
+      border: 1px solid var(--border-soft);
+      border-radius: 8px;
+      padding: 10px 12px;
+      border-top: 3px solid var(--sub-color);
+    }
+    .subject-summary .sub-name {
+      font-size: 0.72rem; font-weight: 700; color: var(--sub-color); margin-bottom: 4px;
+    }
+    .subject-summary .sub-focus {
+      font-size: 0.72rem; color: var(--ink-soft); line-height: 1.45;
+    }
+    .subject-summary .sub-time {
+      font-size: 0.65rem; color: var(--ink-faint); margin-top: 4px;
+    }
+
+    .study-daily-list { display: flex; flex-direction: column; gap: 8px; }
+    .study-day-card {
+      background: var(--surface);
+      border: 1px solid var(--border-soft);
+      border-radius: var(--card-radius);
+      overflow: hidden;
+    }
+    .study-day-card.is-rest { opacity: 0.92; border-style: dashed; }
+    .study-day-card.is-review { border-left: 3px solid #f59e0b; }
+    .study-day-head {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 8px 14px;
+      background: #f8fafb;
+      border-bottom: 1px solid var(--border-soft);
+      font-size: 0.78rem;
+    }
+    .study-day-head .day-num { font-weight: 700; color: var(--ink); }
+    .study-day-head .day-date { color: var(--ink-faint); }
+    .study-day-head .day-hours {
+      font-weight: 700; color: #1e3a5f;
+      background: #e0f2fe; padding: 2px 10px; border-radius: 999px; font-size: 0.72rem;
+    }
+    .study-day-head .day-tag {
+      font-size: 0.65rem; color: #b45309; font-weight: 600;
+    }
+    .study-subject-rows { padding: 6px 10px 8px; }
+    .study-sub-row {
+      display: grid;
+      grid-template-columns: 72px 52px 1fr;
+      gap: 8px;
+      align-items: start;
+      padding: 5px 4px;
+      border-bottom: 1px solid #f0f4f5;
+      font-size: 0.75rem;
+    }
+    .study-sub-row:last-child { border-bottom: none; }
+    @media (max-width: 500px) {
+      .study-sub-row { grid-template-columns: 60px 46px 1fr; }
+    }
+    .study-sub-row .s-name {
+      font-weight: 700;
+      color: var(--sub-color);
+      padding-top: 1px;
+    }
+    .study-sub-row .s-dur {
+      color: var(--ink-faint);
+      font-size: 0.68rem;
+      white-space: nowrap;
+    }
+    .study-sub-row .s-focus { color: var(--ink-soft); line-height: 1.45; }
+    .study-sub-row.evening .s-name { color: #64748b; }
+
+    .daily-schedule-hint {
+      background: var(--sea-pale);
+      border-radius: 8px;
+      padding: 10px 14px;
+      font-size: 0.72rem;
+      color: var(--ink-soft);
+      margin-bottom: 14px;
+      line-height: 1.55;
+    }
+    .daily-schedule-hint strong { color: var(--sea); }
+
+    @media print {
+      .toolbar, .overview { display: none !important; }
+      .week-panel, .study-panel { display: block !important; page-break-after: always; }
+      .day-card, .study-day-card { break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+
+<header class="header">
+  <h1>夏日计划卡</h1>
+  <p>2026.07.13 — 08.23 · 学习 · 运动 · 游戏 · 美食 · 博物馆 · 其他</p>
+  <div class="header-stats">
+    <span>共 <b>42</b> 天</span>
+    <span>已完成 <b id="stat-done">0</b> 项</span>
+    <span>本周 <b id="stat-week">0</b> 项</span>
+  </div>
+</header>
+
+<div class="toolbar">
+  <div class="toolbar-inner">
+    <div class="toolbar-group">
+      <a class="btn" href="../index.html" style="text-decoration:none">← 博客</a>
+      <button class="btn btn-primary" id="btn-save">保存到文件</button>
+      <button class="btn" id="btn-open">打开文件</button>
+      <span class="save-status" id="save-status">就绪</span>
+    </div>
+    <div class="week-tabs" id="week-tabs"></div>
+    <div class="toolbar-group">
+      <button class="btn" id="btn-today">今天</button>
+      <button class="btn" id="btn-study">学习计划</button>
+      <button class="btn" id="btn-print">打印</button>
+    </div>
+  </div>
+</div>
+
+<main class="main">
+  <section class="overview">
+    <div class="overview-title">42 天进度 · 点击跳转</div>
+    <div class="heatmap" id="heatmap"></div>
+    <div class="legend" id="legend"></div>
+  </section>
+  <div id="weeks"></div>
+
+  <section class="section-divider" id="study-plan">
+    <div class="study-header">
+      <h2>初三暑假 · 语数英物 35 天学习计划</h2>
+      <p>7月13日 — 8月16日 · 5周 · 目标：暑假末三科卷面 180–200，打牢七年级 + 八上基础</p>
+      <div class="study-goals">
+        <span class="study-goal-pill">数学 90min/天 · 拉分最快</span>
+        <span class="study-goal-pill">英语 60min/天 · 词汇是开关</span>
+        <span class="study-goal-pill">语文 60min/天 · 背了就能拿分</span>
+        <span class="study-goal-pill">物理 60min/天 · 八上是地基</span>
+        <span class="study-goal-pill">错题 30min/晚 · 只记为什么错</span>
+      </div>
+    </div>
+
+    <div class="daily-schedule-hint">
+      <strong>每日时段参考：</strong>上午① 数学 90min → 上午② 英语 60min → 下午① 语文 60min → 下午② 物理 60min → 晚上 错题整理 30min。
+      学习日合计 <strong>5–5.5 小时</strong>；周日为复习日约 3 小时，下午休息。
+    </div>
+
+    <div class="study-week-tabs" id="study-week-tabs"></div>
+    <div id="study-weeks"></div>
+  </section>
+</main>
+
+<footer class="footer">
+  编辑后点击 <em>保存到文件</em> · 上方打卡记录生活，下方对照学科日计划执行
+</footer>
+
+<script type="application/json" id="planner-data">{
+  "weeks": {
+    "0": {
+      "theme": "City 探索",
+      "important": "羽毛球一次、天安门广场、钟鼓楼\n金谷园，潇湘阁\n羽毛球，散步"
+    },
+    "1": {
+      "theme": "学校探索",
+      "important": "清华、北大，国家自然博物馆、中国地质博物馆、国家博物馆\n萨莉亚、必胜客、烤鸭\nswitch，散步，逛街"
+    },
+    "2": {
+      "theme": "博物馆之旅",
+      "important": "植物园、郊外徒步、、天坛公园\n自助餐\n夜骑北京"
+    },
+    "3": {
+      "theme": "郊外探索",
+      "important": "颐和园、圆明园、鸟巢、野生动物园\n散步，逛街"
+    },
+    "4": {
+      "theme": "郊外",
+      "important": "天津/河北"
+    },
+    "5": {
+      "theme": "",
+      "important": ""
+    }
+  },
+  "days": {}
+}</script>
+
+<script>
+const START = new Date(2026, 6, 13);
+const END   = new Date(2026, 7, 23);
+const WEEKDAYS = ["日","一","二","三","四","五","六"];
+
+const CATEGORIES = [
+  { key: "study",   label: "学习",   icon: "📚", color: "#0891b2", placeholder: "学了什么" },
+  { key: "sport",   label: "运动",   icon: "🏃", color: "#10b981", placeholder: "跑了多久" },
+  { key: "game",    label: "游戏",   icon: "🎮", color: "#8b5cf6", placeholder: "玩了什么" },
+  { key: "food",    label: "美食",   icon: "🍜", color: "#f59e0b", placeholder: "尝试的美食" },
+  { key: "museum",  label: "博物馆", icon: "🏛️", color: "#e11d48", placeholder: "打卡地点" },
+  { key: "other",   label: "其他",   icon: "✨", color: "#64748b", placeholder: "其他事项" },
+];
+
+const SUBJECTS = {
+  math:    { name: "数学", color: "#2563eb", dailyMin: 90 },
+  english: { name: "英语", color: "#7c3aed", dailyMin: 60 },
+  chinese: { name: "语文", color: "#dc2626", dailyMin: 60 },
+  physics: { name: "物理", color: "#059669", dailyMin: 60 },
+};
+
+const STUDY_WEEKS = [
+  {
+    week: 1, range: "7/13 – 7/19", theme: "诊断 + 补最短板",
+    summary: {
+      math:    { focus: "七年级综合摸底 → 有理数、整式入门", time: "90min/天" },
+      english: { focus: "词汇量测试 + 七上语法 → 30词/天", time: "60min/天" },
+      chinese: { focus: "古诗默写摸底 → 背诵第1–15首", time: "60min/天" },
+      physics: { focus: "八上第一章小测 → 声现象", time: "60min/天" },
+    },
+    days: [
+      { date: "7/13", weekday: "一", num: 1, hours: 5, tag: "摸底",
+        items: [
+          { sub: "math", dur: "90min", focus: "七年级综合卷 1 套（限时 90 分钟），标出计算/概念/读题类错题" },
+          { sub: "english", dur: "60min", focus: "词汇量测试 + 七年级语法卷 1 套" },
+          { sub: "chinese", dur: "60min", focus: "古诗默写 20 首 + 阅读理解 1 篇" },
+          { sub: "physics", dur: "60min", focus: "八上第一章小测（声现象）" },
+          { sub: "evening", dur: "30min", focus: "错题归类：计算？概念？读题？词汇？" },
+        ]},
+      { date: "7/14", weekday: "二", num: 2, hours: 5, tag: "复盘",
+        items: [
+          { sub: "math", dur: "90min", focus: "昨日数学错题订正 + 七上有理数加减乘除专项" },
+          { sub: "english", dur: "60min", focus: "语法错题回顾 + 背诵 30 个核心词" },
+          { sub: "chinese", dur: "60min", focus: "默写错题重背 + 阅读错题分析" },
+          { sub: "physics", dur: "60min", focus: "物理概念盲区补强 + 课本例题" },
+          { sub: "evening", dur: "30min", focus: "确定最短板科目，制定本周重点" },
+        ]},
+      { date: "7/15", weekday: "三", num: 3, hours: 5,
+        items: [
+          { sub: "math", dur: "90min", focus: "有理数运算强化（《5·3》或《一本》基础题）" },
+          { sub: "english", dur: "60min", focus: "30 词 + 课文朗读 + 一般现在时练习" },
+          { sub: "chinese", dur: "60min", focus: "古诗第 1–5 首背诵 + 默写" },
+          { sub: "physics", dur: "60min", focus: "声现象：声音产生、传播、三要素" },
+          { sub: "evening", dur: "30min", focus: "当日错题整理入错题本" },
+        ]},
+      { date: "7/16", weekday: "四", num: 4, hours: 5,
+        items: [
+          { sub: "math", dur: "90min", focus: "整式加减、同类项合并" },
+          { sub: "english", dur: "60min", focus: "30 词 + 一般现在时句型转换 10 题" },
+          { sub: "chinese", dur: "60min", focus: "古诗第 6–10 首背诵 + 默写" },
+          { sub: "physics", dur: "60min", focus: "声现象计算：速度公式 v=s/t" },
+          { sub: "evening", dur: "30min", focus: "错题订正，标注错误原因" },
+        ]},
+      { date: "7/17", weekday: "五", num: 5, hours: 5,
+        items: [
+          { sub: "math", dur: "90min", focus: "整式乘法入门 + 基础练习" },
+          { sub: "english", dur: "60min", focus: "30 词 + 完形填空 1 篇（七年级难度）" },
+          { sub: "chinese", dur: "60min", focus: "古诗第 11–15 首背诵 + 默写" },
+          { sub: "physics", dur: "60min", focus: "光的直线传播、反射定律" },
+          { sub: "evening", dur: "30min", focus: "错题回炉" },
+        ]},
+      { date: "7/18", weekday: "六", num: 6, hours: 5,
+        items: [
+          { sub: "math", dur: "90min", focus: "本周数学小结卷 1 套（基础题为主）" },
+          { sub: "english", dur: "60min", focus: "30 词 + 阅读 1 篇 + 本周语法回顾" },
+          { sub: "chinese", dur: "60min", focus: "古诗 1–15 首总默写 + 阅读 1 篇" },
+          { sub: "physics", dur: "60min", focus: "声 + 光基础综合练习" },
+          { sub: "evening", dur: "30min", focus: "本周错题过一遍" },
+        ]},
+      { date: "7/19", weekday: "日", num: 7, hours: 3, tag: "周复习", rest: true,
+        items: [
+          { sub: "math", dur: "60min", focus: "本周数学错题回顾 + 有理数易错点" },
+          { sub: "english", dur: "45min", focus: "本周 150 词复习 + 听力 1 套" },
+          { sub: "chinese", dur: "45min", focus: "古诗 1–15 首巩固默写" },
+          { sub: "physics", dur: "30min", focus: "声光概念卡片复习" },
+          { sub: "evening", dur: "—", focus: "下午休息 · 保证睡眠，预防厌学" },
+        ]},
+    ],
+  },
+  {
+    week: 2, range: "7/20 – 7/26", theme: "方程 + 七上英语 + 古诗攻坚",
+    summary: {
+      math:    { focus: "一元一次方程、应用题入门", time: "90min/天" },
+      english: { focus: "七上单词全部 + 一般现在时巩固", time: "60min/天" },
+      chinese: { focus: "古诗第 16–30 首", time: "60min/天" },
+      physics: { focus: "光的折射、透镜成像", time: "60min/天" },
+    },
+    days: [
+      { date: "7/20", weekday: "一", num: 8, hours: 5, items: [
+        { sub: "math", dur: "90min", focus: "一元一次方程：移项、合并" },
+        { sub: "english", dur: "60min", focus: "七上 Unit1–2 单词 30 个 + 语法练习" },
+        { sub: "chinese", dur: "60min", focus: "古诗第 16–20 首" },
+        { sub: "physics", dur: "60min", focus: "光的折射规律" },
+        { sub: "evening", dur: "30min", focus: "错题整理" },
+      ]},
+      { date: "7/21", weekday: "二", num: 9, hours: 5, items: [
+        { sub: "math", dur: "90min", focus: "方程含括号、去分母" },
+        { sub: "english", dur: "60min", focus: "七上 Unit3–4 单词 + 句型转换" },
+        { sub: "chinese", dur: "60min", focus: "古诗第 21–25 首" },
+        { sub: "physics", dur: "60min", focus: "凸透镜成像规律（表格记忆）" },
+        { sub: "evening", dur: "30min", focus: "错题整理" },
+      ]},
+      { date: "7/22", weekday: "三", num: 10, hours: 5, items: [
+        { sub: "math", dur: "90min", focus: "方程应用题：行程、工程各 3 题" },
+        { sub: "english", dur: "60min", focus: "七上 Unit5–6 单词 + 阅读 1 篇" },
+        { sub: "chinese", dur: "60min", focus: "古诗第 26–30 首" },
+        { sub: "physics", dur: "60min", focus: "眼睛与眼镜、显微镜原理" },
+        { sub: "evening", dur: "30min", focus: "错题整理" },
+      ]},
+      { date: "7/23", weekday: "四", num: 11, hours: 5, items: [
+        { sub: "math", dur: "90min", focus: "方程应用题：利润、浓度各 3 题" },
+        { sub: "english", dur: "60min", focus: "七上剩余单词 + 完形 1 篇" },
+        { sub: "chinese", dur: "60min", focus: "古诗 16–30 总复习默写" },
+        { sub: "physics", dur: "60min", focus: "光现象综合练习" },
+        { sub: "evening", dur: "30min", focus: "错题整理" },
+      ]},
+      { date: "7/24", weekday: "五", num: 12, hours: 5, items: [
+        { sub: "math", dur: "90min", focus: "七上代数综合卷 1 套（基础+中档）" },
+        { sub: "english", dur: "60min", focus: "七上语法综合 + 阅读 1 篇" },
+        { sub: "chinese", dur: "60min", focus: "文言文实词 10 个 + 翻译 2 句" },
+        { sub: "physics", dur: "60min", focus: "八上光现象章节卷" },
+        { sub: "evening", dur: "30min", focus: "错题整理" },
+      ]},
+      { date: "7/25", weekday: "六", num: 13, hours: 5, items: [
+        { sub: "math", dur: "90min", focus: "本周错题歼灭 + 方程再练 10 题" },
+        { sub: "english", dur: "60min", focus: "七上单词总测 + 听力 1 套" },
+        { sub: "chinese", dur: "60min", focus: "古诗 1–30 抽查默写 + 阅读 1 篇" },
+        { sub: "physics", dur: "60min", focus: "画光路图专项 5 题" },
+        { sub: "evening", dur: "30min", focus: "本周总结" },
+      ]},
+      { date: "7/26", weekday: "日", num: 14, hours: 3, tag: "周复习", rest: true, items: [
+        { sub: "math", dur: "60min", focus: "方程专题错题回顾" },
+        { sub: "english", dur: "45min", focus: "七上词汇总复习" },
+        { sub: "chinese", dur: "45min", focus: "古诗 1–30 巩固" },
+        { sub: "physics", dur: "30min", focus: "光现象知识清单过一遍" },
+        { sub: "evening", dur: "—", focus: "下午休息" },
+      ]},
+    ],
+  },
+  {
+    week: 3, range: "7/27 – 8/2", theme: "几何入门 + 七下英语 + 古诗收官",
+    summary: {
+      math:    { focus: "平面几何、三角形、全等入门", time: "90min/天" },
+      english: { focus: "七下单词 + 一般过去时", time: "60min/天" },
+      chinese: { focus: "古诗 31–61 首 + 文言文 10 篇", time: "60min/天" },
+      physics: { focus: "物态变化、密度计算", time: "60min/天" },
+    },
+    days: [
+      { date: "7/27", weekday: "一", num: 15, hours: 5, items: [
+        { sub: "math", dur: "90min", focus: "线段、角、平行线性质" },
+        { sub: "english", dur: "60min", focus: "七下 Unit1–2 单词 30 个" },
+        { sub: "chinese", dur: "60min", focus: "古诗第 31–35 首" },
+        { sub: "physics", dur: "60min", focus: "温度、熔化凝固、汽化液化" },
+        { sub: "evening", dur: "30min", focus: "错题整理" },
+      ]},
+      { date: "7/28", weekday: "二", num: 16, hours: 5, items: [
+        { sub: "math", dur: "90min", focus: "三角形内角和、外角定理" },
+        { sub: "english", dur: "60min", focus: "一般过去时规则/不规则动词 20 个" },
+        { sub: "chinese", dur: "60min", focus: "古诗第 36–40 首" },
+        { sub: "physics", dur: "60min", focus: "水的沸腾、蒸发快慢因素" },
+        { sub: "evening", dur: "30min", focus: "错题整理" },
+      ]},
+      { date: "7/29", weekday: "三", num: 17, hours: 5, items: [
+        { sub: "math", dur: "90min", focus: "全等三角形判定（SSS/SAS）" },
+        { sub: "english", dur: "60min", focus: "七下 Unit3–4 单词 + 过去时练习" },
+        { sub: "chinese", dur: "60min", focus: "古诗第 41–45 首" },
+        { sub: "physics", dur: "60min", focus: "密度公式 ρ=m/V 基础计算" },
+        { sub: "evening", dur: "30min", focus: "错题整理" },
+      ]},
+      { date: "7/30", weekday: "四", num: 18, hours: 5, items: [
+        { sub: "math", dur: "90min", focus: "全等三角形判定（ASA/AAS/HL）" },
+        { sub: "english", dur: "60min", focus: "七下 Unit5–6 单词 + 阅读 1 篇" },
+        { sub: "chinese", dur: "60min", focus: "古诗第 46–50 首" },
+        { sub: "physics", dur: "60min", focus: "密度实验题 + 计算 5 题" },
+        { sub: "evening", dur: "30min", focus: "错题整理" },
+      ]},
+      { date: "7/31", weekday: "五", num: 19, hours: 5, items: [
+        { sub: "math", dur: "90min", focus: "几何证明入门（基础 3 题）" },
+        { sub: "english", dur: "60min", focus: "七下剩余单词 + 完形 1 篇" },
+        { sub: "chinese", dur: "60min", focus: "古诗第 51–55 首" },
+        { sub: "physics", dur: "60min", focus: "物态变化综合练习" },
+        { sub: "evening", dur: "30min", focus: "错题整理" },
+      ]},
+      { date: "8/1", weekday: "六", num: 20, hours: 5, items: [
+        { sub: "math", dur: "90min", focus: "七下几何综合卷 1 套" },
+        { sub: "english", dur: "60min", focus: "过去时综合 + 阅读 1 篇" },
+        { sub: "chinese", dur: "60min", focus: "古诗 56–61 首 + 文言文 5 篇" },
+        { sub: "physics", dur: "60min", focus: "热学章节卷" },
+        { sub: "evening", dur: "30min", focus: "本周总结" },
+      ]},
+      { date: "8/2", weekday: "日", num: 21, hours: 3, tag: "周复习", rest: true, items: [
+        { sub: "math", dur: "60min", focus: "几何错题 + 全等判定回顾" },
+        { sub: "english", dur: "45min", focus: "七下词汇 + 过去时回顾" },
+        { sub: "chinese", dur: "45min", focus: "古诗 31–61 抽查 15 首" },
+        { sub: "physics", dur: "30min", focus: "密度公式易错点" },
+        { sub: "evening", dur: "—", focus: "下午休息" },
+      ]},
+    ],
+  },
+  {
+    week: 4, range: "8/3 – 8/9", theme: "函数入门 + 八上英语 + 阅读模板",
+    summary: {
+      math:    { focus: "平面直角坐标系、函数概念、八上前半", time: "90min/天" },
+      english: { focus: "八上单词 + 完形每天 2 篇", time: "60min/天" },
+      chinese: { focus: "阅读答题模板（手法、含义、概括）", time: "60min/天" },
+      physics: { focus: "力、重力、压强入门", time: "60min/天" },
+    },
+    days: [
+      { date: "8/3", weekday: "一", num: 22, hours: 5, items: [
+        { sub: "math", dur: "90min", focus: "平面直角坐标系、点的坐标" },
+        { sub: "english", dur: "60min", focus: "八上 Unit1 单词 30 个" },
+        { sub: "chinese", dur: "60min", focus: "记叙文阅读：概括中心 3 篇" },
+        { sub: "physics", dur: "60min", focus: "力的概念、三要素、图示" },
+        { sub: "evening", dur: "30min", focus: "错题整理" },
+      ]},
+      { date: "8/4", weekday: "二", num: 23, hours: 5, items: [
+        { sub: "math", dur: "90min", focus: "函数概念、变量与自变量" },
+        { sub: "english", dur: "60min", focus: "八上 Unit2 单词 + 完形 2 篇" },
+        { sub: "chinese", dur: "60min", focus: "词语含义题模板 + 练习 3 篇" },
+        { sub: "physics", dur: "60min", focus: "弹力、弹簧测力计" },
+        { sub: "evening", dur: "30min", focus: "错题整理" },
+      ]},
+      { date: "8/5", weekday: "三", num: 24, hours: 5, items: [
+        { sub: "math", dur: "90min", focus: "一次函数 y=kx+b 图像与性质" },
+        { sub: "english", dur: "60min", focus: "八上 Unit3 单词 + 完形 2 篇" },
+        { sub: "chinese", dur: "60min", focus: "修辞手法辨析 + 练习 2 篇" },
+        { sub: "physics", dur: "60min", focus: "重力 G=mg 计算" },
+        { sub: "evening", dur: "30min", focus: "错题整理" },
+      ]},
+      { date: "8/6", weekday: "四", num: 25, hours: 5, items: [
+        { sub: "math", dur: "90min", focus: "一次函数与方程、不等式" },
+        { sub: "english", dur: "60min", focus: "八上 Unit4 单词 + 阅读 1 篇" },
+        { sub: "chinese", dur: "60min", focus: "句子含义/象征意义题模板" },
+        { sub: "physics", dur: "60min", focus: "固体压强 p=F/S" },
+        { sub: "evening", dur: "30min", focus: "错题整理" },
+      ]},
+      { date: "8/7", weekday: "五", num: 26, hours: 5, items: [
+        { sub: "math", dur: "90min", focus: "八上代数综合卷 1 套" },
+        { sub: "english", dur: "60min", focus: "八上单词复习 + 完形 2 篇" },
+        { sub: "chinese", dur: "60min", focus: "文言文 120 实词再背 15 个" },
+        { sub: "physics", dur: "60min", focus: "液体压强 p=ρgh" },
+        { sub: "evening", dur: "30min", focus: "错题整理" },
+      ]},
+      { date: "8/8", weekday: "六", num: 27, hours: 5, items: [
+        { sub: "math", dur: "90min", focus: "函数 + 几何综合基础题" },
+        { sub: "english", dur: "60min", focus: "八上语法 + 阅读 1 篇" },
+        { sub: "chinese", dur: "60min", focus: "阅读综合卷 1 套（限时）" },
+        { sub: "physics", dur: "60min", focus: "压强综合计算 5 题" },
+        { sub: "evening", dur: "30min", focus: "本周总结" },
+      ]},
+      { date: "8/9", weekday: "日", num: 28, hours: 3, tag: "周复习", rest: true, items: [
+        { sub: "math", dur: "60min", focus: "函数图像与性质回顾" },
+        { sub: "english", dur: "45min", focus: "八上词汇 + 完形错题" },
+        { sub: "chinese", dur: "45min", focus: "阅读答题模板默背" },
+        { sub: "physics", dur: "30min", focus: "压强公式辨析" },
+        { sub: "evening", dur: "—", focus: "下午休息" },
+      ]},
+    ],
+  },
+  {
+    week: 5, range: "8/10 – 8/16", theme: "综合冲刺 + 河南真题体验",
+    summary: {
+      math:    { focus: "综合卷 2 套 + 错题歼灭", time: "90min/天" },
+      english: { focus: "综合卷 2 套 + 1200 词验收", time: "60min/天" },
+      chinese: { focus: "作文素材 10 个 + 模拟训练", time: "60min/天" },
+      physics: { focus: "八上综合 + 基础实验题", time: "60min/天" },
+    },
+    days: [
+      { date: "8/10", weekday: "一", num: 29, hours: 5, tag: "模考",
+        items: [
+          { sub: "math", dur: "90min", focus: "河南中考数学真题 1 套（2023/2024，先做基础+中档）" },
+          { sub: "english", dur: "60min", focus: "河南中考英语真题 1 套（词汇+阅读部分）" },
+          { sub: "chinese", dur: "60min", focus: "河南中考语文真题 1 套（古诗+阅读）" },
+          { sub: "physics", dur: "60min", focus: "八上综合卷 1 套" },
+          { sub: "evening", dur: "30min", focus: "三套真题错题分类" },
+        ]},
+      { date: "8/11", weekday: "二", num: 30, hours: 5,
+        items: [
+          { sub: "math", dur: "90min", focus: "昨日数学真题错题订正 + 同类题 5 道" },
+          { sub: "english", dur: "60min", focus: "昨日英语错题 + 词汇复习 50 词" },
+          { sub: "chinese", dur: "60min", focus: "昨日阅读错题 + 答题模板套用" },
+          { sub: "physics", dur: "60min", focus: "实验题专项：读数、器材、步骤" },
+          { sub: "evening", dur: "30min", focus: "错题整理" },
+        ]},
+      { date: "8/12", weekday: "三", num: 31, hours: 5,
+        items: [
+          { sub: "math", dur: "90min", focus: "七年级 + 八上综合卷 1 套（限时）" },
+          { sub: "english", dur: "60min", focus: "完形 + 阅读综合 2 套" },
+          { sub: "chinese", dur: "60min", focus: "作文素材积累 3 个（人物/成长/亲情）" },
+          { sub: "physics", dur: "60min", focus: "声光热力综合选择 20 题" },
+          { sub: "evening", dur: "30min", focus: "错题整理" },
+        ]},
+      { date: "8/13", weekday: "四", num: 32, hours: 5,
+        items: [
+          { sub: "math", dur: "90min", focus: "计算专项：每日 10 道限时练" },
+          { sub: "english", dur: "60min", focus: "1200 核心词验收测试" },
+          { sub: "chinese", dur: "60min", focus: "作文素材再积 3 个 + 提纲写 1 篇" },
+          { sub: "physics", dur: "60min", focus: "八上易错概念辨析 15 题" },
+          { sub: "evening", dur: "30min", focus: "错题整理" },
+        ]},
+      { date: "8/14", weekday: "五", num: 33, hours: 5,
+        items: [
+          { sub: "math", dur: "90min", focus: "第二套综合卷 + 错题只练中等以下" },
+          { sub: "english", dur: "60min", focus: "第二套综合卷" },
+          { sub: "chinese", dur: "60min", focus: "61 首古诗总默写（抽查 30 首）" },
+          { sub: "physics", dur: "60min", focus: "八上综合卷第 2 套" },
+          { sub: "evening", dur: "30min", focus: "错题整理" },
+        ]},
+      { date: "8/15", weekday: "六", num: 34, hours: 5, tag: "查漏",
+        items: [
+          { sub: "math", dur: "90min", focus: "暑假数学全部错题过一遍" },
+          { sub: "english", dur: "60min", focus: "薄弱语法点 + 阅读 1 篇" },
+          { sub: "chinese", dur: "60min", focus: "作文完整写 1 篇（600 字，限时 50 分钟）" },
+          { sub: "physics", dur: "60min", focus: "知识清单翻阅 + 盲点补缺" },
+          { sub: "evening", dur: "30min", focus: "整理暑假学习档案" },
+        ]},
+      { date: "8/16", weekday: "日", num: 35, hours: 3, tag: "总结", rest: true,
+        items: [
+          { sub: "math", dur: "60min", focus: "自测卷 1 套 · 目标：基础题错误率明显下降" },
+          { sub: "english", dur: "45min", focus: "自测 · 目标：1200–1500 词掌握" },
+          { sub: "chinese", dur: "45min", focus: "自测 · 目标：古诗大部分能默写" },
+          { sub: "physics", dur: "30min", focus: "自测 · 目标：八上基础题会做" },
+          { sub: "evening", dur: "—", focus: "三科合计目标 180–200 · 庆祝 + 休息" },
+        ]},
+    ],
+  },
+];
+
+let activeStudyWeek = 0;
+
+function renderStudyPlan() {
+  const tabs = document.getElementById("study-week-tabs");
+  const container = document.getElementById("study-weeks");
+  tabs.innerHTML = "";
+  container.innerHTML = "";
+
+  STUDY_WEEKS.forEach((wk, wi) => {
+    const tab = document.createElement("button");
+    tab.className = "study-week-tab" + (wi === activeStudyWeek ? " active" : "");
+    tab.textContent = `第${wk.week}周`;
+    tab.title = wk.range + " · " + wk.theme;
+    tab.addEventListener("click", () => showStudyWeek(wi));
+    tabs.appendChild(tab);
+
+    const panel = document.createElement("div");
+    panel.className = "study-panel" + (wi === activeStudyWeek ? " active" : "");
+    panel.id = `study-week-${wi}`;
+
+    const summary = document.createElement("div");
+    summary.className = "study-week-summary";
+    summary.innerHTML = `
+      <h3>第 ${wk.week} 周 · ${wk.range}</h3>
+      <span class="theme-tag">${wk.theme}</span>
+      <div class="subject-summary-grid">
+        ${Object.entries(wk.summary).map(([key, s]) => `
+          <div class="subject-summary" style="--sub-color:${SUBJECTS[key].color}">
+            <div class="sub-name">${SUBJECTS[key].name}</div>
+            <div class="sub-focus">${s.focus}</div>
+            <div class="sub-time">${s.time}</div>
+          </div>
+        `).join("")}
+      </div>
+    `;
+    panel.appendChild(summary);
+
+    const list = document.createElement("div");
+    list.className = "study-daily-list";
+    wk.days.forEach(day => {
+      const card = document.createElement("div");
+      card.className = "study-day-card"
+        + (day.rest ? " is-rest" : "")
+        + (day.tag === "周复习" || day.tag === "总结" ? " is-review" : "");
+      card.innerHTML = `
+        <div class="study-day-head">
+          <span class="day-num">第 ${day.num} 天</span>
+          <span class="day-date">${day.date} 周${day.weekday}${day.tag ? ` · ${day.tag}` : ""}</span>
+          <span class="day-hours">${day.hours}h</span>
+        </div>
+        <div class="study-subject-rows"></div>
+      `;
+      const rows = card.querySelector(".study-subject-rows");
+      day.items.forEach(item => {
+        const sub = item.sub === "evening"
+          ? { name: "晚间", color: "#64748b" }
+          : SUBJECTS[item.sub];
+        const row = document.createElement("div");
+        row.className = "study-sub-row" + (item.sub === "evening" ? " evening" : "");
+        row.style.setProperty("--sub-color", sub.color);
+        row.innerHTML = `
+          <span class="s-name">${sub.name}</span>
+          <span class="s-dur">${item.dur}</span>
+          <span class="s-focus">${item.focus}</span>
+        `;
+        rows.appendChild(row);
+      });
+      list.appendChild(card);
+    });
+    panel.appendChild(list);
+    container.appendChild(panel);
+  });
+}
+
+function showStudyWeek(wi) {
+  activeStudyWeek = wi;
+  document.querySelectorAll(".study-panel").forEach((p, i) => p.classList.toggle("active", i === wi));
+  document.querySelectorAll(".study-week-tab").forEach((t, i) => t.classList.toggle("active", i === wi));
+}
+
+let state = loadEmbedded();
+let dirty = false;
+let fileHandle = null;
+let activeWeek = 0;
+
+function defaultDay() {
+  const d = {};
+  CATEGORIES.forEach(c => { d[c.key] = { text: "", done: false }; });
+  return d;
+}
+
+function loadEmbedded() {
+  let raw;
+  try {
+    const el = document.getElementById("planner-data");
+    raw = JSON.parse(el.textContent);
+  } catch (_) {
+    try {
+      raw = JSON.parse(repairPlannerJson(document.getElementById("planner-data").textContent));
+    } catch (__) {
+      return { weeks: {}, days: {} };
+    }
+  }
+  if (raw.days && !raw.days["2026-07-13"]?.study) migrateOld(raw);
+  if (!raw.weeks) raw.weeks = {};
+  return raw;
+}
+
+function repairPlannerJson(raw) {
+  let out = "";
+  let inStr = false;
+  let esc = false;
+  for (const ch of raw) {
+    if (inStr) {
+      if (esc) { out += ch; esc = false; }
+      else if (ch === "\\") { out += ch; esc = true; }
+      else if (ch === '"') { out += ch; inStr = false; }
+      else if (ch === "\n" || ch === "\r") { out += "\\n"; }
+      else { out += ch; }
+    } else {
+      out += ch;
+      if (ch === '"') inStr = true;
+    }
+  }
+  return out;
+}
+
+function migrateOld(raw) {
+  const days = {};
+  Object.entries(raw.days || {}).forEach(([key, old]) => {
+    const d = defaultDay();
+    if (old.notes) d.study.text = old.notes;
+    if (old.checkins) {
+      Object.keys(old.checkins).forEach(name => {
+        if (name.includes("运动") || name.includes("锻炼")) d.sport.done = !!old.checkins[name];
+        if (name.includes("学习") || name.includes("阅读")) d.study.done = !!old.checkins[name];
+      });
+    }
+    if (old.tasks) {
+      old.tasks.forEach(t => {
+        if (!t.text?.trim()) return;
+        const text = t.text.trim();
+        if (/博物馆|展览|打卡/.test(text)) { d.museum.text = text; d.museum.done = t.done; }
+        else if (/吃|美食|餐|探店/.test(text)) { d.food.text = text; d.food.done = t.done; }
+        else if (/游戏|玩/.test(text)) { d.game.text = text; d.game.done = t.done; }
+        else if (/跑|运动|健身|泳/.test(text)) { d.sport.text = text; d.sport.done = t.done; }
+        else { d.study.text = (d.study.text ? d.study.text + "；" : "") + text; if (t.done) d.study.done = true; }
+      });
+    }
+    days[key] = d;
+  });
+  raw.days = days;
+  delete raw.checkins;
+}
+
+function markDirty() {
+  dirty = true;
+  const s = document.getElementById("save-status");
+  s.textContent = "未保存";
+  s.className = "save-status dirty";
+}
+
+function markSaved(name) {
+  dirty = false;
+  const s = document.getElementById("save-status");
+  s.textContent = name ? `已保存 · ${name}` : "已保存";
+  s.className = "save-status saved";
+}
+
+function dateKey(d) {
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+}
+
+function getAllDays() {
+  const days = [];
+  const d = new Date(START);
+  while (d <= END) { days.push(new Date(d)); d.setDate(d.getDate()+1); }
+  return days;
+}
+
+function getDay(key) {
+  if (!state.days[key]) state.days[key] = defaultDay();
+  else CATEGORIES.forEach(c => {
+    if (!state.days[key][c.key]) state.days[key][c.key] = { text: "", done: false };
+  });
+  return state.days[key];
+}
+
+function getWeek(wi) {
+  if (!state.weeks[wi]) state.weeks[wi] = { theme: "", important: "" };
+  return state.weeks[wi];
+}
+
+function groupWeeks(days) {
+  const weeks = []; let cur = [];
+  days.forEach((d, i) => {
+    cur.push(d);
+    if (d.getDay() === 0 || i === days.length - 1) { weeks.push([...cur]); cur = []; }
+  });
+  return weeks;
+}
+
+function isToday(d) {
+  const t = new Date();
+  return d.getFullYear() === t.getFullYear() && d.getMonth() === t.getMonth() && d.getDate() === t.getDate();
+}
+
+function dayCompletion(key) {
+  const data = getDay(key);
+  let filled = 0, done = 0;
+  CATEGORIES.forEach(c => {
+    const item = data[c.key];
+    if (item.text.trim()) { filled++; if (item.done) done++; }
+    else if (item.done) { filled++; done++; }
+  });
+  return filled ? done / filled : 0;
+}
+
+function dayFilledCount(key) {
+  const data = getDay(key);
+  return CATEGORIES.filter(c => getDay(key)[c.key].text.trim() || getDay(key)[c.key].done).length;
+}
+
+function esc(s) {
+  const d = document.createElement("div");
+  d.textContent = s || "";
+  return d.innerHTML;
+}
+
+function buildHTML() {
+  const dataJson = JSON.stringify(state);
+  const raw = document.documentElement.outerHTML;
+  return raw.replace(
+    /<script type="application\/json" id="planner-data">[\s\S]*?<\/script>/,
+    `<script type="application/json" id="planner-data">${dataJson}<\/script>`
+  );
+}
+
+async function saveToFile() {
+  const html = "<!DOCTYPE html>\n" + buildHTML();
+  const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+  if (fileHandle?.createWritable) {
+    try {
+      const w = await fileHandle.createWritable();
+      await w.write(blob); await w.close();
+      markSaved(fileHandle.name); return;
+    } catch (_) { fileHandle = null; }
+  }
+  if ("showSaveFilePicker" in window) {
+    try {
+      const h = await window.showSaveFilePicker({
+        suggestedName: "夏日计划卡.html",
+        types: [{ description: "HTML", accept: { "text/html": [".html"] } }],
+      });
+      const w = await h.createWritable();
+      await w.write(blob); await w.close();
+      fileHandle = h; markSaved(h.name); return;
+    } catch (e) { if (e.name === "AbortError") return; }
+  }
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "夏日计划卡.html";
+  a.click();
+  markSaved("已下载");
+}
+
+async function openFile() {
+  if (!("showOpenFilePicker" in window)) {
+    alert("请使用 Chrome / Edge 打开并保存文件");
+    return;
+  }
+  try {
+    const [h] = await window.showOpenFilePicker({
+      types: [{ description: "HTML", accept: { "text/html": [".html"] } }],
+    });
+    const text = await h.getFile().then(f => f.text());
+    const m = text.match(/<script type="application\/json" id="planner-data">([\s\S]*?)<\/script>/);
+    if (!m) { alert("未找到数据"); return; }
+    try {
+      state = JSON.parse(m[1]);
+    } catch (_) {
+      state = JSON.parse(repairPlannerJson(m[1]));
+    }
+    fileHandle = h;
+    dirty = false;
+    renderAll();
+    markSaved(h.name);
+  } catch (e) { if (e.name !== "AbortError") alert("打开失败"); }
+}
+
+function updatePreview(card, key) {
+  const data = getDay(key);
+  const parts = CATEGORIES
+    .filter(c => data[c.key].text.trim())
+    .map(c => `${c.icon}${data[c.key].text.trim().slice(0, 8)}`);
+  const el = card.querySelector(".card-preview");
+  if (parts.length) {
+    el.textContent = parts.join(" · ");
+    el.classList.add("has-content");
+  } else {
+    el.textContent = "—";
+    el.classList.remove("has-content");
+  }
+  const dots = card.querySelectorAll(".dot");
+  CATEGORIES.forEach((c, i) => {
+    const item = data[c.key];
+    dots[i].classList.toggle("on", !!(item.text.trim() || item.done));
+    dots[i].style.background = (item.text.trim() || item.done) ? c.color : "";
+  });
+}
+
+function renderDayCard(d) {
+  const key = dateKey(d);
+  const data = getDay(key);
+  const card = document.createElement("div");
+  card.className = "day-card"
+    + (isToday(d) ? " is-today" : "")
+    + (d.getDay() === 0 || d.getDay() === 6 ? " is-weekend" : "");
+  card.id = `day-${key}`;
+
+  const dotsHtml = CATEGORIES.map(() => `<span class="dot"></span>`).join("");
+
+  card.innerHTML = `
+    <div class="card-head">
+      <div>
+        <div class="card-date">${d.getMonth()+1}/${d.getDate()}</div>
+        <div class="card-weekday">周${WEEKDAYS[d.getDay()]}</div>
+      </div>
+      <div class="card-dots">${dotsHtml}</div>
+    </div>
+    <div class="card-body"></div>
+    <div class="card-preview">—</div>
+  `;
+
+  const body = card.querySelector(".card-body");
+  CATEGORIES.forEach(cat => {
+    const item = data[cat.key];
+    const row = document.createElement("div");
+    row.className = "cat-row" + (item.done ? " done" : "");
+    row.style.setProperty("--cat-color", cat.color);
+    row.innerHTML = `
+      <span class="cat-icon" title="${cat.label}">${cat.icon}</span>
+      <input class="cat-input" type="text" value="${esc(item.text)}"
+        placeholder="${cat.placeholder}" data-key="${key}" data-cat="${cat.key}" />
+      <input class="cat-check" type="checkbox" ${item.done ? "checked" : ""}
+        data-key="${key}" data-cat="${cat.key}" title="完成" />
+    `;
+    body.appendChild(row);
+  });
+
+  card.querySelectorAll(".cat-input").forEach(inp => {
+    inp.addEventListener("input", e => {
+      const k = e.target.dataset.key, c = e.target.dataset.cat;
+      getDay(k)[c].text = e.target.value;
+      markDirty();
+      updatePreview(card, k);
+      updateStats();
+      updateHeat();
+    });
+  });
+
+  card.querySelectorAll(".cat-check").forEach(cb => {
+    cb.addEventListener("change", e => {
+      const k = e.target.dataset.key, c = e.target.dataset.cat;
+      getDay(k)[c].done = e.target.checked;
+      e.target.closest(".cat-row").classList.toggle("done", e.target.checked);
+      markDirty();
+      updatePreview(card, k);
+      updateStats();
+      updateHeat();
+    });
+  });
+
+  updatePreview(card, key);
+  return card;
+}
+
+function renderWeekOverview(wi, wk) {
+  const wkData = getWeek(wi);
+  const start = wk[0], end = wk[wk.length - 1];
+  const el = document.createElement("div");
+  el.className = "week-overview";
+  el.innerHTML = `
+    <div class="week-range">第 <strong>${wi + 1}</strong> 周 · ${start.getMonth()+1}月${start.getDate()}日 – ${end.getMonth()+1}月${end.getDate()}日</div>
+    <div class="overview-field">
+      <label>本周主题 / 活动</label>
+      <input type="text" data-week-theme="${wi}" value="${esc(wkData.theme)}"
+        placeholder="例如：City walk、游泳周、博物馆之旅…" />
+    </div>
+    <div class="overview-field">
+      <label>重要事项</label>
+      <textarea data-week-important="${wi}" placeholder="本周必须完成的事、预约、截止日期…">${esc(wkData.important)}</textarea>
+    </div>
+  `;
+  el.querySelector(`[data-week-theme="${wi}"]`).addEventListener("input", e => {
+    getWeek(wi).theme = e.target.value;
+    markDirty();
+  });
+  el.querySelector(`[data-week-important="${wi}"]`).addEventListener("input", e => {
+    getWeek(wi).important = e.target.value;
+    markDirty();
+  });
+  return el;
+}
+
+function showWeek(wi) {
+  activeWeek = wi;
+  document.querySelectorAll(".week-panel").forEach((p, i) => p.classList.toggle("active", i === wi));
+  document.querySelectorAll(".week-tab").forEach((t, i) => t.classList.toggle("active", i === wi));
+  document.querySelectorAll(".heat").forEach(h => {
+    h.classList.toggle("in-week", +h.dataset.week === wi);
+  });
+  updateStats();
+}
+
+function renderWeeks() {
+  const days = getAllDays();
+  const weeks = groupWeeks(days);
+  const container = document.getElementById("weeks");
+  const tabs = document.getElementById("week-tabs");
+  container.innerHTML = "";
+  tabs.innerHTML = "";
+
+  weeks.forEach((wk, wi) => {
+    const tab = document.createElement("button");
+    tab.className = "week-tab" + (wi === activeWeek ? " active" : "");
+    tab.textContent = `第${wi + 1}周`;
+    tab.addEventListener("click", () => showWeek(wi));
+    tabs.appendChild(tab);
+
+    const panel = document.createElement("section");
+    panel.className = "week-panel" + (wi === activeWeek ? " active" : "");
+    panel.id = `week-${wi}`;
+    panel.appendChild(renderWeekOverview(wi, wk));
+
+    const grid = document.createElement("div");
+    grid.className = "cards-grid";
+    wk.forEach(d => grid.appendChild(renderDayCard(d)));
+    panel.appendChild(grid);
+    container.appendChild(panel);
+  });
+}
+
+function updateHeat() {
+  const el = document.getElementById("heatmap");
+  el.innerHTML = "";
+  const weeks = groupWeeks(getAllDays());
+  const dayWeekMap = {};
+  weeks.forEach((wk, wi) => wk.forEach(d => { dayWeekMap[dateKey(d)] = wi; }));
+
+  getAllDays().forEach(d => {
+    const key = dateKey(d);
+    const p = dayCompletion(key);
+    const lv = p === 0 ? 0 : p < 0.5 ? 1 : p < 0.8 ? 2 : p < 1 ? 3 : 4;
+    const c = document.createElement("div");
+    c.className = `heat h${lv}` + (isToday(d) ? " today" : "") + (dayWeekMap[key] === activeWeek ? " in-week" : "");
+    c.dataset.week = dayWeekMap[key];
+    c.textContent = d.getDate();
+    c.title = `${key} · ${Math.round(p * 100)}%`;
+    c.addEventListener("click", () => {
+      showWeek(dayWeekMap[key]);
+      setTimeout(() => document.getElementById(`day-${key}`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 80);
+    });
+    el.appendChild(c);
+  });
+}
+
+function updateStats() {
+  let totalDone = 0, weekDone = 0;
+  const weeks = groupWeeks(getAllDays());
+  const weekDays = weeks[activeWeek] || [];
+
+  getAllDays().forEach(d => {
+    const data = getDay(dateKey(d));
+    CATEGORIES.forEach(c => { if (data[c.key].done) totalDone++; });
+  });
+  weekDays.forEach(d => {
+    const data = getDay(dateKey(d));
+    CATEGORIES.forEach(c => { if (data[c.key].done) weekDone++; });
+  });
+
+  document.getElementById("stat-done").textContent = totalDone;
+  document.getElementById("stat-week").textContent = weekDone;
+}
+
+function renderLegend() {
+  const el = document.getElementById("legend");
+  el.innerHTML = CATEGORIES.map(c =>
+    `<span class="legend-item"><span class="legend-dot" style="background:${c.color}"></span>${c.icon} ${c.label}</span>`
+  ).join("");
+}
+
+function renderAll() {
+  renderWeeks();
+  updateHeat();
+  updateStats();
+  renderLegend();
+  renderStudyPlan();
+}
+
+function jumpToday() {
+  const t = new Date();
+  if (t < START || t > END) { alert("今天不在计划期内"); return; }
+  const key = dateKey(t);
+  const weeks = groupWeeks(getAllDays());
+  weeks.forEach((wk, wi) => { if (wk.some(d => dateKey(d) === key)) showWeek(wi); });
+  setTimeout(() => document.getElementById(`day-${key}`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 80);
+}
+
+document.getElementById("btn-save").addEventListener("click", saveToFile);
+document.getElementById("btn-open").addEventListener("click", openFile);
+document.getElementById("btn-print").addEventListener("click", () => window.print());
+document.getElementById("btn-today").addEventListener("click", jumpToday);
+document.getElementById("btn-study").addEventListener("click", () => {
+  document.getElementById("study-plan").scrollIntoView({ behavior: "smooth", block: "start" });
+});
+window.addEventListener("beforeunload", e => { if (dirty) { e.preventDefault(); e.returnValue = ""; } });
+
+renderAll();
+</script>
+</body>
+</html>
