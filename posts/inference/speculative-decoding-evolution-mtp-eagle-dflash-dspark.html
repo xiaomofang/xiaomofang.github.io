@@ -1,0 +1,940 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="night">
+<head>
+  <meta charset="UTF-8" />
+  <script>
+    (function () {
+      try {
+        var saved = localStorage.getItem("yichuan-theme");
+        var theme = saved || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "night" : "day");
+        document.documentElement.setAttribute("data-theme", theme);
+      } catch (e) {}
+    })();
+  </script>
+  <style>
+    html { font-size: 16px; }
+    @media (min-width: 1024px) { html { font-size: 26px; } }
+    @media (min-width: 1200px) { html { font-size: 34px; } }
+    html, body { margin: 0; min-height: 100%; }
+    html[data-theme="night"], html[data-theme="night"] body { background: #0c0c0c; color: #ededed; color-scheme: dark; }
+    html[data-theme="day"], html[data-theme="day"] body { background: #ffffff; color: #1a1a1a; color-scheme: light; }
+  </style>
+  <link rel="stylesheet" href="../../styles.css?v=40" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous" />
+  <title>投机解码四代演进：从 MTP、Medusa 到 EAGLE、DFlash、DSpark</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="description" content="从拒绝采样的无损证明出发，沿着自回归草稿（Draft Model → EAGLE）与并行草稿（Medusa/MTP → DFlash）两条支线，讲清投机解码为什么这样演化，DSpark 又是如何把两条支线汇合在一起的；最后补上训练数据怎么在线产出、hidden state 如何伪装成 KV 复用 PD 分离基础设施的工程闭环。" />
+</head>
+<body>
+  <div class="ambient" aria-hidden="true"><span class="orb orb-a"></span><span class="orb orb-b"></span></div>
+  <canvas id="star-canvas"></canvas>
+
+  <header class="site-header">
+    <div class="header-inner">
+      <a href="../../index.html" class="logo">
+        <span class="logo-dot"></span>
+        <span class="logo-text">MOFANG</span>
+      </a>
+      <div class="header-actions">
+        <nav class="site-nav">
+          <a href="../../index.html">← Back</a>
+        </nav>
+        <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle theme">
+          <span class="icon-sun">☀️</span>
+          <span class="icon-moon">🌙</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="site-main">
+    <article class="post-page">
+      <header class="post-page-header">
+        <p class="post-page-date">2026-07-29 · Inference</p>
+        <h1 class="post-page-title">投机解码四代演进：从 MTP、Medusa 到 EAGLE、DFlash、DSpark</h1>
+        <p class="post-lead">
+          投机解码从来不是一个方法，而是一条不断在「猜得准」和「猜得快」之间寻找新平衡点的技术谱系。
+          它从一开始就分叉成两条支线——<strong>自回归支线</strong>（Draft Model → EAGLE）追求依赖建模的精度，
+          <strong>并行支线</strong>（Medusa / MTP → DFlash）追求起草延迟的下限，直到 DSpark 把两条支线重新
+          缝合在一起。本文顺着这条演化脉络把每一步「为什么这么改」讲透。
+        </p>
+      </header>
+
+      <section class="post-page-content">
+        <p>
+          读完本文，你应该能回答这几个问题：<strong>拒绝采样为什么能保证分布不变？MTP 和 EAGLE 长得像不像、
+          差在哪？并行草稿为什么会「虎头蛇尾」，又为什么第一步反而能赢自回归？DFlash 和 DSpark 到底谁解决了
+          什么？以及——训练这样一个草稿器，数据从哪来、怎么喂进去？</strong>
+        </p>
+
+        <div class="logic-map" aria-label="文章逻辑地图">
+          <div class="map-node">
+            <span>1</span>
+            <strong>起点分叉</strong>
+            <p>Draft Model 通用但慢；Medusa/MTP 把头做成并行或链式，各有取舍。</p>
+          </div>
+          <div class="map-arrow">→</div>
+          <div class="map-node">
+            <span>2</span>
+            <strong>自回归支线：EAGLE</strong>
+            <p>特征级自回归 + Training-Time Test，把「边缘变条件」焊死。</p>
+          </div>
+          <div class="map-arrow">→</div>
+          <div class="map-node">
+            <span>3</span>
+            <strong>并行支线：DFlash</strong>
+            <p>Mask token + KV 注入，一次前向出全块，代价是后缀衰减。</p>
+          </div>
+          <div class="map-arrow">→</div>
+          <div class="map-node">
+            <span>4</span>
+            <strong>汇流：DSpark</strong>
+            <p>并行骨干 + 轻量 Markov 头 + 置信度调度，两条支线各取所长。</p>
+          </div>
+          <div class="map-arrow">→</div>
+          <div class="map-node">
+            <span>5</span>
+            <strong>工程闭环</strong>
+            <p>数据在线产、hidden state 伪装成 KV，复用 PD 分离基础设施。</p>
+          </div>
+        </div>
+
+        <h2>一、地基：为什么「先猜后验」不会损失一点精度</h2>
+        <p>
+          所有投机解码方法共享同一个地基：用一个轻量草稿器 \(M_d\) 提议 \(\gamma\) 个候选 token，
+          再用完整的目标模型 \(M_t\) 做一次前向并行验证整个候选块。差异只在草稿器怎么设计——但验证规则
+          必须严格保持目标分布不变，否则「加速」就变成了「偷工减料」。这条底线是后面所有架构创新的前提，
+          值得先讲透。
+        </p>
+        <p>
+          记 \(p(\cdot)\) 为目标模型在某一位置给出的分布，\(q(\cdot)\) 为草稿器在同一位置给出的分布。
+          草稿 token \(v\) 是从 \(q\) 里采出来的，但最终输出必须服从 \(p\)。做法是：
+        </p>
+        <ul class="note-list">
+          <li><strong>接受：</strong>以 \(\min\!\bigl(1,\, p(v)/q(v)\bigr)\) 的概率接受 \(v\)。</li>
+          <li><strong>拒绝：</strong>一旦拒绝，本位置及其后所有草稿全部丢弃，从残差分布
+            \(r(x)=\mathrm{norm}\bigl(\max(p(x)-q(x),0)\bigr)\) 里重新采样一个 token。</li>
+        </ul>
+        <p>
+          为什么这样就无损？对任意 token \(t\)，它被最终输出的概率来自两条互斥路径：
+          「草稿采到 \(t\) 且被接受」的概率是 \(q(t)\cdot\min(1,p(t)/q(t)) = \min(p(t),q(t))\)；
+          「某次拒绝后从残差里采到 \(t\)」的概率是 \(\max(0,p(t)-q(t))\)。两者相加：
+        </p>
+        <div class="math-block" aria-label="拒绝采样无损性证明">
+          \[
+            P(\text{output}=t) = \min\bigl(p(t),q(t)\bigr) + \max\bigl(0,\,p(t)-q(t)\bigr) = p(t)
+          \]
+        </div>
+        <p>
+          最后一步用到恒等式 \(\min(a,b)+\max(0,a-b)=a\)，对任意 \(a,b\) 都成立。所以无论 \(q\) 是什么样子，
+          只要验证按这套规则做，输出分布严格等于 \(p\)——<strong>草稿器只影响速度，永远不影响写什么</strong>。
+        </p>
+
+        <div class="callout">
+          <strong>一个数字例子。</strong>
+          假设目标分布 \(p\) 在某位置给出 <code>cats: 0.52, dogs: 0.19, to: 0.09, eat: 0.07, 其他: 0.13</code>，
+          草稿分布 \(q\) 给出 <code>cats: 0.40, dogs: 0.25, to: 0.15, eat: 0.10, 其他: 0.10</code>。
+          若草稿采到 <code>dogs</code>，接受概率是 \(\min(1, 0.19/0.25)=0.76\)；若草稿采到 <code>to</code>，
+          接受概率是 \(\min(1,0.09/0.15)=0.60\)。一旦被拒，残差分布只在「\(p\) 比 \(q\) 更看好」的
+          token 上有质量——比如 <code>cats</code> 上 \(\max(0.52-0.40,0)=0.12\)，<code>其他</code> 上
+          \(\max(0.13-0.10,0)=0.03\)——归一化后重采样，绝不会再采到刚被拒绝、且 \(q\) 本来就高估的 <code>to</code>。
+        </div>
+
+        <p>
+          每一步的平均接受率恰好等于两个分布的重叠面积，也是它们总变差距离（Total Variation Distance）的补集：
+        </p>
+        <div class="math-block" aria-label="接受率公式">
+          \[
+            \alpha = 1 - D_{TV}(p,q) = \sum_v \min\bigl(p(v),\,q(v)\bigr)
+          \]
+        </div>
+        <p>
+          设 \(\tau\) 为每轮平均接受的 token 数（含验证阶段额外生成的 bonus token），
+          \(T_{\text{draft}}\)、\(T_{\text{verify}}\) 分别是起草与验证阶段的耗时，每 token 平均延迟为：
+        </p>
+        <div class="math-block" aria-label="投机解码延迟公式">
+          \[
+            L = \frac{T_{\text{draft}} + T_{\text{verify}}}{\tau}
+          \]
+        </div>
+        <p>
+          这个公式定义了全部可优化的旋钮：<strong>降低 \(T_{\text{draft}}\)</strong>（起草更快）、
+          <strong>提高 \(\tau\)</strong>（\(q\) 与 \(p\) 更贴近，接受率更高）、
+          <strong>降低有效的 \(T_{\text{verify}}\)</strong>（验证更聪明，不做无谓的验证）。
+          接下来要讲的整条演化史，就是不同方法在这三个旋钮上依次做文章的过程——而且从一开始就分成了
+          两条路线。
+        </p>
+
+        <h2>二、起点分叉：外部 Draft Model、Medusa 与 MTP</h2>
+        <p>
+          Leviathan et al.（2023）与 Chen et al.（2023）最早提出的形态很朴素：另外训练一个小语言模型
+          \(M_d\)（比如用同系列的 7B 陪 70B），逐 token 自回归生成 \(\gamma\) 个草稿。它通用、无需改动
+          目标模型，但代价直白——\(M_d\) 本身是完整的自回归模型，\(T_{\text{draft}}\) 随 \(\gamma\) 线性增长；
+          且 \(M_d\) 与 \(M_t\) 之间没有共享表示，命中率完全取决于两个独立模型碰巧有多像。
+        </p>
+        <p>
+          真正的分叉出现在「怎么让草稿器和目标模型共享算力」这个问题上，几乎同时出现了两种答案：
+        </p>
+
+        <h3>2.1 Medusa：并行支线的起点，独立到近乎极端</h3>
+        <p>
+          Medusa（Cai et al., 2024）在目标模型最后一层的隐藏状态 \(h_t\) 上，挂 \(K\) 个独立的解码头，
+          每个头 \(k\) 直接从同一个 \(h_t\) 预测 \(t+k\) 位置的 token，<strong>彼此之间完全没有条件依赖</strong>。
+          这是并行支线最纯粹的形态：\(T_{\text{draft}}\) 被打到 \(O(1)\)，一次前向出全部候选；
+          但正因为头之间零依赖，Medusa 是「多模态碰撞」问题最极端的体现——上下文允许 "of course" 或
+          "no problem" 两种续写时，独立的头完全可能拼出 "of problem"。
+        </p>
+
+        <h3>2.2 MTP：给独立头接上一根线</h3>
+        <p>
+          MTP（Multi-Token Prediction，Gloeckle et al., 2024；后被 DeepSeek-V3 系统性采用并作为
+          生产投机解码的默认起草器）走的是另一条路：不再让 \(K\) 个头各自独立，而是把它们<strong>链起来</strong>。
+          以 DeepSeek-V3 的设计为例，第 \(k\) 个 MTP 模块的输入是「第 \(k-1\) 个模块的输出表征」与
+          「第 \(k-1\) 个未来 token 的 embedding」拼接后过一个 Transformer block，再复用共享的 LM head
+          投影出第 \(k\) 个未来 token 的 logits：
+        </p>
+        <div class="math-block" aria-label="MTP 模块链式结构">
+          \[
+            h'_k = \mathrm{Block}_k\bigl([\,e(x_{t+k-1});\; h'_{k-1}\,]\bigr), \qquad
+            \mathrm{logits}_{t+k} = W_{\text{lm}} h'_k + b
+          \]
+        </div>
+        <p>
+          注意这个形状——「拼接前一位置的 token embedding 与前一步的表征，过一层网络，再投影」——
+          和后面要讲的 EAGLE 几乎是同一张图纸。这不是巧合：<strong>只要你想让并行头之间有依赖，
+          最直接的办法就是把上一步的采样结果（或其 embedding）显式喂回去</strong>，MTP 和 EAGLE 都独立走到
+          了这一步。
+
+        </p>
+
+        <figure class="diagram-figure">
+          <svg viewBox="0 0 780 220" role="img" aria-label="链式自回归 drafter 的通用形状">
+            <defs>
+              <marker id="arrow-chain" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+                <polygon points="0 0, 8 3, 0 6" class="d-accent" />
+              </marker>
+            </defs>
+            <rect x="20" y="70" width="150" height="70" rx="10" class="d-box" />
+            <text x="95" y="98" text-anchor="middle" class="d-label">h_{k-1}</text>
+            <text x="95" y="118" text-anchor="middle" class="d-muted">上一步表征</text>
+
+            <rect x="20" y="150" width="150" height="50" rx="10" class="d-box" />
+            <text x="95" y="180" text-anchor="middle" class="d-muted">e(x_{k-1}) 前一 token 嵌入</text>
+
+            <path d="M170 105 L215 105" class="d-arrow" marker-end="url(#arrow-chain)" />
+            <path d="M170 175 L195 175 L195 120 L215 120" class="d-arrow" marker-end="url(#arrow-chain)" />
+
+            <rect x="220" y="80" width="180" height="70" rx="10" class="d-box-accent" />
+            <text x="310" y="108" text-anchor="middle" class="d-label">拼接 + 一层网络</text>
+            <text x="310" y="128" text-anchor="middle" class="d-muted">MTP: Transformer block</text>
+            <text x="310" y="144" text-anchor="middle" class="d-muted">EAGLE: FC + Decoder 层</text>
+
+            <path d="M400 115 L445 115" class="d-arrow" marker-end="url(#arrow-chain)" />
+
+            <rect x="450" y="80" width="130" height="70" rx="10" class="d-box" />
+            <text x="515" y="108" text-anchor="middle" class="d-label">h_k</text>
+            <text x="515" y="128" text-anchor="middle" class="d-muted">这一步表征</text>
+
+            <path d="M580 115 L625 115" class="d-arrow" marker-end="url(#arrow-chain)" />
+
+            <rect x="630" y="80" width="130" height="70" rx="10" class="d-box" />
+            <text x="695" y="105" text-anchor="middle" class="d-label">LM head</text>
+            <text x="695" y="125" text-anchor="middle" class="d-muted">采样 x_k</text>
+
+            <path d="M695 150 C 695 200, 95 200, 95 150" class="d-line" stroke-dasharray="5 4" fill="none" />
+            <text x="380" y="212" text-anchor="middle" class="d-muted">采样出的 x_k 回填，循环到下一步</text>
+          </svg>
+          <figcaption>
+            MTP 与 EAGLE 共享同一个「拼接前驱信息 → 过一层网络 → 采样」的自回归骨架，
+            真正的差异在训练方式与特征来源，而不在这张骨架图本身。
+          </figcaption>
+        </figure>
+
+        <h3>2.3 MTP 的软肋：训练看到的是真值，推理喂的是自己的猜测</h3>
+        <p>
+          MTP 模块是在<strong>预训练阶段</strong>与主干联合训练的：损失函数里 \(e(x_{t+k-1})\) 用的是
+          <strong>ground truth</strong> 的下一个 token（teacher forcing）。但把它当作投机解码的草稿器使用时，
+          第 \(k\) 步喂进去的 \(x_{t+k-1}\) 必须是<strong>模块自己在第 \(k-1\) 步刚采样出的 token</strong>——
+          训练分布和推理分布不一致（exposure bias）：模块从没在训练时见过「自己犯错后该怎么修正」这种输入。
+          一旦前面某一步采样偏了，链条后续的偏差会被放大，而模块本身对此毫无免疫力。
+        </p>
+        <p>
+          此外，MTP 模块是和主干模型联合训练的通用组件，通常只服务于「给预训练提供额外监督信号、顺便兼职做
+          投机解码」这个次要目标，深度和容量都比较保守（DeepSeek-V3 只用 1 个 MTP 模块，即 \(\gamma=1\) 的推测），
+          很难深挖到 \(\gamma\){=}5、7 甚至更长的候选块。
+        </p>
+
+        <table class="decision-table">
+          <thead>
+            <tr>
+              <th>方法</th>
+              <th>头间关系</th>
+              <th>\(T_{\text{draft}}\)</th>
+              <th>核心问题</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>外部 Draft Model</td>
+              <td>完整自回归</td>
+              <td>\(O(\gamma)\)</td>
+              <td>与目标模型零共享，命中率靠运气</td>
+            </tr>
+            <tr>
+              <td>Medusa</td>
+              <td>完全独立</td>
+              <td>\(O(1)\)</td>
+              <td>多模态碰撞最极端，块内零依赖</td>
+            </tr>
+            <tr>
+              <td>MTP</td>
+              <td>链式依赖</td>
+              <td>\(O(\gamma)\)</td>
+              <td>训练用真值、推理喂猜测，exposure bias</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <p>
+          EAGLE 正是在看清这两条支线各自的病灶之后，把「链式依赖」这条路做到极致——它同样是自回归的，
+          但用两处专门的设计，逐一堵上 MTP 留下的两个缺口。
+        </p>
+
+        <h2>三、自回归支线的巅峰：EAGLE</h2>
+        <p>
+          先固定全篇要反复用到的一个玩具例子：词表 10 个 token
+          <code>{0:I, 1:love, 2:cats, 3:dogs, 4:to, 5:eat, 6:pizza, 7:very, 8:today, 9:&lt;eos&gt;}</code>，
+          已确认前缀「I love」，草稿窗口长度 \(\gamma{=}3\)。目标模型在「I love」之后给出的分布
+          \(p(\cdot \mid \text{I love})\) 长这样：
+        </p>
+
+        <table class="decision-table">
+          <thead>
+            <tr><th>token</th><th>cats</th><th>dogs</th><th>to</th><th>eat</th><th>pizza</th><th>very</th><th>其他</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>logit</td><td>2.4</td><td>1.4</td><td>0.6</td><td>0.3</td><td>0.1</td><td>-0.4</td><td>更低</td>
+            </tr>
+            <tr>
+              <td>softmax</td><td>51.6%</td><td>19.0%</td><td>8.5%</td><td>6.3%</td><td>5.2%</td><td>3.1%</td><td>6.3%</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>3.1 EAGLE 的两个部件</h3>
+        <p>
+          记 \(h_t \in \mathbb{R}^d\) 为目标模型在位置 \(t\)、LM head 之前那一层的隐藏状态，
+          \(e(\cdot)\) 为词嵌入查表（与 \(W_{\text{lm}}\) 一样直接复用目标模型的，冻结不训）。
+          EAGLE 的草稿器只有两个部件——一个 \(2d \to d\) 的全连接层、一层 decoder——整个训练只训它俩：
+        </p>
+        <div class="math-block" aria-label="EAGLE 自回归公式">
+          \[
+            h^{(k)} = g\bigl([\,h^{(k-1)};\; e(x_k)\,]\bigr), \qquad
+            x_{k+1} \sim \mathrm{softmax}\bigl(W_{\text{lm}} h^{(k)} + b\bigr)
+          \]
+        </div>
+        <p>
+          沿用前缀「I love」（<code>love</code> 是上一轮确认的最后一个 token，\(h_I\)、\(h_{\text{love}}\)
+          都是目标模型上一轮前向算出来的真值）：
+        </p>
+        <ul class="note-list">
+          <li>第 1 步：\(g([h_{\text{love}}; e(\text{love})]) \to h^{(1)} \to\) LM head \(\to\) <code>cats</code></li>
+          <li>第 2 步：\(g([h^{(1)}; e(\text{cats})]) \to h^{(2)} \to\) LM head \(\to\) <code>eat</code></li>
+          <li>第 3 步：\(g([h^{(2)}; e(\text{eat})]) \to h^{(3)} \to\) LM head \(\to\) <code>pizza</code></li>
+        </ul>
+        <p>
+          3 个 token = 3 次串行前向，草稿结果 <code>cats | eat | pizza</code>。这个结构和上一节的 MTP
+          骨架几乎一模一样，真正的分水岭在下面两处。
+        </p>
+
+        <h3>3.2 为什么必须喂 token embedding：边缘分布 vs 条件分布</h3>
+        <p>
+          假设不喂 \(e(x_k)\)，草稿器只拿到 \(h^{(k-1)}\)，那它要拟合的对象就是对所有可能取值求和的
+          <strong>边缘分布</strong>：
+        </p>
+        <div class="math-block" aria-label="边缘分布公式">
+          \[
+            p\bigl(h^{(k)} \mid x\bigr) = \sum_{u \in \mathcal V} p(y_k=u \mid x)\cdot p\bigl(h^{(k)} \mid x, y_k=u\bigr)
+          \]
+        </div>
+        <p>
+          求和里第一项是「这一位取 \(u\) 的概率」，第二项是「已知这一位取了 \(u\) 之后，特征该长什么样」。
+          从 \(h_{\text{love}}\) 出发，<code>cats</code> 51.6%、<code>dogs</code> 19.0%、<code>to</code> 8.5%……
+          每一个取值都会导出一条完全不同的后续分支，草稿器被迫去拟合这些分支<strong>混合起来</strong>的均值——
+          一个天然更「糊」的目标。把 \(e(x_k)\) 喂进去之后，分支被显式确定，拟合对象重新变成单峰的
+          <strong>条件分布</strong> \(p(h^{(k)} \mid x, y_k)\)。EAGLE 论文给出的实测数据是加速比从 1.9× 提到
+          2.8×——这一个改动几乎是全篇最大的单点收益。
+        </p>
+        <p>
+          这个「边缘 vs 条件」的区别是全文的主线：下一节 DFlash 的后缀衰减、再下一节 DSpark 的 Markov Head，
+          本质上都是同一个问题的不同解法。
+        </p>
+
+        <h3>3.3 Training-Time Test：补上 MTP 留下的 exposure bias 缺口</h3>
+        <p>
+          光有「喂 token embedding」这一步还不够——如果训练时喂的 \(e(x_k)\) 永远是 ground truth，
+          就会重蹈 MTP 的覆辙。EAGLE-3（Li et al., 2025）引入 <strong>Training-Time Test</strong>：
+          训练阶段完整模拟真实的推测解码 rollout，让草稿器在训练时就吃到「自己刚采样（或模拟采样）出来的」
+          token embedding，而不是干净的真值。这样草稿器学会的不是「假设前面全对该怎么预测」，而是
+          「不管前面对不对，都要给出此刻最合理的延续」——直接对齐推理时的真实分布，彻底堵上 MTP 的
+          exposure bias 缺口。
+        </p>
+
+        <h3>3.4 EAGLE-2 / EAGLE-3：树状验证与多层特征融合</h3>
+        <p>
+          在这两处地基之上，后续版本继续加固：EAGLE-2（Li et al., 2024）观察到「草稿树」比「草稿链」验证效率
+          更高——与其线性生成一条候选序列，不如动态展开一棵候选树，用一次前向验证多条分支，进一步提升
+          \(\tau\)；EAGLE-3 除了引入 Training-Time Test，还把目标模型多层（浅、中、深）的隐藏状态融合后
+          再喂给草稿器，而不只是用最后一层——更丰富的特征来源让草稿器能同时捕捉词法和语义层面的线索。
+        </p>
+
+        <h3>3.5 代价：\(T_{\text{draft}}\) 依然随 \(\gamma\) 线性增长</h3>
+        <p>
+          无论怎么加固，EAGLE 的起草过程本质上仍是链式的——预测第 \(k\) 步必须先有第 \(k-1\) 步的真实
+          （或采样）结果。这意味着 \(T_{\text{draft}} \propto \gamma\)：草稿窗口越长，起草耗时越接近线性堆叠，
+          很快会把验证阶段省下来的时间吃回去，因此 EAGLE 系草稿器只能用很浅的网络（通常 1 层）、
+          较短的 block。这正是并行支线一直想要解决的问题——只是它一直没能一并解决「块内依赖」，
+          直到 DFlash 才把并行做到接近可用的地步。
+
+        </p>
+
+        <h2>四、并行支线的突破：DFlash——像 Diffusion 一样一次成型</h2>
+        <p>
+          DFlash（Chen, Liang &amp; Liu, 2026）的思路是：既然串行是因为「必须先有前一个 token 才能算下一个」，
+          那就用 MASK 占位符把未来位置先占上——这个结构和扩散模型几乎一一对应，论文标题就叫
+          <em>Block Diffusion for Flash Speculative Decoding</em>。
+        </p>
+
+        <h3>4.1 结构：锚点 + Mask，一次前向、块内双向注意力</h3>
+        <p>
+          输入是一个 anchor token（上一轮验证确认的最后一个 token）加上 \(\gamma\) 个 mask token，
+          块内使用双向注意力（<code>is_causal=False</code>），\(\gamma\) 个 mask 位置能看到完整上下文，
+          也能互相看见：
+        </p>
+
+        <figure class="diagram-figure">
+          <svg viewBox="0 0 780 210" role="img" aria-label="DFlash 并行起草结构">
+            <defs>
+              <marker id="arrow-df" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+                <polygon points="0 0, 8 3, 0 6" class="d-accent" />
+              </marker>
+            </defs>
+            <rect x="20" y="20" width="230" height="60" rx="10" class="d-box" />
+            <text x="135" y="45" text-anchor="middle" class="d-label">目标模型多层隐藏状态</text>
+            <text x="135" y="65" text-anchor="middle" class="d-muted">融合投影 → 上下文特征</text>
+
+            <path d="M250 50 L300 50" class="d-arrow" marker-end="url(#arrow-df)" />
+            <text x="275" y="40" text-anchor="middle" class="d-tag">KV 注入</text>
+
+            <rect x="20" y="110" width="120" height="60" rx="10" class="d-box" />
+            <text x="80" y="135" text-anchor="middle" class="d-label">[锚点]</text>
+            <text x="80" y="155" text-anchor="middle" class="d-muted">上一轮确认的 token</text>
+
+            <rect x="150" y="110" width="330" height="60" rx="10" class="d-box" />
+            <text x="315" y="135" text-anchor="middle" class="d-label">[MASK][MASK][MASK]</text>
+            <text x="315" y="155" text-anchor="middle" class="d-muted">待「去噪」的 3 个空位</text>
+
+            <path d="M480 140 L520 140" class="d-arrow" marker-end="url(#arrow-df)" />
+
+            <rect x="300" y="20" width="200" height="60" rx="10" class="d-box-accent" />
+            <text x="400" y="45" text-anchor="middle" class="d-label">草稿器（每层拼入上下文 K/V）</text>
+            <text x="400" y="65" text-anchor="middle" class="d-muted">一次前向 · 块内双向注意力</text>
+
+            <rect x="525" y="110" width="230" height="60" rx="10" class="d-box" />
+            <text x="640" y="135" text-anchor="middle" class="d-label">U1, U2, U3</text>
+            <text x="640" y="155" text-anchor="middle" class="d-muted">三个位置独立取 argmax</text>
+          </svg>
+          <figcaption>
+            DFlash：锚点 + Mask 一次前向出全部草稿 logits，草稿延迟从 \(O(\gamma)\) 降到 \(O(1)\)；
+            目标模型的上下文特征通过 KV 注入拼入草稿器每一层，而不仅仅是输入端。
+          </figcaption>
+        </figure>
+
+        <p>
+          续用同一玩具例子，草稿器一次前向给出三组 logits（只列 top-3，实际是完整 10 维）：
+        </p>
+        <table class="decision-table">
+          <thead>
+            <tr><th>排名</th><th>\(U_1\)（第 1 位）</th><th>\(U_2\)（第 2 位）</th><th>\(U_3\)（第 3 位）</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>top-1</td><td>cats (2.4)</td><td>very (1.3)</td><td>pizza (1.2)</td></tr>
+            <tr><td>top-2</td><td>dogs (1.4)</td><td>to (1.1)</td><td>eat (1.0)</td></tr>
+            <tr><td>top-3</td><td>to (0.6)</td><td>eat (0.7)</td><td>today (0.7)</td></tr>
+          </tbody>
+        </table>
+        <p>
+          三个位置各自独立取 argmax，得到 <code>cats | very | pizza</code>——草稿延迟从 \(O(\gamma)\) 降到了 \(O(1)\)。
+        </p>
+
+        <h3>4.2 KV 注入：把目标上下文焊进每一层，而不只是输入端</h3>
+        <p>
+          目标模型跑一次前向，每一层都会输出一份隐藏状态；DFlash 按固定层号（等间距、跳过第 0 层和最后
+          几层）挑出若干层，拼接后投影成紧凑的上下文特征，再拼进草稿模型<strong>每一层</strong>的 K、V：
+        </p>
+        <div class="math-block" aria-label="DFlash 上下文特征提取">
+          \[
+            H_{\text{ctx}} = \mathrm{RMSNorm}\bigl(W_c\,[H^{(l_1)};\,\ldots;\,H^{(l_m)}]\bigr)
+          \]
+        </div>
+        <p>
+          Query 只来自草稿 token 自身，目标特征仅仅是给掩码位置多提供的 KV 条目，绕过草稿器自身的
+          Q 投影和 FFN，开销很小。这和 EAGLE 的差别正在这里——EAGLE 只在输入端把目标特征拼进第一层，
+          信号往上走会逐层衰减；DFlash 让每一层都能直接读到。从数学上看，它的作用是把草稿分布 \(q\)
+          往目标分布 \(p\) 上拉，两者越贴近，\(\alpha=1-D_{TV}(p,q)\) 越高，接受率也就越高。
+          所以 DFlash 的两个设计正好分工：<strong>Mask 占位符负责快，KV 注入负责准</strong>。
+        </p>
+
+        <div class="callout muted">
+          <strong>「KV」注入的是什么？</strong>
+          这里的「KV」指的是数据的存放形式，不是数据来源。\(k_{\text{ctx}}\) 是拿目标模型的隐藏状态、
+          用草稿模型自己的 \(W_K\) 投影出来的，和目标模型的 KV Cache 本身无关——这个「伪装成 KV」的手法，
+          后面第七节讲训练数据管线时还会再遇到一次，是同一个思路的两处不同应用。
+        </div>
+
+        <h3>4.3 反直觉：并行为什么反而赢了自回归</h3>
+        <p>
+          DFlash 的整体接受长度全面压过 EAGLE-3，这与「逐步自回归生成质量更高」的常规认知相悖。
+          原因在<strong>位置 1</strong>：预测第一个位置的 token，无论架构是因果还是并行，都只依赖目标模型
+          提供的上下文，差异纯粹来自架构容量。自回归草稿器延迟是 \(O(\gamma)\)，被迫做得很浅（通常 1 层）；
+          并行草稿器延迟 \(O(1)\)，能低成本堆到 5 层甚至更深。而投机解码是严格的前缀存活过程，
+          <strong>位置 1 一旦被拒，整块作废</strong>，杠杆最大。所以哪怕并行架构后面掉得厉害，全局接受长度
+          仍然更优。
+        </p>
+
+        <h3>4.4 代价：后缀衰减与多模态碰撞</h3>
+        <p>
+          差异不在草稿器这边——同一个网络、同一次前向，每个位置拿到的输入信息量完全一样。差异在它要对齐的
+          目标那边。验证永远是因果的，位置 \(k\) 比的是：
+        </p>
+        <div class="math-block" aria-label="位置级接受率公式">
+          \[
+            \alpha_k = 1 - D_{TV}\bigl(p(\cdot \mid x, y_{&lt;k}),\; q_k(\cdot \mid x)\bigr)
+          \]
+        </div>
+        <p>
+          位置 1 两边条件集完全一样，不存在差距；位置 2 起，草稿器手上永远只有前缀，给出的最好也只能是
+          跨分支混合的边缘分布 \(p(y_2\mid x) = \sum_u p(y_1{=}u\mid x)\,p(y_2\mid x, y_1{=}u)\)，
+          熵天然高于任何单一分支，而它要对齐的恰恰是其中某一个分支；位置越靠后，草稿器要混合的分支越多、
+          分布越糊，目标模型那边条件却越加越多、分布反而越尖锐——两边越拉越远，这就是<strong>后缀衰减</strong>。
+        </p>
+        <p>
+          值得停下来想一层：块内明明是双向注意力，位置之间能互相看见，为什么还会拼出不连贯的组合？
+          用一组数字看清楚：假设前缀「I love」下，位置 1、2 的真实<strong>联合分布</strong>有两个明显的峰：
+        </p>
+        <table class="decision-table">
+          <thead>
+            <tr><th>组合</th><th>联合概率</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>cats · to</td><td>0.30 ← 峰</td></tr>
+            <tr><td>dogs · very</td><td>0.30 ← 峰</td></tr>
+            <tr><td>cats · very</td><td>0.22</td></tr>
+            <tr><td>dogs · to</td><td>0.18</td></tr>
+          </tbody>
+        </table>
+        <p>
+          边缘化之后，位置 1 是 <code>cats 0.52 / dogs 0.48</code>，argmax 取 <code>cats</code>；
+          位置 2 是 <code>to 0.48 / very 0.52</code>，argmax 取 <code>very</code>。两个位置各自独立取
+          argmax，拼出 <code>cats · very</code>——概率只有 0.22，而两个真正的联合峰都是 0.30。
+          （这组数字是为说明现象构造的示意值，非真实论文数据。）
+        </p>
+        <p>
+          双向注意力让网络内部完全可以在隐藏层编码出联合分布 \(q(y_1,\ldots,y_\gamma \mid x)\)，
+          但它对外的输出接口是彼此独立的 logits 向量，每个至多是这个联合分布在该位置上的<strong>边缘</strong>——
+          而边缘的 argmax 不等于联合的众数（mode）。所以问题的根源并不是「位置之间没有信息交流」，
+          而是<strong>采样时把这条交流硬生生切断了</strong>——这正是<strong>多模态碰撞</strong>的本质。
+        </p>
+        <p>
+          这个观察对后面理解 DSpark 至关重要：既然网络内部已经隐式编码了联合结构，只需要给采样过程
+          「开一个出口」，把「各位置独立取边缘 argmax」改成「按实际采到的前驱修正后续 logits 再采样」，
+          链式结构就能被找回来——而且几乎不需要额外的建模能力，只需要一个很轻的修正模块。
+        </p>
+
+        <h2>五、汇流：DSpark——把依赖还给草稿，把预算还给系统</h2>
+        <p>
+          走到这里，两条支线的病灶已经很清楚：自回归支线（EAGLE）依赖建模强，但 \(T_{\text{draft}}\)
+          线性增长；并行支线（DFlash）起草快、位置 1 强，但后段迅速衰减。DSpark（Cheng, Yu, Shao, Li,
+          Xiong et al., DeepSeek-AI &amp; 北京大学, 2026）的做法不是在两者之间取舍，而是<strong>把并行主干
+          和轻量串行修正拼在一起</strong>，同时再补一刀解决「验证多少」这个此前没人管的系统问题。
+        </p>
+
+        <h3>5.1 起草侧：并行骨干 + Markov Head</h3>
+        <p>
+          DSpark 保留 DFlash 的并行主干，一次前向出全块基础 logits \(U_1,\ldots,U_\gamma\)，
+          然后加一个极轻的串行头，从左到右为每一位的 logits 加一个依赖前缀的转移偏置：
+        </p>
+        <div class="math-block" aria-label="DSpark 转移偏置公式">
+          \[
+            z_k(v) = U_k(v) + B(y_{k-1}, v)
+          \]
+        </div>
+        <p>
+          \(B(y_{k-1}, \cdot) \in \mathbb{R}^{|V|}\) 可以想成一张 \(|V|\times|V|\) 转移表在「上一个词是
+          \(y_{k-1}\)」这一行查出来的修正向量。完整转移矩阵在 10 万词表下有 \(10^{10}\) 个元素，不可用，
+          DSpark 用低秩分解 \(B=W_1W_2\)（秩默认 256）近似，实现上就是一个 embedding 查找表加一个线性投影，
+          存储和每步计算都很小。回到玩具例子：第 2 位主干本来判断 <code>very(1.3) &gt; to(1.1)</code>，
+          但 Markov Head 读到上一位实际采到的是 <code>cats</code>，查表得到 \(B(\text{cats},\cdot)\)
+          给 <code>to</code> 加了 +1.2、给 <code>very</code> 减了 0.4，修正后 <code>to(2.3) &gt; very(0.9)</code>，
+          草稿从 <code>cats | very | pizza</code> 被拉回 <code>cats | to | eat</code>——骨架是并行主干给的，
+          纠正是串行头给的，实测这个串行头带来的延迟开销只有 0.2%–1.3%，却能让一个仅 2 层的 DSpark
+          打赢 5 层的 DFlash。
+        </p>
+
+        <h3>5.2 验证侧：置信度头 + 硬件感知调度器</h3>
+        <p>
+          起草更准之后，另一个此前没人管的问题浮出水面：并行架构很容易吐出很长的草稿块，但不加区分地
+          验证全部 token，会在高并发场景下把宝贵的 batch 容量浪费在注定被拒绝的尾部上。DSpark 用一个
+          轻量置信度头预测「前面都过了的前提下，这一位也能通过验证」的条件概率 \(c_k\)，
+          前缀存活概率由链式法则累乘 \(a_k=\prod_{i\le k} c_i\)；再用一个硬件感知调度器，
+          结合当前系统负载与离线 profile 出的吞吐曲线 \(\text{SPS}(B)\)，把所有候选按存活概率全局排序，
+          贪心纳入直到边际吞吐开始下降——轻载时把空闲算力换成更长的草稿，重载时只验高置信前缀。
+        </p>
+        <p>
+          置信度不改变输出质量（目标模型仍是唯一裁判），只决定怎么分配验证预算——这正是
+          「Confidence-Scheduled」这个名字的含义。这两个机制的完整数学细节（置信度头的解析监督标签、
+          Sequential Temperature Scaling 校准、调度算法的非预见性证明、以及与 DeepSeek-V4 的工程整合）
+          在站内已经有一篇专题文章讲透，这里不再重复，感兴趣可以直接跳转：
+          <a href="dspark-confidence-scheduled-speculative-decoding.html">《DSpark 深度解析：半自回归生成与置信度调度》</a>。
+        </p>
+
+        <h3>5.3 效果：两条支线各取所长的直接证据</h3>
+        <p>
+          在 Qwen3-14B 上（接受长度含 bonus token，温度 1.0，关闭调度器）：
+        </p>
+        <table class="decision-table">
+          <thead>
+            <tr><th>方法</th><th>GSM8K</th><th>MATH500</th><th>MBPP</th><th>HumanEval</th><th>MT-Bench</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>EAGLE-3</td><td>5.24</td><td>4.60</td><td>3.81</td><td>4.14</td><td>2.62</td></tr>
+            <tr><td>DFlash</td><td>5.41</td><td>4.84</td><td>4.44</td><td>4.59</td><td>3.10</td></tr>
+            <tr><td>DSpark</td><td>6.21</td><td>5.74</td><td>5.26</td><td>5.43</td><td>3.70</td></tr>
+          </tbody>
+        </table>
+        <p>
+          DSpark 相对 EAGLE-3 平均提升 30.0%，相对 DFlash 提升 18.3%；块内接受率从 0.93 起步且全块平稳，
+          块越长收益越大（\(\gamma{=}7\) 时 +15%–18%，\(\gamma{=}15\) 时扩大到 +22%–30%）。
+          线上部署在 DeepSeek-V4 预览版上，匹配吞吐水平下，V4-Flash 单用户生成速度提升
+          <strong>60%–85%</strong>，V4-Pro 提升 <strong>57%–78%</strong>。
+        </p>
+
+        <h2>六、五种方法的全景对照</h2>
+        <table class="decision-table">
+          <thead>
+            <tr>
+              <th>方法</th>
+              <th>工作方式</th>
+              <th>草稿风格</th>
+              <th>\(T_{\text{draft}}\)</th>
+              <th>核心矛盾</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Draft Model</td>
+              <td>独立小模型逐 token 草稿</td>
+              <td>自回归</td>
+              <td>\(O(\gamma)\)</td>
+              <td>与目标模型零共享，命中率靠运气</td>
+            </tr>
+            <tr>
+              <td>Medusa / MTP</td>
+              <td>共享 trunk，独立或链式头</td>
+              <td>并行 / 自回归</td>
+              <td>\(O(1)\) / \(O(\gamma)\)</td>
+              <td>零依赖（Medusa）或 exposure bias（MTP）</td>
+            </tr>
+            <tr>
+              <td>EAGLE-3</td>
+              <td>特征级自回归 + Training-Time Test</td>
+              <td>自回归</td>
+              <td>\(O(\gamma)\)</td>
+              <td>依赖建模强，但延迟随块长线性增长</td>
+            </tr>
+            <tr>
+              <td>DFlash</td>
+              <td>非因果 mask token 锚定块草稿 + KV 注入</td>
+              <td>并行块</td>
+              <td>\(O(1)\)</td>
+              <td>后段独立采样，多模态碰撞，后缀衰减</td>
+            </tr>
+            <tr>
+              <td>DSpark</td>
+              <td>DFlash 式并行骨干 + Markov Head + 置信度调度</td>
+              <td>依赖块</td>
+              <td>\(O(1) + \epsilon\)</td>
+              <td>——（同时解决接受长度与验证预算两个瓶颈）</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <figure class="diagram-figure diagram-figure--wide">
+          <svg viewBox="0 0 860 300" role="img" aria-label="两条支线汇流示意图">
+            <defs>
+              <marker id="arrow-flow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+                <polygon points="0 0, 8 3, 0 6" class="d-accent" />
+              </marker>
+            </defs>
+            <rect x="20" y="16" width="820" height="70" rx="12" class="d-zone" />
+            <text x="40" y="38" class="d-tag">自回归支线 · 依赖建模强 · 延迟随块长增长</text>
+            <rect x="60" y="50" width="150" height="28" rx="6" class="d-box" />
+            <text x="135" y="69" text-anchor="middle" class="d-label">Draft Model</text>
+            <path d="M210 64 L255 64" class="d-arrow" marker-end="url(#arrow-flow)" />
+            <rect x="260" y="50" width="150" height="28" rx="6" class="d-box" />
+            <text x="335" y="69" text-anchor="middle" class="d-label">EAGLE-3</text>
+
+            <rect x="20" y="106" width="820" height="70" rx="12" class="d-zone" />
+            <text x="40" y="128" class="d-tag">并行支线 · 起草延迟 O(1) · 块内独立</text>
+            <rect x="60" y="140" width="150" height="28" rx="6" class="d-box" />
+            <text x="135" y="159" text-anchor="middle" class="d-label">Medusa / MTP</text>
+            <path d="M210 154 L255 154" class="d-arrow" marker-end="url(#arrow-flow)" />
+            <rect x="260" y="140" width="150" height="28" rx="6" class="d-box" />
+            <text x="335" y="159" text-anchor="middle" class="d-label">DFlash</text>
+
+            <path d="M335 78 C 335 210, 500 210, 500 210" class="d-line" fill="none" />
+            <path d="M335 168 C 335 210, 500 210, 500 210" class="d-line" fill="none" marker-end="url(#arrow-flow)" />
+
+            <rect x="440" y="216" width="180" height="50" rx="10" class="d-box-accent" />
+            <text x="530" y="246" text-anchor="middle" class="d-label">DSpark</text>
+
+            <path d="M620 241 L680 241" class="d-arrow" marker-end="url(#arrow-flow)" />
+            <rect x="685" y="216" width="140" height="50" rx="10" class="d-box" />
+            <text x="755" y="240" text-anchor="middle" class="d-label">生产部署</text>
+            <text x="755" y="256" text-anchor="middle" class="d-muted">DeepSeek-V4</text>
+          </svg>
+          <figcaption>两条支线各自演进到一个瓶颈明确的终点后，在 DSpark 汇流为一个方法。</figcaption>
+        </figure>
+
+        <h2>七、训练与工程闭环：怎么产出一个又快又准的 Drafter</h2>
+        <p>
+          算法讲完，剩下全是数据和管道的事——这部分对应 <code>vllm-project/speculators</code> 的实践，
+          也是这条演化史里最容易被忽略、但决定「论文能不能落地」的一环。
+        </p>
+
+        <h3>7.1 训练目标里藏着的结论</h3>
+        <p>
+          以 DSpark 为例，三项损失加权求和，权重不是随手调的：
+        </p>
+        <div class="math-block" aria-label="训练损失权重">
+          \[
+            \mathcal{L} = 0.1\,\mathcal{L}_{\text{ce}} + 1.0\,\mathcal{L}_{\text{tv}} + 0.1\,\mathcal{L}_{\text{conf}}
+          \]
+        </div>
+        <p>
+          分布匹配损失 \(\mathcal{L}_{\text{tv}}\) 的权重是交叉熵 \(\mathcal{L}_{\text{ce}}\) 的 10 倍，
+          这不是调参偏好，是第一节 \(\alpha = 1 - D_{TV}(p,q)\) 的直接推论：<strong>最小化 \(L_1\) 距离
+          就是在直接最大化接受率</strong>。草稿模型的训练目标从来就不是「预测下一个正确 token」，
+          而是「让输出分布贴近目标模型」——这也是为什么单纯优化交叉熵训出来的草稿器，接受率往往不如
+          专门优化过总变差距离的版本。三项损失都乘一个指数衰减的位置权重
+          \(w_k \propto e^{-(k-1)/\lambda}\)，因为位置 1 的错误会作废整块，越靠前的位置权重越高。
+        </p>
+
+        <h3>7.2 数据只能在线产：为什么不能提前 dump 到硬盘</h3>
+        <p>
+          两个要求把「离线产数据、批量喂训练」这条路堵死了：一是草稿器要拟合目标模型<strong>在它自己输出
+          分布上</strong>的行为，所以训练用的回复必须由目标模型自己重新生成，数据集只能提供 prompt；
+          二是 EAGLE 系草稿器吃的是目标模型多层 hidden state，每个训练样本是「token 序列 + 多层隐藏状态」
+          的配对，而隐藏状态的体量比 token 大得多。更麻烦的是，只要目标模型换个版本或换个精度，
+          整个 dump 立刻作废；训练时再把这些数据读回来，又是一堵实打实的带宽墙。
+          唯一可行的路线是 <strong>produce → consume → free</strong>：每一批数据生成后立刻被训练消费、
+          随即释放，零陈旧、路径上完全没有持久化存储。
+        </p>
+
+        <h3>7.3 把 hidden state 伪装成 KV：复用 vLLM KVConnector 与 Mooncake</h3>
+        <p>
+          在线产数据意味着要在「目标模型做 prefill 的机器」和「训练草稿器的机器」之间实时传输隐藏状态，
+          而这条通路其实不需要重新发明——它和 vLLM 的 PD 分离（Prefill-Decode Disaggregation）架构长得
+          一模一样，只是把「D（Decode 实例）」换成了「Trainer」。<code>speculators</code> 的做法是直接复用
+          vLLM 已经打磨好的 <strong>KVConnector</strong>：
+        </p>
+        <div class="math-block" aria-label="hidden state 伪装成 KV 布局">
+          \[
+            \underbrace{[\text{block},\,\text{block\_size},\,\text{num\_heads},\,\text{head\_size}]}_{\text{KV Cache 布局}}
+            \;\Longleftarrow\;
+            \underbrace{[T,\,L,\,H]}_{\text{辅助激活栈}}, \quad \text{令 num\_heads}{=}L,\ \text{head\_size}{=}H
+          \]
+        </div>
+        <p>
+          令 <code>num_heads = L</code>（目标模型层数）、<code>head_size = H</code>（隐藏维），
+          辅助激活栈就严丝合缝地落进 KV 槽位，一个字节不用改——层轴被伪装成注意力头，于是无需 reshape、
+          无额外注意力计算；分页管理、块分配、槽位映射、生命周期全部沿用 KV Cache 现成的机制，
+          前缀缓存还自动生效（重复 prompt 不用重跑目标模型）。走了 KV 这条路，就自动继承了整个
+          KVConnector 生态。
+        </p>
+        <p>
+          后端选择 <strong>Mooncake</strong> 也不是因为「RDMA 比磁盘快」这种粗糙理由，而是需求写完后
+          只剩它满足全部约束：
+        </p>
+        <table class="decision-table">
+          <thead>
+            <tr><th>硬性要求</th><th>共享文件系统</th><th>NCCL 集合通信</th><th>裸 RDMA</th><th>Mooncake</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>跨节点，不假设共享 FS</td><td>✗</td><td>✓</td><td>✓</td><td>✓</td></tr>
+            <tr><td>按 key 寻址（生产者不知道谁何时消费）</td><td>✗</td><td>✗</td><td>✗</td><td>✓</td></tr>
+            <tr><td>单边读取，不占生产者 CPU</td><td>✗</td><td>✗</td><td>✓</td><td>✓</td></tr>
+            <tr><td>有界 + 可驱逐（背压可控）</td><td>✗</td><td>✗</td><td>✗</td><td>✓</td></tr>
+          </tbody>
+        </table>
+        <p>
+          集合通信要求固定通信域、锁步参与，而这里的传输是异步、动态、多对多的；裸 RDMA 传得动，
+          但寻址、生命周期、驱逐、背压全得自己重新写一遍。Mooncake 四条全中，而且 vLLM 做 PD 分离时
+          已经在生产里用它——架构完全对上：生产者池（目标模型 prefill）和消费者池（Trainer）跑在不同机器上，
+          中间用一个按 key 寻址的 KV store 异步传张量，这和 PD 分离是同一套基础设施。
+        </p>
+
+        <h3>7.4 三条命令看完整流程</h3>
+        <figure class="code-block">
+          <figcaption>数据准备 → 提取服务 → 在线训练，三步跑通</figcaption>
+          <pre><code class="language-python"># 1. 准备数据：分词 + 构建 loss mask
+python scripts/prepare_data.py --model target-model-fp8 \
+    --dataset-name-or-path sharegpt-cleaned --output-dir ./data
+
+# 2. 启动提取服务器：通过 connector 流式传输目标隐藏状态
+python scripts/launch_vllm.py target-model-fp8 --target-layer-ids 8 23 39 55 70 \
+    --hidden-states-backend mooncake --mooncake-protocol rdma -- --tensor-parallel-size 4
+
+# 3. 训练：在线消费隐藏状态
+torchrun --standalone --nproc_per_node 4 scripts/train.py --speculator-type dspark \
+    --verifier-name-or-path target-model-fp8 --num-layers 5 --block-size 8 --markov-rank 256</code></pre>
+        </figure>
+        <p>
+          产出的 <code>config.json</code> 里，配方和 checkpoint 是同一个对象，字段与训练参数一一对应，
+          serving 引擎自动检测走哪条草稿路径；<code>verifier</code> 字段锁定了训练时对应的确切目标模型——
+          草稿器和验证器是绑死的一对，换一个目标模型就得重训草稿器。这也是为什么第一节反复强调的
+          「无损」前提如此重要：草稿器的一切改动都不能绕开验证规则，否则丢掉的就不只是速度。
+        </p>
+
+        <h2>结语：一条支线走到头，另一条支线开始补课</h2>
+        <p>
+          回看这条演化史，会发现它并不是一条直线，而是两条互相纠正的支线：自回归支线一路把「依赖建模」
+          做到极致，从 MTP 的链式拼接到 EAGLE 的特征级自回归、再到 Training-Time Test 堵上分布偏移，
+          代价是起草延迟线性增长；并行支线一路把「起草延迟」压到极限，从 Medusa 的完全独立到 DFlash 的
+          KV 注入，代价是块内依赖被采样过程硬生生切断。DSpark 没有在两条支线里选边站，
+          而是看清了「双向注意力已经隐式编码了联合结构，只是采样接口把它掐断了」这一件事，
+          用一个几乎零开销的 Markov Head 重新打开这个出口——顺带把「验证多少」也从固定超参数
+          变成了一个感知系统负载的动态决策。
+        </p>
+        <p>
+          更值得记住的是最后一节：算法上的无损证明只是故事的一半，能不能真正把训练数据在线产出来、
+          能不能复用现成的 PD 分离基础设施而不是重新造轮子，往往才是一篇论文能否走进生产环境的
+          决定性因素。
+        </p>
+
+        <div class="essay-ending">
+          自回归支线教会草稿器「怎么想」，并行支线教会草稿器「怎么快」——DSpark 的答案不是二选一，
+          而是让「想」和「快」分别只做自己最擅长的那一半工作。
+        </div>
+
+        <section class="references-section" aria-label="参考与扩展阅读">
+          <h2>参考与扩展阅读</h2>
+          <ol class="reference-list">
+            <li>
+              <a href="https://proceedings.mlr.press/v202/leviathan23a.html" target="_blank" rel="noopener noreferrer">
+                Fast Inference from Transformers via Speculative Decoding (Leviathan, Kalman &amp; Matias, ICML 2023)
+              </a>
+              <span>投机解码的奠基性工作之一，给出了 draft-verify-accept 与拒绝采样的基本框架。</span>
+            </li>
+            <li>
+              <a href="https://arxiv.org/abs/2302.01318" target="_blank" rel="noopener noreferrer">
+                Accelerating Large Language Model Decoding with Speculative Sampling (Chen, Borgeaud, Irving et al., DeepMind, 2023)
+              </a>
+              <span>与 Leviathan et al. 同期独立提出的推测采样方法，两者共同确立了这一范式。</span>
+            </li>
+            <li>
+              <a href="https://arxiv.org/abs/2401.10774" target="_blank" rel="noopener noreferrer">
+                Medusa: Simple LLM Inference Acceleration Framework with Multiple Decoding Heads (Cai, Yao, Chen et al., 2024)
+              </a>
+              <span>并行支线的起点：共享 trunk + 独立解码头，零依赖的极端形态。</span>
+            </li>
+            <li>
+              <a href="https://arxiv.org/abs/2404.19737" target="_blank" rel="noopener noreferrer">
+                Better &amp; Faster Large Language Models via Multi-token Prediction (Gloeckle, Idrissi, Rozière et al., Meta, 2024)
+              </a>
+              <span>Multi-Token Prediction 的系统性研究，MTP 链式头设计的重要参照。</span>
+            </li>
+            <li>
+              <a href="https://arxiv.org/abs/2412.19437" target="_blank" rel="noopener noreferrer">
+                DeepSeek-V3 Technical Report (DeepSeek-AI, 2024)
+              </a>
+              <span>MTP 模块在生产大模型中作为投机解码起草器的具体设计与部署细节。</span>
+            </li>
+            <li>
+              <a href="https://arxiv.org/abs/2401.15077" target="_blank" rel="noopener noreferrer">
+                EAGLE: Speculative Sampling Requires Rethinking Feature Uncertainty (Li, Wei, Zhang &amp; Zhang, ICML 2024)
+              </a>
+              <span>特征级自回归草稿器，边缘分布与条件分布区别的原始论证。</span>
+            </li>
+            <li>
+              <a href="https://arxiv.org/abs/2406.16858" target="_blank" rel="noopener noreferrer">
+                EAGLE-2: Faster Inference of Language Models with Dynamic Draft Trees (Li, Wei, Zhang &amp; Zhang, 2024)
+              </a>
+              <span>把草稿链升级为草稿树，用动态树状验证进一步提高接受长度。</span>
+            </li>
+            <li>
+              <a href="https://openreview.net/forum?id=4exx1hUffq" target="_blank" rel="noopener noreferrer">
+                EAGLE-3: Scaling up Inference Acceleration of LLMs via Training-Time Test (Li, Wei, Zhang &amp; Zhang, NeurIPS 2026)
+              </a>
+              <span>引入 Training-Time Test 与多层特征融合，解决训练/推理分布不一致问题。</span>
+            </li>
+            <li>
+              <a href="https://arxiv.org/abs/2602.06036" target="_blank" rel="noopener noreferrer">
+                DFlash: Block Diffusion for Flash Speculative Decoding (Chen, Liang &amp; Liu, 2026)
+              </a>
+              <span>并行支线的突破：非因果 mask token + KV 注入，一次前向出全块草稿。</span>
+            </li>
+            <li>
+              <a href="https://arxiv.org/abs/2607.05147" target="_blank" rel="noopener noreferrer">
+                DSpark: Confidence-Scheduled Speculative Decoding with Semi-Autoregressive Generation (Cheng, Yu, Shao, Li, Xiong et al., DeepSeek-AI &amp; Peking University, 2026)
+              </a>
+              <span>两条支线的汇流点，半自回归生成 + 置信度调度验证，本文第五、七节的核心依据。</span>
+            </li>
+            <li>
+              <a href="dspark-confidence-scheduled-speculative-decoding.html">
+                站内文章：DSpark 深度解析：半自回归生成与置信度调度，让推测解码「又快又不浪费」
+              </a>
+              <span>DSpark 完整的数学细节、消融实验与生产部署故事，本文第五节的延伸阅读。</span>
+            </li>
+          </ol>
+        </section>
+      </section>
+
+      <section class="comments-section" id="comments" aria-label="Discussion">
+        <div class="comments-header">
+          <h2>Discussion</h2>
+        </div>
+        <div id="utterances-container" class="utterances-container"></div>
+        <noscript>请启用 JavaScript 后查看评论区。</noscript>
+      </section>
+    </article>
+  </main>
+
+  <footer class="site-footer">
+    <span class="footer-credit">
+      <span class="footer-prefix">© 2026 by</span>
+      <a href="../../index.html" class="footer-brand">
+        <span class="brand-mascot-frame brand-mascot-frame--inline" aria-hidden="true">
+          <picture>
+            <source srcset="../../assets/avatar-mascot.webp" type="image/webp" />
+            <img src="../../assets/avatar-mascot.png" alt="" class="brand-mascot" width="27" height="27" decoding="async" />
+          </picture>
+        </span>
+        <span>MOFANG</span>
+      </a>
+    </span>
+  </footer>
+
+  <script src="../../app.js?v=37"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" crossorigin="anonymous"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js" crossorigin="anonymous"
+    onload="renderMathInElement(document.body, {
+      delimiters: [
+        {left: '\\[', right: '\\]', display: true},
+        {left: '\\(', right: '\\)', display: false}
+      ],
+      throwOnError: false
+    });"></script>
+</body>
+</html>

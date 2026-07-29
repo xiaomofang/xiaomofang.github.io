@@ -221,21 +221,21 @@ body {
 }
 
 [data-theme="night"] .theme-toggle .icon-sun {
-  opacity: 0;
-  transform: scale(0.5);
+  opacity: 1;
 }
 
 [data-theme="night"] .theme-toggle .icon-moon {
-  opacity: 1;
+  opacity: 0;
+  transform: scale(0.5);
 }
 
 [data-theme="day"] .theme-toggle .icon-sun {
-  opacity: 1;
+  opacity: 0;
+  transform: scale(0.5);
 }
 
 [data-theme="day"] .theme-toggle .icon-moon {
-  opacity: 0;
-  transform: scale(0.5);
+  opacity: 1;
 }
 
 .site-main {
@@ -827,6 +827,31 @@ body {
 
 .diagram-figure.diagram-figure--wide svg {
   max-width: 900px;
+}
+
+.diagram-figure img {
+  display: block;
+  width: 100%;
+  max-width: 720px;
+  height: auto;
+  margin: 0 auto;
+  border-radius: 10px;
+  background: #ffffff;
+  padding: 10px;
+  box-shadow: 0 0 0 1px var(--border);
+}
+
+.diagram-figure.diagram-figure--wide img {
+  max-width: 880px;
+}
+
+.diagram-figure .fig-source {
+  display: block;
+  margin-top: 8px;
+  text-align: center;
+  color: var(--text-soft);
+  font-size: 0.78rem;
+  letter-spacing: 0.02em;
 }
 
 .diagram-figure .d-title {
