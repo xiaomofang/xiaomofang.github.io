@@ -19,7 +19,7 @@
     html[data-theme="night"], html[data-theme="night"] body { background: #0c0c0c; color: #ededed; color-scheme: dark; }
     html[data-theme="day"], html[data-theme="day"] body { background: #ffffff; color: #1a1a1a; color-scheme: light; }
   </style>
-  <link rel="stylesheet" href="../../styles.css?v=40" />
+  <link rel="stylesheet" href="../../styles.css?v=41" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous" />
   <title>投机解码四代演进：从 MTP、Medusa 到 EAGLE、DFlash、DSpark</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
@@ -68,31 +68,31 @@
         </p>
 
         <div class="logic-map" aria-label="文章逻辑地图">
-          <div class="map-node">
+          <div class="map-node map-node--start">
             <span>1</span>
             <strong>起点分叉</strong>
             <p>Draft Model 通用但慢；Medusa/MTP 把头做成并行或链式，各有取舍。</p>
           </div>
           <div class="map-arrow">→</div>
-          <div class="map-node">
+          <div class="map-node map-node--ar">
             <span>2</span>
             <strong>自回归支线：EAGLE</strong>
             <p>特征级自回归 + Training-Time Test，把「边缘变条件」焊死。</p>
           </div>
           <div class="map-arrow">→</div>
-          <div class="map-node">
+          <div class="map-node map-node--par">
             <span>3</span>
             <strong>并行支线：DFlash</strong>
             <p>Mask token + KV 注入，一次前向出全块，代价是后缀衰减。</p>
           </div>
           <div class="map-arrow">→</div>
-          <div class="map-node">
+          <div class="map-node map-node--conv">
             <span>4</span>
             <strong>汇流：DSpark</strong>
             <p>并行骨干 + 轻量 Markov 头 + 置信度调度，两条支线各取所长。</p>
           </div>
           <div class="map-arrow">→</div>
-          <div class="map-node">
+          <div class="map-node map-node--eng">
             <span>5</span>
             <strong>工程闭环</strong>
             <p>数据在线产、hidden state 伪装成 KV，复用 PD 分离基础设施。</p>
@@ -185,6 +185,16 @@
           "no problem" 两种续写时，独立的头完全可能拼出 "of problem"。
         </p>
 
+        <figure class="diagram-figure">
+          <img src="../../assets/eagle-medusa/medusa-x1.png" alt="Medusa 架构与验证流程原图" loading="lazy" width="748" height="616" />
+          <figcaption>
+            <strong>Medusa 论文原图（Cai et al., 2024）：架构与验证流程。</strong>
+            目标模型的最后一层隐藏状态被同时喂给 \(K\) 个独立的 Medusa Head，每个头各自给出
+            top-k 候选；候选笛卡尔积组装成树，用 tree attention 一次前向并行验证，
+            接受最长的合法前缀。三个头之间没有任何箭头相连——这正是「完全独立」的直观体现。
+          </figcaption>
+        </figure>
+
         <h3>2.2 MTP：给独立头接上一根线</h3>
         <p>
           MTP（Multi-Token Prediction，Gloeckle et al., 2024；后被 DeepSeek-V3 系统性采用并作为
@@ -211,7 +221,7 @@
           <svg viewBox="0 0 780 220" role="img" aria-label="链式自回归 drafter 的通用形状">
             <defs>
               <marker id="arrow-chain" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
-                <polygon points="0 0, 8 3, 0 6" class="d-accent" />
+                <polygon points="0 0, 8 3, 0 6" class="d-accent-blue" />
               </marker>
             </defs>
             <rect x="20" y="70" width="150" height="70" rx="10" class="d-box" />
@@ -221,31 +231,31 @@
             <rect x="20" y="150" width="150" height="50" rx="10" class="d-box" />
             <text x="95" y="180" text-anchor="middle" class="d-muted">e(x_{k-1}) 前一 token 嵌入</text>
 
-            <path d="M170 105 L215 105" class="d-arrow" marker-end="url(#arrow-chain)" />
-            <path d="M170 175 L195 175 L195 120 L215 120" class="d-arrow" marker-end="url(#arrow-chain)" />
+            <path d="M170 105 L215 105" class="d-arrow-blue" marker-end="url(#arrow-chain)" />
+            <path d="M170 175 L195 175 L195 120 L215 120" class="d-arrow-blue" marker-end="url(#arrow-chain)" />
 
-            <rect x="220" y="80" width="180" height="70" rx="10" class="d-box-accent" />
+            <rect x="220" y="80" width="180" height="70" rx="10" class="d-box-blue" />
             <text x="310" y="108" text-anchor="middle" class="d-label">拼接 + 一层网络</text>
             <text x="310" y="128" text-anchor="middle" class="d-muted">MTP: Transformer block</text>
             <text x="310" y="144" text-anchor="middle" class="d-muted">EAGLE: FC + Decoder 层</text>
 
-            <path d="M400 115 L445 115" class="d-arrow" marker-end="url(#arrow-chain)" />
+            <path d="M400 115 L445 115" class="d-arrow-blue" marker-end="url(#arrow-chain)" />
 
             <rect x="450" y="80" width="130" height="70" rx="10" class="d-box" />
             <text x="515" y="108" text-anchor="middle" class="d-label">h_k</text>
             <text x="515" y="128" text-anchor="middle" class="d-muted">这一步表征</text>
 
-            <path d="M580 115 L625 115" class="d-arrow" marker-end="url(#arrow-chain)" />
+            <path d="M580 115 L625 115" class="d-arrow-blue" marker-end="url(#arrow-chain)" />
 
             <rect x="630" y="80" width="130" height="70" rx="10" class="d-box" />
             <text x="695" y="105" text-anchor="middle" class="d-label">LM head</text>
             <text x="695" y="125" text-anchor="middle" class="d-muted">采样 x_k</text>
 
             <path d="M695 150 C 695 200, 95 200, 95 150" class="d-line" stroke-dasharray="5 4" fill="none" />
-            <text x="380" y="212" text-anchor="middle" class="d-muted">采样出的 x_k 回填，循环到下一步</text>
+            <text x="380" y="212" text-anchor="middle" class="d-tag-blue">采样出的 x_k 回填，循环到下一步</text>
           </svg>
           <figcaption>
-            MTP 与 EAGLE 共享同一个「拼接前驱信息 → 过一层网络 → 采样」的自回归骨架，
+            MTP 与 EAGLE 共享同一个「拼接前驱信息 → 过一层网络 → 采样」的自回归骨架（蓝色 = 自回归支线），
             真正的差异在训练方式与特征来源，而不在这张骨架图本身。
           </figcaption>
         </figure>
@@ -301,6 +311,18 @@
         </p>
 
         <h2>三、自回归支线的巅峰：EAGLE</h2>
+
+        <figure class="diagram-figure diagram-figure--wide">
+          <img src="../../assets/eagle-medusa/eagle-x5.png" alt="四种草稿方式的对比原图" loading="lazy" width="830" height="265" />
+          <figcaption>
+            <strong>EAGLE 论文原图（Li et al., ICML 2024）：四种起草方式的对比。</strong>
+            蓝色块是 token，橙色块是特征，红框是草稿模型的预测。Speculative Sampling 与 Lookahead
+            （基于 n-gram 的免训练方案，本文不展开）都在 token 层面打转；Medusa 独立地从同一个特征
+            \(f_2\) 并出 \(t_4, t_5\)；只有 EAGLE 把「上一步的采样结果」显式喂回特征序列——
+            这正是下面要讲的核心设计。
+          </figcaption>
+        </figure>
+
         <p>
           先固定全篇要反复用到的一个玩具例子：词表 10 个 token
           <code>{0:I, 1:love, 2:cats, 3:dogs, 4:to, 5:eat, 6:pizza, 7:very, 8:today, 9:&lt;eos&gt;}</code>，
@@ -348,6 +370,17 @@
           骨架几乎一模一样，真正的分水岭在下面两处。
         </p>
 
+        <figure class="diagram-figure diagram-figure--wide">
+          <img src="../../assets/eagle-medusa/eagle-x6.png" alt="EAGLE 完整推理流程原图" loading="lazy" width="831" height="906" />
+          <figcaption>
+            <strong>EAGLE 论文原图（Li et al., ICML 2024）：完整推理流程。</strong>
+            绿色是 token embedding，橙色是特征，红框是草稿模型的预测，蓝色模块（带雪花图标）来自目标
+            模型且冻结不训。左侧是目标模型单步生成，右侧是草稿阶段连续多步展开：每一步都把「上一步的
+            采样结果」与「上一步的特征」拼接后再喂入 Autoregression Head——下图的候选树正是由此连续
+            展开而来。
+          </figcaption>
+        </figure>
+
         <h3>3.2 为什么必须喂 token embedding：边缘分布 vs 条件分布</h3>
         <p>
           假设不喂 \(e(x_k)\)，草稿器只拿到 \(h^{(k-1)}\)，那它要拟合的对象就是对所有可能取值求和的
@@ -366,6 +399,17 @@
           <strong>条件分布</strong> \(p(h^{(k)} \mid x, y_k)\)。EAGLE 论文给出的实测数据是加速比从 1.9× 提到
           2.8×——这一个改动几乎是全篇最大的单点收益。
         </p>
+
+        <figure class="diagram-figure">
+          <img src="../../assets/eagle-medusa/eagle-x3.png" alt="特征序列不确定性原图" loading="lazy" width="829" height="216" />
+          <figcaption>
+            <strong>EAGLE 论文原图（Li et al., ICML 2024）：特征序列的不确定性。</strong>
+            与我们「I love」的玩具例子同构：token「I」之后既可能采到「am」也可能采到「always」，
+            两条分支各自导出完全不同的特征分布 \(p_I\)；只有已知实际采样结果（token 一起喂入），
+            后续特征 \(p_{\text{am}}\) / \(p_{\text{always}}\) 才会重新变得单峰、可预测。
+          </figcaption>
+        </figure>
+
         <p>
           这个「边缘 vs 条件」的区别是全文的主线：下一节 DFlash 的后缀衰减、再下一节 DSpark 的 Markov Head，
           本质上都是同一个问题的不同解法。
@@ -417,15 +461,15 @@
           <svg viewBox="0 0 780 210" role="img" aria-label="DFlash 并行起草结构">
             <defs>
               <marker id="arrow-df" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
-                <polygon points="0 0, 8 3, 0 6" class="d-accent" />
+                <polygon points="0 0, 8 3, 0 6" class="d-accent-orange" />
               </marker>
             </defs>
             <rect x="20" y="20" width="230" height="60" rx="10" class="d-box" />
             <text x="135" y="45" text-anchor="middle" class="d-label">目标模型多层隐藏状态</text>
             <text x="135" y="65" text-anchor="middle" class="d-muted">融合投影 → 上下文特征</text>
 
-            <path d="M250 50 L300 50" class="d-arrow" marker-end="url(#arrow-df)" />
-            <text x="275" y="40" text-anchor="middle" class="d-tag">KV 注入</text>
+            <path d="M250 50 L300 50" class="d-arrow-orange" marker-end="url(#arrow-df)" />
+            <text x="275" y="40" text-anchor="middle" class="d-tag-orange">KV 注入</text>
 
             <rect x="20" y="110" width="120" height="60" rx="10" class="d-box" />
             <text x="80" y="135" text-anchor="middle" class="d-label">[锚点]</text>
@@ -435,9 +479,9 @@
             <text x="315" y="135" text-anchor="middle" class="d-label">[MASK][MASK][MASK]</text>
             <text x="315" y="155" text-anchor="middle" class="d-muted">待「去噪」的 3 个空位</text>
 
-            <path d="M480 140 L520 140" class="d-arrow" marker-end="url(#arrow-df)" />
+            <path d="M480 140 L520 140" class="d-arrow-orange" marker-end="url(#arrow-df)" />
 
-            <rect x="300" y="20" width="200" height="60" rx="10" class="d-box-accent" />
+            <rect x="300" y="20" width="200" height="60" rx="10" class="d-box-orange" />
             <text x="400" y="45" text-anchor="middle" class="d-label">草稿器（每层拼入上下文 K/V）</text>
             <text x="400" y="65" text-anchor="middle" class="d-muted">一次前向 · 块内双向注意力</text>
 
@@ -446,8 +490,18 @@
             <text x="640" y="155" text-anchor="middle" class="d-muted">三个位置独立取 argmax</text>
           </svg>
           <figcaption>
-            DFlash：锚点 + Mask 一次前向出全部草稿 logits，草稿延迟从 \(O(\gamma)\) 降到 \(O(1)\)；
+            DFlash：锚点 + Mask 一次前向出全部草稿 logits，草稿延迟从 \(O(\gamma)\) 降到 \(O(1)\)（橙色 = 并行支线）；
             目标模型的上下文特征通过 KV 注入拼入草稿器每一层，而不仅仅是输入端。
+          </figcaption>
+        </figure>
+
+        <figure class="diagram-figure diagram-figure--wide">
+          <img src="../../assets/eagle-medusa/dflash-x2.png" alt="DFlash 推理设计原图" loading="lazy" width="747" height="336" />
+          <figcaption>
+            <strong>DFlash 论文原图（Chen, Liang &amp; Liu, 2026）：推理设计（Figure 2）。</strong>
+            浅蓝色是融合后的目标上下文特征，橙色是锚点 token，绿色是待去噪的 mask token；
+            上下文特征只出现在每一层的 KV Cache 里，通过双向注意力被所有 mask 位置读取，
+            再经 MLP 得到下一层输入——层层堆叠即可加深草稿网络而不增加串行步数。
           </figcaption>
         </figure>
 
@@ -503,6 +557,16 @@
           仍然更优。
         </p>
 
+        <figure class="diagram-figure diagram-figure--wide">
+          <img src="../../assets/eagle-medusa/dflash-x1.png" alt="DFlash 相对 EAGLE-3 与基线的加速比原图" loading="lazy" width="747" height="267" />
+          <figcaption>
+            <strong>DFlash 论文原图（Chen, Liang &amp; Liu, 2026）：相对加速比（Figure 1）。</strong>
+            Qwen3-8B 上，DFlash（蓝）在全部 7 个 benchmark 上都比 EAGLE-3（绿）快出一大截，
+            部分任务上相对自回归解码基线（灰）的加速比超过 6×——数字上印证了上面「位置 1 容量优势」
+            这个反直觉结论。
+          </figcaption>
+        </figure>
+
         <h3>4.4 代价：后缀衰减与多模态碰撞</h3>
         <p>
           差异不在草稿器这边——同一个网络、同一次前向，每个位置拿到的输入信息量完全一样。差异在它要对齐的
@@ -519,6 +583,16 @@
           熵天然高于任何单一分支，而它要对齐的恰恰是其中某一个分支；位置越靠后，草稿器要混合的分支越多、
           分布越糊，目标模型那边条件却越加越多、分布反而越尖锐——两边越拉越远，这就是<strong>后缀衰减</strong>。
         </p>
+
+        <figure class="diagram-figure">
+          <img src="../../assets/dspark/x2.png" alt="位置级条件接受率对比原图" loading="lazy" width="789" height="215" />
+          <figcaption>
+            <strong>DSpark 论文原图（Cheng, Yu, Shao, Li, Xiong et al., 2026）：位置级条件接受率。</strong>
+            自回归 drafter（Eagle3，蓝线）接受率随位置保持稳定甚至上升；并行 drafter（DFlash，橙线）
+            则出现明显的后缀衰减——这正是上面公式 \(\alpha_k\) 推导出的现象在真实 benchmark 上的直接体现。
+          </figcaption>
+        </figure>
+
         <p>
           值得停下来想一层：块内明明是双向注意力，位置之间能互相看见，为什么还会拼出不连贯的组合？
           用一组数字看清楚：假设前缀「I love」下，位置 1、2 的真实<strong>联合分布</strong>有两个明显的峰：
@@ -560,6 +634,16 @@
           和轻量串行修正拼在一起</strong>，同时再补一刀解决「验证多少」这个此前没人管的系统问题。
         </p>
 
+        <figure class="diagram-figure">
+          <img src="../../assets/dspark/x1.png" alt="DSpark 架构与解码周期原图" loading="lazy" width="747" height="483" />
+          <figcaption>
+            <strong>DSpark 论文原图（Cheng, Yu, Shao, Li, Xiong et al., 2026）：架构与解码周期（Figure 1）。</strong>
+            并行骨干一次前向生成 E、F、G、H 四个候选（半自回归修正见下文），调度器判断只验证到
+            H 之前为止；目标模型验证后 E、F 被接受、G 被拒绝，模型据此生成修正 token G* 完成本轮解码——
+            这张图同时体现了本节「怎么生成」与延伸阅读文章里「怎么调度验证」两个机制。
+          </figcaption>
+        </figure>
+
         <h3>5.1 起草侧：并行骨干 + Markov Head</h3>
         <p>
           DSpark 保留 DFlash 的并行主干，一次前向出全块基础 logits \(U_1,\ldots,U_\gamma\)，
@@ -581,6 +665,15 @@
           纠正是串行头给的，实测这个串行头带来的延迟开销只有 0.2%–1.3%，却能让一个仅 2 层的 DSpark
           打赢 5 层的 DFlash。
         </p>
+
+        <figure class="diagram-figure">
+          <img src="../../assets/dspark/x3.png" alt="drafter 深度消融实验原图" loading="lazy" width="747" height="302" />
+          <figcaption>
+            <strong>DSpark 论文原图（Cheng, Yu, Shao, Li, Xiong et al., 2026）：drafter 深度的影响（Figure 3）。</strong>
+            固定 proposal length，DSpark（绿线）性能随层数增加单调提升，仅 2 层就已经超过 5 层的
+            DFlash（橙线）——直接证实了上一段「纠正比堆并行层更划算」的结论。
+          </figcaption>
+        </figure>
 
         <h3>5.2 验证侧：置信度头 + 硬件感知调度器</h3>
         <p>
@@ -676,21 +769,27 @@
               <marker id="arrow-flow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
                 <polygon points="0 0, 8 3, 0 6" class="d-accent" />
               </marker>
+              <marker id="arrow-flow-blue" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+                <polygon points="0 0, 8 3, 0 6" class="d-accent-blue" />
+              </marker>
+              <marker id="arrow-flow-orange" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+                <polygon points="0 0, 8 3, 0 6" class="d-accent-orange" />
+              </marker>
             </defs>
-            <rect x="20" y="16" width="820" height="70" rx="12" class="d-zone" />
-            <text x="40" y="38" class="d-tag">自回归支线 · 依赖建模强 · 延迟随块长增长</text>
-            <rect x="60" y="50" width="150" height="28" rx="6" class="d-box" />
+            <rect x="20" y="16" width="820" height="70" rx="12" class="d-zone-blue" />
+            <text x="40" y="38" class="d-tag-blue">自回归支线 · 依赖建模强 · 延迟随块长增长</text>
+            <rect x="60" y="50" width="150" height="28" rx="6" class="d-box-blue" />
             <text x="135" y="69" text-anchor="middle" class="d-label">Draft Model</text>
-            <path d="M210 64 L255 64" class="d-arrow" marker-end="url(#arrow-flow)" />
-            <rect x="260" y="50" width="150" height="28" rx="6" class="d-box" />
+            <path d="M210 64 L255 64" class="d-arrow-blue" marker-end="url(#arrow-flow-blue)" />
+            <rect x="260" y="50" width="150" height="28" rx="6" class="d-box-blue" />
             <text x="335" y="69" text-anchor="middle" class="d-label">EAGLE-3</text>
 
-            <rect x="20" y="106" width="820" height="70" rx="12" class="d-zone" />
-            <text x="40" y="128" class="d-tag">并行支线 · 起草延迟 O(1) · 块内独立</text>
-            <rect x="60" y="140" width="150" height="28" rx="6" class="d-box" />
+            <rect x="20" y="106" width="820" height="70" rx="12" class="d-zone-orange" />
+            <text x="40" y="128" class="d-tag-orange">并行支线 · 起草延迟 O(1) · 块内独立</text>
+            <rect x="60" y="140" width="150" height="28" rx="6" class="d-box-orange" />
             <text x="135" y="159" text-anchor="middle" class="d-label">Medusa / MTP</text>
-            <path d="M210 154 L255 154" class="d-arrow" marker-end="url(#arrow-flow)" />
-            <rect x="260" y="140" width="150" height="28" rx="6" class="d-box" />
+            <path d="M210 154 L255 154" class="d-arrow-orange" marker-end="url(#arrow-flow-orange)" />
+            <rect x="260" y="140" width="150" height="28" rx="6" class="d-box-orange" />
             <text x="335" y="159" text-anchor="middle" class="d-label">DFlash</text>
 
             <path d="M335 78 C 335 210, 500 210, 500 210" class="d-line" fill="none" />
@@ -700,11 +799,14 @@
             <text x="530" y="246" text-anchor="middle" class="d-label">DSpark</text>
 
             <path d="M620 241 L680 241" class="d-arrow" marker-end="url(#arrow-flow)" />
-            <rect x="685" y="216" width="140" height="50" rx="10" class="d-box" />
+            <rect x="685" y="216" width="140" height="50" rx="10" class="d-box-purple" />
             <text x="755" y="240" text-anchor="middle" class="d-label">生产部署</text>
             <text x="755" y="256" text-anchor="middle" class="d-muted">DeepSeek-V4</text>
           </svg>
-          <figcaption>两条支线各自演进到一个瓶颈明确的终点后，在 DSpark 汇流为一个方法。</figcaption>
+          <figcaption>
+            两条支线各自演进到一个瓶颈明确的终点后（蓝 = 自回归、橙 = 并行），在 DSpark（绿）汇流为
+            一个方法，最终落地到生产部署（紫）。
+          </figcaption>
         </figure>
 
         <h2>七、训练与工程闭环：怎么产出一个又快又准的 Drafter</h2>
@@ -835,55 +937,25 @@ torchrun --standalone --nproc_per_node 4 scripts/train.py --speculator-type dspa
               <a href="https://proceedings.mlr.press/v202/leviathan23a.html" target="_blank" rel="noopener noreferrer">
                 Fast Inference from Transformers via Speculative Decoding (Leviathan, Kalman &amp; Matias, ICML 2023)
               </a>
-              <span>投机解码的奠基性工作之一，给出了 draft-verify-accept 与拒绝采样的基本框架。</span>
-            </li>
-            <li>
-              <a href="https://arxiv.org/abs/2302.01318" target="_blank" rel="noopener noreferrer">
-                Accelerating Large Language Model Decoding with Speculative Sampling (Chen, Borgeaud, Irving et al., DeepMind, 2023)
-              </a>
-              <span>与 Leviathan et al. 同期独立提出的推测采样方法，两者共同确立了这一范式。</span>
+              <span>投机解码的奠基性工作，给出了 draft-verify-accept 与拒绝采样的基本框架，全文第一节的证明基础。</span>
             </li>
             <li>
               <a href="https://arxiv.org/abs/2401.10774" target="_blank" rel="noopener noreferrer">
                 Medusa: Simple LLM Inference Acceleration Framework with Multiple Decoding Heads (Cai, Yao, Chen et al., 2024)
               </a>
-              <span>并行支线的起点：共享 trunk + 独立解码头，零依赖的极端形态。</span>
-            </li>
-            <li>
-              <a href="https://arxiv.org/abs/2404.19737" target="_blank" rel="noopener noreferrer">
-                Better &amp; Faster Large Language Models via Multi-token Prediction (Gloeckle, Idrissi, Rozière et al., Meta, 2024)
-              </a>
-              <span>Multi-Token Prediction 的系统性研究，MTP 链式头设计的重要参照。</span>
-            </li>
-            <li>
-              <a href="https://arxiv.org/abs/2412.19437" target="_blank" rel="noopener noreferrer">
-                DeepSeek-V3 Technical Report (DeepSeek-AI, 2024)
-              </a>
-              <span>MTP 模块在生产大模型中作为投机解码起草器的具体设计与部署细节。</span>
-            </li>
-            <li>
-              <a href="https://arxiv.org/abs/2401.15077" target="_blank" rel="noopener noreferrer">
-                EAGLE: Speculative Sampling Requires Rethinking Feature Uncertainty (Li, Wei, Zhang &amp; Zhang, ICML 2024)
-              </a>
-              <span>特征级自回归草稿器，边缘分布与条件分布区别的原始论证。</span>
-            </li>
-            <li>
-              <a href="https://arxiv.org/abs/2406.16858" target="_blank" rel="noopener noreferrer">
-                EAGLE-2: Faster Inference of Language Models with Dynamic Draft Trees (Li, Wei, Zhang &amp; Zhang, 2024)
-              </a>
-              <span>把草稿链升级为草稿树，用动态树状验证进一步提高接受长度。</span>
+              <span>并行支线的起点：共享 trunk + 独立解码头，零依赖的极端形态，本文 Figure 1 原图出处。</span>
             </li>
             <li>
               <a href="https://openreview.net/forum?id=4exx1hUffq" target="_blank" rel="noopener noreferrer">
                 EAGLE-3: Scaling up Inference Acceleration of LLMs via Training-Time Test (Li, Wei, Zhang &amp; Zhang, NeurIPS 2026)
               </a>
-              <span>引入 Training-Time Test 与多层特征融合，解决训练/推理分布不一致问题。</span>
+              <span>自回归支线的巅峰，EAGLE 系列（v1–v3）从特征级自回归到 Training-Time Test 的集大成之作，本文多幅原图出处。</span>
             </li>
             <li>
               <a href="https://arxiv.org/abs/2602.06036" target="_blank" rel="noopener noreferrer">
                 DFlash: Block Diffusion for Flash Speculative Decoding (Chen, Liang &amp; Liu, 2026)
               </a>
-              <span>并行支线的突破：非因果 mask token + KV 注入，一次前向出全块草稿。</span>
+              <span>并行支线的突破：非因果 mask token + KV 注入，一次前向出全块草稿，本文多幅原图出处。</span>
             </li>
             <li>
               <a href="https://arxiv.org/abs/2607.05147" target="_blank" rel="noopener noreferrer">

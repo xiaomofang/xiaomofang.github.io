@@ -23,6 +23,9 @@
   --surface-muted: rgba(255, 255, 255, 0.04);
   --input-bg: rgba(255, 255, 255, 0.04);
   --code-bg: #141414;
+  --hue-blue: #60a5fa;
+  --hue-orange: #fb923c;
+  --hue-purple: #c084fc;
 }
 
 [data-theme="day"] {
@@ -43,6 +46,9 @@
   --syntax-string: #047857;
   --syntax-number: #b45309;
   --syntax-comment: #64748b;
+  --hue-blue: #2563eb;
+  --hue-orange: #ea580c;
+  --hue-purple: #9333ea;
 }
 
 [data-theme="night"] {
@@ -691,6 +697,15 @@ body {
   margin-bottom: 10px;
 }
 
+.post-page-content h2 {
+  margin-top: 46px;
+  padding-top: 8px;
+}
+
+.post-page-content h3 {
+  margin-top: 34px;
+}
+
 .post-page-content pre {
   background: var(--code-bg);
   border: 1px solid var(--border);
@@ -925,6 +940,86 @@ body {
   fill: none;
 }
 
+/* Multi-hue palette for lineage diagrams: blue = autoregressive branch,
+   orange = parallel branch, purple = engineering, accent(green) = convergence. */
+.diagram-figure .d-box-blue {
+  fill: color-mix(in srgb, var(--hue-blue) 16%, var(--code-bg));
+  stroke: var(--hue-blue);
+  stroke-width: 1.5;
+}
+
+.diagram-figure .d-box-orange {
+  fill: color-mix(in srgb, var(--hue-orange) 16%, var(--code-bg));
+  stroke: var(--hue-orange);
+  stroke-width: 1.5;
+}
+
+.diagram-figure .d-box-purple {
+  fill: color-mix(in srgb, var(--hue-purple) 16%, var(--code-bg));
+  stroke: var(--hue-purple);
+  stroke-width: 1.5;
+}
+
+.diagram-figure .d-zone-blue {
+  fill: color-mix(in srgb, var(--hue-blue) 6%, transparent);
+  stroke: var(--hue-blue);
+  stroke-width: 1.5;
+  stroke-dasharray: 6 4;
+  opacity: 0.7;
+}
+
+.diagram-figure .d-zone-orange {
+  fill: color-mix(in srgb, var(--hue-orange) 6%, transparent);
+  stroke: var(--hue-orange);
+  stroke-width: 1.5;
+  stroke-dasharray: 6 4;
+  opacity: 0.7;
+}
+
+.diagram-figure .d-tag-blue {
+  fill: var(--hue-blue);
+  font-size: 11px;
+  font-weight: 600;
+  font-family: var(--font-sans);
+  letter-spacing: 0.04em;
+}
+
+.diagram-figure .d-tag-orange {
+  fill: var(--hue-orange);
+  font-size: 11px;
+  font-weight: 600;
+  font-family: var(--font-sans);
+  letter-spacing: 0.04em;
+}
+
+.diagram-figure .d-tag-purple {
+  fill: var(--hue-purple);
+  font-size: 11px;
+  font-weight: 600;
+  font-family: var(--font-sans);
+  letter-spacing: 0.04em;
+}
+
+.diagram-figure .d-accent-blue {
+  fill: var(--hue-blue);
+}
+
+.diagram-figure .d-accent-orange {
+  fill: var(--hue-orange);
+}
+
+.diagram-figure .d-arrow-blue {
+  stroke: var(--hue-blue);
+  stroke-width: 2;
+  fill: none;
+}
+
+.diagram-figure .d-arrow-orange {
+  stroke: var(--hue-orange);
+  stroke-width: 2;
+  fill: none;
+}
+
 .diagram-figure foreignObject .svg-math {
   display: flex;
   align-items: center;
@@ -1052,52 +1147,72 @@ body {
 }
 
 .logic-map {
-  display: grid;
-  grid-template-columns: 1fr auto 1fr auto 1fr auto 1fr;
+  --map-color: var(--accent);
+  display: flex;
+  flex-wrap: wrap;
   align-items: stretch;
-  gap: 12px;
-  margin: 30px 0 34px;
+  gap: 16px 10px;
+  margin: 34px 0 38px;
 }
 
 .map-node {
+  flex: 1 1 190px;
   min-width: 0;
   border: 1px solid var(--border);
+  border-top: 3px solid var(--map-color);
   border-radius: var(--radius);
   background: var(--surface-muted);
-  padding: 16px;
+  padding: 18px 18px 20px;
+  transition: transform var(--transition), box-shadow var(--transition);
+}
+
+.map-node:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px -14px var(--map-color);
 }
 
 .map-node span {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
-  margin-bottom: 10px;
+  width: 26px;
+  height: 26px;
+  margin-bottom: 12px;
   border-radius: 50%;
-  background: var(--accent);
+  background: var(--map-color);
   color: var(--bg);
-  font-size: 0.75rem;
+  font-size: 0.78rem;
   font-weight: 700;
 }
 
 .map-node strong {
   display: block;
   color: var(--text);
-  font-size: 0.95rem;
-  margin-bottom: 4px;
+  font-size: 0.98rem;
+  line-height: 1.4;
+  margin-bottom: 6px;
 }
 
 .map-node p {
   margin: 0;
   font-size: 0.86rem;
-  line-height: 1.55;
+  line-height: 1.6;
+  color: var(--text-soft);
 }
+
+.map-node--start { --map-color: var(--text-faint); }
+.map-node--ar { --map-color: var(--hue-blue); }
+.map-node--par { --map-color: var(--hue-orange); }
+.map-node--conv { --map-color: var(--accent); }
+.map-node--eng { --map-color: var(--hue-purple); }
 
 .map-arrow {
   display: flex;
   align-items: center;
-  color: var(--accent);
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 20px;
+  color: var(--text-faint);
   font-family: var(--font-serif);
   font-size: 1.3rem;
 }
@@ -1309,7 +1424,11 @@ body {
   }
 
   .logic-map {
-    grid-template-columns: 1fr;
+    flex-direction: column;
+  }
+
+  .map-node {
+    flex-basis: auto;
   }
 
   .algo-step {
