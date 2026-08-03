@@ -548,6 +548,13 @@ body {
   color: var(--accent-2);
 }
 
+.post-card-stats {
+  margin: 14px 0 0;
+  font-size: 0.8rem;
+  color: var(--text-faint);
+  line-height: 1.5;
+}
+
 .post-title {
   font-family: var(--font-serif);
   font-size: 1.3rem;
@@ -646,10 +653,23 @@ body {
   border-bottom: 1px solid var(--border);
 }
 
-.post-page-date {
+.post-page-category {
+  margin: 0 0 10px;
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent-2);
+}
+
+.post-page-date,
+.post-page-meta {
   font-size: 0.8rem;
   color: var(--text-faint);
   margin: 0 0 12px;
+}
+
+.post-page-meta {
+  margin: 16px 0 0;
 }
 
 .post-page-title {

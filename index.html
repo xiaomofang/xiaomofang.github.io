@@ -19,7 +19,7 @@
     html[data-theme="night"], html[data-theme="night"] body { background: #0c0c0c; color: #ededed; color-scheme: dark; }
     html[data-theme="day"], html[data-theme="day"] body { background: #ffffff; color: #1a1a1a; color-scheme: light; }
   </style>
-  <link rel="stylesheet" href="styles.css?v=41" />
+  <link rel="stylesheet" href="styles.css?v=42" />
   <title>MOFANG's Blog</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="description" content="LLM notes — understanding, one question at a time." />
@@ -84,52 +84,52 @@
         <article class="post-card" data-category="inference" data-date="2026-07-29" data-title="投机解码四代演进：从 MTP、Medusa 到 EAGLE、DFlash、DSpark">
           <a href="posts/inference/speculative-decoding-evolution-mtp-eagle-dflash-dspark.html" class="post-card-link">
             <div class="post-meta-row">
-              <time class="post-date" datetime="2026-07-29">Jul 29</time>
               <span class="post-tag">Inference</span>
             </div>
             <h3 class="post-title">投机解码四代演进：从 MTP、Medusa 到 EAGLE、DFlash、DSpark</h3>
             <p class="post-excerpt">
               沿着自回归支线（Draft Model → EAGLE）与并行支线（Medusa/MTP → DFlash）两条脉络，讲清投机解码为什么这样演化，DSpark 又如何把两条支线汇合；最后补上训练数据在线产出、hidden state 伪装成 KV 复用 PD 分离基础设施的工程闭环。
             </p>
+            <p class="post-card-stats">2026年7月29日 · 28 分钟 · 8293 字 · MOFANG</p>
           </a>
         </article>
 
         <article class="post-card" data-category="inference" data-date="2026-07-28" data-title="DSpark 深度解析：半自回归生成与置信度调度，让推测解码「又快又不浪费」">
           <a href="posts/inference/dspark-confidence-scheduled-speculative-decoding.html" class="post-card-link">
             <div class="post-meta-row">
-              <time class="post-date" datetime="2026-07-28">Jul 28</time>
               <span class="post-tag">Inference</span>
             </div>
             <h3 class="post-title">DSpark 深度解析：半自回归生成与置信度调度，让推测解码「又快又不浪费」</h3>
             <p class="post-excerpt">
               并行 drafter 快但会「烂尾」，固定验证长度在高并发下浪费 batch 容量。DeepSeek 与北大提出的 DSpark 用半自回归生成 + 硬件感知置信度调度双管齐下，在 DeepSeek-V4 真实流量上实现 60%–85% 提速。
             </p>
+            <p class="post-card-stats">2026年7月28日 · 24 分钟 · 7051 字 · MOFANG</p>
           </a>
         </article>
 
         <article class="post-card" data-category="inference" data-date="2026-06-10" data-title="FlashAttention 深度剖析：从存储层级到 IO-Aware Exact Attention">
           <a href="posts/inference/flash-attention-deep-dive.html" class="post-card-link">
             <div class="post-meta-row">
-              <time class="post-date" datetime="2026-06-10">Jun 10</time>
               <span class="post-tag">Inference</span>
             </div>
             <h3 class="post-title">FlashAttention 深度剖析：从存储层级到 IO-Aware Exact Attention</h3>
             <p class="post-excerpt">
               从 L1/L2/L3、SRAM、HBM 到 online softmax 与 kernel fusion：为什么 attention 是 memory-bound，FlashAttention 又如何把 O(N²) 中间矩阵留在片上。
             </p>
+            <p class="post-card-stats">2026年6月10日 · 11 分钟 · 3039 字 · MOFANG</p>
           </a>
         </article>
 
         <article class="post-card" data-category="inference" data-date="2026-06-08" data-title="Temperature=0 不等于确定性：从解码策略到 Batch Invariance">
           <a href="posts/inference/temperature-zero-determinism.html" class="post-card-link">
             <div class="post-meta-row">
-              <time class="post-date" datetime="2026-06-08">Jun 08</time>
               <span class="post-tag">Inference</span>
             </div>
             <h3 class="post-title">Temperature=0 不等于确定性：从解码策略到 Batch Invariance</h3>
             <p class="post-excerpt">
               从 logits、argmax、dynamic batching 到 MoE 与 RL 训练：确定性不是采样参数，而是系统属性。
             </p>
+            <p class="post-card-stats">2026年6月8日 · 8 分钟 · 2388 字 · MOFANG</p>
           </a>
         </article>
       </div>
@@ -153,6 +153,6 @@
     </span>
   </footer>
 
-  <script src="app.js?v=36"></script>
+  <script src="app.js?v=38"></script>
 </body>
 </html>

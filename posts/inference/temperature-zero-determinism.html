@@ -19,7 +19,7 @@
     html[data-theme="night"], html[data-theme="night"] body { background: #0c0c0c; color: #ededed; color-scheme: dark; }
     html[data-theme="day"], html[data-theme="day"] body { background: #ffffff; color: #1a1a1a; color-scheme: light; }
   </style>
-  <link rel="stylesheet" href="../../styles.css?v=41" />
+  <link rel="stylesheet" href="../../styles.css?v=42" />
   <title>Temperature=0 不等于确定性：从解码策略到 Batch Invariance</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="description" content="temperature=0 只能固定解码策略，不能保证大模型推理结果完全复现。本文从 logits、argmax、浮点归约、batch invariance、dynamic batching、MoE 路由和 RL 训练稳定性出发，解释确定性为什么是一项系统属性。" />
@@ -49,12 +49,13 @@
   <main class="site-main">
     <article class="post-page">
       <header class="post-page-header">
-        <p class="post-page-date">2026-06-08 · Inference</p>
+        <p class="post-page-category">Inference</p>
         <h1 class="post-page-title">Temperature=0 不等于确定性：从解码策略到 Batch Invariance</h1>
         <p class="post-lead">
           很多工程直觉会把 temperature=0 和“输出完全一致”画上等号。这个等号并不成立：
           temperature=0 固定的是解码策略，而不是生成 logits 的整个计算过程。
         </p>
+        <p class="post-page-meta" data-date="2026-06-08" data-author="MOFANG">2026年6月8日 · 8 分钟 · 2388 字 · MOFANG</p>
       </header>
 
       <section class="post-page-content">
@@ -429,6 +430,6 @@ Expert 4 : 0.500000</code></pre>
     </span>
   </footer>
 
-  <script src="../../app.js?v=35"></script>
+  <script src="../../app.js?v=38"></script>
 </body>
 </html>

@@ -19,7 +19,7 @@
     html[data-theme="night"], html[data-theme="night"] body { background: #0c0c0c; color: #ededed; color-scheme: dark; }
     html[data-theme="day"], html[data-theme="day"] body { background: #ffffff; color: #1a1a1a; color-scheme: light; }
   </style>
-  <link rel="stylesheet" href="../../styles.css?v=41" />
+  <link rel="stylesheet" href="../../styles.css?v=42" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous" />
   <title>DSpark 深度解析：半自回归生成与置信度调度，让推测解码「又快又不浪费」</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
@@ -50,7 +50,7 @@
   <main class="site-main">
     <article class="post-page">
       <header class="post-page-header">
-        <p class="post-page-date">2026-07-28 · Inference</p>
+        <p class="post-page-category">Inference</p>
         <h1 class="post-page-title">DSpark 深度解析：半自回归生成与置信度调度，让推测解码「又快又不浪费」</h1>
         <p class="post-lead">
           并行 drafter 一口气吐出一整块草稿 token，却在后半段迅速「烂尾」；固定长度验证又会在高并发时把宝贵的
@@ -58,6 +58,7 @@
           用一个很轻的「串行小尾巴」和一个会看 GPU 脸色的调度器，同时解决了这两个问题——并在 DeepSeek-V4
           的真实流量上把单用户生成速度提升了 60%–85%。
         </p>
+        <p class="post-page-meta" data-date="2026-07-28" data-author="MOFANG">2026年7月28日 · 24 分钟 · 7051 字 · MOFANG</p>
       </header>
 
       <section class="post-page-content">
@@ -814,7 +815,7 @@
     </span>
   </footer>
 
-  <script src="../../app.js?v=37"></script>
+  <script src="../../app.js?v=38"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" crossorigin="anonymous"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js" crossorigin="anonymous"
     onload="renderMathInElement(document.body, {

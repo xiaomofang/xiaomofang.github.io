@@ -165,6 +165,47 @@
     if (el) el.textContent = new Date().getFullYear();
   }
 
+  // Chinese reading pace used for 预计阅读时间 (~300 字 / min).
+  const CHARS_PER_MINUTE = 300;
+
+  function formatZhDate(isoDate) {
+    const parts = String(isoDate || "").split("-").map(Number);
+    if (parts.length < 3 || parts.some((n) => !n)) return isoDate || "";
+    const [y, m, d] = parts;
+    return y + "年" + m + "月" + d + "日";
+  }
+
+  function countReadableChars(root) {
+    if (!root) return 0;
+    const clone = root.cloneNode(true);
+    clone.querySelectorAll("pre, code, .katex, .katex-display, script, style, noscript").forEach(function (el) {
+      el.remove();
+    });
+    const text = clone.textContent || "";
+    const cjk = (text.match(/[\u4e00-\u9fff\u3400-\u4dbf]/g) || []).length;
+    const latinWords = (text.match(/[A-Za-z0-9]+(?:[-'][A-Za-z0-9]+)*/g) || []).length;
+    return cjk + latinWords;
+  }
+
+  function formatReadingMeta(isoDate, chars, author) {
+    const minutes = Math.max(1, Math.ceil(chars / CHARS_PER_MINUTE));
+    return formatZhDate(isoDate) + " · " + minutes + " 分钟 · " + chars + " 字 · " + (author || "MOFANG");
+  }
+
+  function initReadingStats() {
+    const meta = document.querySelector(".post-page-meta[data-date]");
+    const content = document.querySelector(".post-page-content");
+    if (!meta || !content) return;
+
+    const chars = countReadableChars(content);
+    meta.textContent = formatReadingMeta(
+      meta.getAttribute("data-date"),
+      chars,
+      meta.getAttribute("data-author") || "MOFANG"
+    );
+    meta.setAttribute("data-chars", String(chars));
+  }
+
   function escapeHtml(value) {
     return value
       .replace(/&/g, "&amp;")
@@ -238,6 +279,7 @@
     initFilters();
     initYear();
     initCodeHighlighting();
+    initReadingStats();
     initComments();
     filterPosts();
 
