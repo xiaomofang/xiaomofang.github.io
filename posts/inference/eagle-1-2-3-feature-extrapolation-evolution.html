@@ -1,0 +1,641 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="night">
+<head>
+  <meta charset="UTF-8" />
+  <script>
+    (function () {
+      try {
+        var saved = localStorage.getItem("yichuan-theme");
+        var theme = saved || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "night" : "day");
+        document.documentElement.setAttribute("data-theme", theme);
+      } catch (e) {}
+    })();
+  </script>
+  <style>
+    html { font-size: 16px; }
+    @media (min-width: 1024px) { html { font-size: 26px; } }
+    @media (min-width: 1200px) { html { font-size: 34px; } }
+    html, body { margin: 0; min-height: 100%; }
+    html[data-theme="night"], html[data-theme="night"] body { background: #0c0c0c; color: #ededed; color-scheme: dark; }
+    html[data-theme="day"], html[data-theme="day"] body { background: #ffffff; color: #1a1a1a; color-scheme: light; }
+  </style>
+  <link rel="stylesheet" href="../../styles.css?v=42" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous" />
+  <title>EAGLE 三代演进：从特征外推到 Training-Time Test</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="description" content="把 EAGLE、EAGLE-2、EAGLE-3 的演进脉络讲透：特征级自回归为何比 token 级更准、shifted-token 如何消解采样不确定性、动态草稿树如何按置信度分配预算、Training-Time Test 与多层特征融合又如何让加速比真正随数据 scale。" />
+</head>
+<body>
+  <div class="ambient" aria-hidden="true"><span class="orb orb-a"></span><span class="orb orb-b"></span></div>
+  <canvas id="star-canvas"></canvas>
+
+  <header class="site-header">
+    <div class="header-inner">
+      <a href="../../index.html" class="logo">
+        <span class="logo-dot"></span>
+        <span class="logo-text">MOFANG</span>
+      </a>
+      <div class="header-actions">
+        <nav class="site-nav">
+          <a href="../../index.html">← Back</a>
+        </nav>
+        <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle theme">
+          <span class="icon-sun">☀️</span>
+          <span class="icon-moon">🌙</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="site-main">
+    <article class="post-page">
+      <header class="post-page-header">
+        <p class="post-page-category">Inference</p>
+        <h1 class="post-page-title">EAGLE 三代演进：从特征外推到 Training-Time Test</h1>
+        <p class="post-lead">
+          投机解码的加速比几乎完全由「草稿有多像目标模型」决定。EAGLE 系列不另训一个独立小 LLM，
+          而是把目标模型自己的隐藏状态借出来做外推——从特征级自回归（EAGLE），到按置信度长树（EAGLE-2），
+          再到扔掉特征回归约束、用 Training-Time Test 吃下数据缩放（EAGLE-3）。本文把这三跳的底层逻辑逐一拆开。
+        </p>
+        <p class="post-page-meta" data-date="2026-08-04" data-author="MOFANG">2026年8月4日 · MOFANG</p>
+      </header>
+
+      <section class="post-page-content">
+        <p>
+          读完本文，你应该能清楚回答：<strong>为什么在次顶层特征上做自回归，比在 token 上猜更轻松？
+          不把「刚采出来的 token」喂回去会发生什么？静态树浪费在哪、动态树的 value 怎么算？
+          EAGLE-3 为什么敢删掉 \(l_{\text{fea}}\)，又为什么必须上多层特征融合？</strong>
+          文中核心图尽量用论文原图；需要补充直觉时再画彩色示意。
+        </p>
+
+        <div class="logic-map" aria-label="文章逻辑地图">
+          <div class="map-node map-node--start">
+            <span>1</span>
+            <strong>地基</strong>
+            <p>Draft–Verify + 拒绝采样：草稿只影响速度，不影响分布。</p>
+          </div>
+          <div class="map-arrow">→</div>
+          <div class="map-node map-node--ar">
+            <span>2</span>
+            <strong>EAGLE</strong>
+            <p>特征级自回归 + shifted-token，消解特征不确定性。</p>
+          </div>
+          <div class="map-arrow">→</div>
+          <div class="map-node map-node--par">
+            <span>3</span>
+            <strong>EAGLE-2</strong>
+            <p>用草稿置信度近似接受率，动态扩展 / 剪枝草稿树。</p>
+          </div>
+          <div class="map-arrow">→</div>
+          <div class="map-node map-node--conv">
+            <span>4</span>
+            <strong>EAGLE-3</strong>
+            <p>去特征约束、多层融合、Training-Time Test，加速比随数据上涨。</p>
+          </div>
+        </div>
+
+        <h2>一、地基：加速比只取决于「猜得有多像」</h2>
+        <p>
+          自回归解码每吐一个 token 就要把整份权重从 HBM 搬进计算单元一次——batch=1 时 GPU 算力大量闲置，
+          瓶颈在内存带宽。投机解码的解法是：用廉价草稿器先提议 \(\gamma\) 个候选，再用目标模型
+          <strong>一次前向并行验证</strong>整块草稿。验证规则是经典拒绝采样：草稿 token \(v\) 以
+          \(\min\!\bigl(1,\, p(v)/q(v)\bigr)\) 被接受；一旦拒绝，从残差
+          \(\mathrm{norm}\bigl(\max(p-q,0)\bigr)\) 重采样，并丢弃后续草稿。可以证明最终输出严格服从目标分布
+          \(p\)——草稿器再烂也只慢，不会写歪。
+        </p>
+        <p>
+          因此整条技术线的主矛盾很干净：<strong>提高草稿与目标的分布重叠 \(\alpha\)</strong>，同时把
+          \(T_{\text{draft}}\) 压到足够低。平均每轮接受长度大致是
+          \(\tau \approx (1-\alpha^{\gamma+1})/(1-\alpha)\)（链式草稿），加速比随 \(\alpha\) 陡增、随 \(\gamma\) 缓增。
+          EAGLE 家族的每一步升级，本质上都在抬 \(\alpha\)，或在同样 \(\alpha\) 下把验证预算花得更聪明。
+        </p>
+
+        <div class="callout">
+          <strong>玩具例子（全文共用）。</strong>
+          词表精简为
+          <code>{I, love, cats, dogs, to, eat, pizza, very, &lt;eos&gt;}</code>，
+          已确认前缀「I love」。目标分布 \(p(\cdot\mid\text{I love})\) 近似为：
+          cats 52%、dogs 19%、to 9%、eat 7%、pizza 5%、其余摊薄。后面每讲到「边缘 vs 条件」「树怎么长」，
+          都回到这个例子。
+        </div>
+
+        <h2>二、EAGLE：在特征空间里做外推</h2>
+        <p>
+          独立小模型当草稿器有三个硬伤：同系列未必有合适尺寸；指令模板不一致时对齐困难；小模型本身的前向也不便宜。
+          EAGLE（Extrapolation Algorithm for Greater Language-model Efficiency，ICML 2024）换了一条路：
+          <strong>不另起炉灶，直接借用目标模型次顶层（LM head 之前）的特征做自回归外推</strong>。
+        </p>
+
+        <figure class="diagram-figure diagram-figure--wide">
+          <img src="../../assets/eagle/eagle1-x5.png" alt="四种草稿方式对比：Speculative Sampling、Lookahead、Medusa、EAGLE" loading="lazy" width="830" height="265" />
+          <figcaption>
+            <strong>EAGLE 论文原图：四种起草方式。</strong>
+            Speculative Sampling / Lookahead 在 token（或 n-gram）层面打转；Medusa 从同一个特征 \(f_2\) 并行出多个头；
+            只有 EAGLE 把「上一时刻的采样结果」与特征一起喂进 Autoregression Head，在特征序列上做链式外推。
+            <span class="fig-source">Li et al., ICML 2024</span>
+          </figcaption>
+        </figure>
+
+        <h3>2.1 两个关键观察</h3>
+        <p>
+          论文开篇就钉死了两件事。第一，<strong>特征级自回归比 token 级容易</strong>：次顶层特征是连续、结构化的表示，
+          预测「下一个隐藏状态」的回归任务，通常比在巨大词表上猜离散 token 更稳。第二，
+          <strong>采样引入的不确定性会毁了特征预测</strong>——同一条特征序列后面可以分叉出完全不同的续写。
+        </p>
+
+        <figure class="diagram-figure diagram-figure--wide">
+          <img src="../../assets/eagle/eagle1-x3.png" alt="特征序列不确定性：am 与 always 两条分支" loading="lazy" width="829" height="216" />
+          <figcaption>
+            <strong>EAGLE 论文原图：特征序列的不确定性。</strong>
+            在 \(f_{\text{I}}\) 之后，可能采到「am」也可能采到「always」，两条分支各自导出
+            \(f_{\text{am}}\) / \(f_{\text{always}}\) 以及完全不同的后续分布。若草稿器只看 \(f_{\text{I}}\)、
+            不知道实际采样结果，它被迫拟合两条分支的<strong>边缘混合</strong>——目标天然更糊。
+            <span class="fig-source">Li et al., ICML 2024</span>
+          </figcaption>
+        </figure>
+
+        <p>
+          用我们的玩具例子把「边缘 vs 条件」写死。若不告诉草稿器下一步采了什么，它要拟合的是：
+        </p>
+        <div class="math-block" aria-label="边缘分布">
+          \[
+            p\bigl(h^{(k)}\mid x\bigr)
+            = \sum_{u\in\mathcal{V}} p(y_k=u\mid x)\,p\bigl(h^{(k)}\mid x,\,y_k=u\bigr)
+          \]
+        </div>
+        <p>
+          「I love」之后 cats 与 dogs 各占大约一半概率质量，后续特征一个偏「动物名词后接 eat / pizza」，
+          一个偏「动物名词后接 to …」——均值落在两者之间，什么都不像。把采样结果 \(e(y_k)\) 喂进去之后，
+          拟合对象变成单峰条件分布 \(p(h^{(k)}\mid x,y_k)\)。论文实测：只喂特征大约 1.9×，
+          特征 + shifted-token 提到约 2.8×——这一步几乎是 EAGLE-1 最大的单点收益。
+        </p>
+
+        <figure class="diagram-figure diagram-figure--wide">
+          <img src="../../assets/eagle/eagle1-x4.png" alt="feature、token、feature&amp;shifted-token 三种输入的加速比与准确率" loading="lazy" width="800" height="320" />
+          <figcaption>
+            <strong>EAGLE 论文原图：三种输入对比。</strong>
+            纯 token（橙）最差；纯 feature（绿）中等；feature + 前进一步的 token（蓝，即 EAGLE）在加速比与准确率上全面领先。
+            「前进一步」的意思是：预测 \(f_{t+1}\) 时，输入里带着已经采出的 \(t_{t+1}\)。
+            <span class="fig-source">Li et al., ICML 2024</span>
+          </figcaption>
+        </figure>
+
+        <h3>2.2 草稿器长什么样</h3>
+        <p>
+          记 \(f_t\) 为目标模型在位置 \(t\)、进入 LM head 之前的特征，\(e(\cdot)\) 为词嵌入（与 LM head 一样直接复用目标模型、冻结）。
+          草稿器只训两块：一个 \(2d\to d\) 的全连接层，加上一层 decoder：
+        </p>
+        <div class="math-block" aria-label="EAGLE 特征自回归">
+          \[
+            f^{(k)} = g\bigl([\,f^{(k-1)};\; e(x_k)\,]\bigr),\qquad
+            x_{k+1}\sim\mathrm{softmax}\bigl(W_{\mathrm{lm}} f^{(k)}\bigr)
+          \]
+        </div>
+        <p>
+          沿用「I love」：目标模型上一轮已经算出真值 \(f_{\text{I}}\)、\(f_{\text{love}}\)，并采出了当前最后一个 token
+          <code>love</code>。草稿三步可以展开成：
+        </p>
+        <ul class="note-list">
+          <li>第 1 步：\(g([f_{\text{love}}; e(\text{love})])\to f^{(1)}\to\) LM head \(\to\) <code>cats</code></li>
+          <li>第 2 步：\(g([f^{(1)}; e(\text{cats})])\to f^{(2)}\to\) LM head \(\to\) <code>eat</code></li>
+          <li>第 3 步：\(g([f^{(2)}; e(\text{eat})])\to f^{(3)}\to\) LM head \(\to\) <code>pizza</code></li>
+        </ul>
+        <p>
+          三步串行前向换来草稿 <code>cats | eat | pizza</code>，再交给目标模型一次并行验证。
+          训练时损失是特征回归（Smooth L1）与 token 蒸馏（交叉熵）的加权和——特征损失让多步外推时输入分布不至于漂太远。
+        </p>
+
+        <figure class="diagram-figure diagram-figure--wide">
+          <img src="../../assets/eagle/eagle1-x6.png" alt="EAGLE 完整推理流程与草稿树" loading="lazy" width="831" height="906" />
+          <figcaption>
+            <strong>EAGLE 论文原图：完整推理流程。</strong>
+            左侧目标模型单步前向给出真特征；右侧草稿器多次前向，在特征–embedding 拼接上外推，并在每个位置展开 top-\(k\) 分支，
+            形成树状草稿。绿块是 embedding，橙块是特征，红框是草稿预测；带雪花的蓝模块来自目标模型且冻结。
+            <span class="fig-source">Li et al., ICML 2024</span>
+          </figcaption>
+        </figure>
+
+        <figure class="diagram-figure">
+          <svg viewBox="0 0 780 250" role="img" aria-label="边缘分布与条件分布对比示意">
+            <defs>
+              <marker id="arr-e1" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+                <polygon points="0 0, 8 3, 0 6" class="d-accent-orange" />
+              </marker>
+            </defs>
+            <text x="390" y="28" text-anchor="middle" class="d-title">同一前缀「I love」，两种拟合目标</text>
+
+            <rect x="30" y="50" width="330" height="170" rx="12" class="d-zone-orange" />
+            <text x="195" y="78" text-anchor="middle" class="d-tag-orange">只喂特征 → 边缘混合</text>
+            <rect x="55" y="100" width="90" height="44" rx="8" class="d-box-orange" />
+            <text x="100" y="127" text-anchor="middle" class="d-label">f_love</text>
+            <path d="M145 122 L175 122" class="d-arrow-orange" marker-end="url(#arr-e1)" />
+            <rect x="180" y="95" width="150" height="90" rx="8" class="d-box" />
+            <text x="255" y="125" text-anchor="middle" class="d-muted">cats 支 + dogs 支</text>
+            <text x="255" y="148" text-anchor="middle" class="d-muted">+ to 支 + …</text>
+            <text x="255" y="171" text-anchor="middle" class="d-label">糊成一团</text>
+
+            <rect x="420" y="50" width="330" height="170" rx="12" class="d-zone-blue" />
+            <text x="585" y="78" text-anchor="middle" class="d-tag-blue">特征 + e(cats) → 条件单峰</text>
+            <rect x="445" y="100" width="80" height="40" rx="8" class="d-box-blue" />
+            <text x="485" y="125" text-anchor="middle" class="d-label">f_love</text>
+            <rect x="445" y="155" width="80" height="40" rx="8" class="d-box-orange" />
+            <text x="485" y="180" text-anchor="middle" class="d-label">e(cats)</text>
+            <path d="M525 120 L555 120" class="d-arrow-blue" marker-end="url(#arr-e1)" />
+            <path d="M525 175 L540 175 L540 140 L555 140" class="d-arrow-orange" marker-end="url(#arr-e1)" />
+            <rect x="560" y="105" width="160" height="80" rx="8" class="d-box-blue" />
+            <text x="640" y="140" text-anchor="middle" class="d-label">p(h | cats)</text>
+            <text x="640" y="165" text-anchor="middle" class="d-muted">清晰可学</text>
+          </svg>
+          <figcaption>
+            彩色示意：不喂采样结果时，草稿器学的是多条未来的加权平均；喂入 \(e(\text{cats})\) 后，分支被钉死，回归目标重新变得可学。
+          </figcaption>
+        </figure>
+
+        <h3>2.3 静态树验证：链断了还能换枝</h3>
+        <p>
+          EAGLE-1 已经不用纯链：每个位置取 top-\(k\)，用 tree attention 一次验证整棵树。
+          链上某个节点被拒，旁支仍可能存活——这比「一处拒绝、后面全扔」浪费少得多。
+          但树的<strong>形状是手工固定的</strong>：难猜的上下文和易猜的上下文共用同一套拓扑，预算分配必然粗糙。
+          这正是 EAGLE-2 要动刀的地方。
+        </p>
+
+        <h2>三、EAGLE-2：让树跟着上下文长</h2>
+        <p>
+          EAGLE-2（EMNLP 2024）不改草稿器训练，也不改验证规则，只改<strong>草稿树怎么长、验证时带哪些节点</strong>。
+          核心观察有两层。
+        </p>
+
+        <h3>3.1 接受率既看位置，更看上下文</h3>
+        <p>
+          静态树之所以「左上密、右下疏」，是因为平均而言越靠前的节点越好猜。但同一位置上的接受率方差很大——
+          有的 query 第一步几乎必中，有的 query 第一步就在掷骰子。固定拓扑会在「10+2=」这种高置信场景里
+          浪费名额给几乎不可能的旁支，又在难猜场景里过早剪枝。
+        </p>
+
+        <figure class="diagram-figure">
+          <img src="../../assets/eagle/eagle2-x5.png" alt="EAGLE 静态树与 EAGLE-2 动态树在 10+2= 上的对比" loading="lazy" width="700" height="280" />
+          <figcaption>
+            <strong>EAGLE-2 论文原图：静态树 vs 动态树。</strong>
+            查询「10+2」时下一步不确定，两边都会分出多个候选；一旦变成「10+2=」，正确答案几乎锁定为「1」，
+            EAGLE-2 只扩这一条高置信路径，而静态树仍会塞进低概率的「3」。
+            <span class="fig-source">Li et al., EMNLP 2024</span>
+          </figcaption>
+        </figure>
+
+        <h3>3.2 草稿置信度 ≈ 接受率</h3>
+        <p>
+          要做动态树，必须在<strong>不调用目标模型</strong>的前提下估计「这个草稿 token 会不会被接受」。
+          EAGLE 的校准性很好：草稿模型给出的概率（confidence）与真实接受率高度正相关——
+          置信度 &lt;0.05 的节点接受率约 0.04，&gt;0.95 的约 0.98。于是可以用草稿自身的 softmax 概率当代理信号，零额外开销。
+        </p>
+
+        <figure class="diagram-figure">
+          <img src="../../assets/eagle/eagle2-x8.png" alt="草稿模型置信度与真实接受率的相关性" loading="lazy" width="700" height="320" />
+          <figcaption>
+            <strong>EAGLE-2 论文原图：置信度校准。</strong>
+            横轴为草稿置信度区间，纵轴为实测接受率，柱子几乎贴着对角线——这是动态树能成立的前提。
+            <span class="fig-source">Li et al., EMNLP 2024</span>
+          </figcaption>
+        </figure>
+
+        <h3>3.3 Expansion + Rerank</h3>
+        <p>
+          动态树分两阶段。记节点 \(v\) 的草稿概率为 \(c(v)\)，从根到 \(v\) 的路径乘积为
+        </p>
+        <div class="math-block" aria-label="节点 value">
+          \[
+            V(v)=\prod_{u\in\mathrm{path}(v)} c(u)
+          \]
+        </div>
+        <p>
+          <strong>Expansion：</strong>每一层只把当前层 \(V\) 最高的 top-\(k\) 节点送进草稿器继续扩，避免在低价值树枝上烧前向。
+          <strong>Rerank：</strong>整树长完后，按 \(V\) 全局挑出预算内的节点展平成验证序列，并按祖先关系写 tree attention mask——
+          不同分支互不可见，同一路径上仍是因果依赖。
+        </p>
+
+        <figure class="diagram-figure">
+          <svg viewBox="0 0 780 280" role="img" aria-label="EAGLE-2 value 乘积与扩展示意">
+            <text x="390" y="26" text-anchor="middle" class="d-title">「I love」后的动态扩展（示意）</text>
+
+            <rect x="330" y="45" width="120" height="40" rx="10" class="d-box-blue" />
+            <text x="390" y="70" text-anchor="middle" class="d-label">root</text>
+
+            <path d="M360 85 L250 120" class="d-arrow-blue" />
+            <path d="M420 85 L530 120" class="d-arrow-orange" />
+
+            <rect x="180" y="125" width="140" height="55" rx="10" class="d-box-blue" />
+            <text x="250" y="148" text-anchor="middle" class="d-label">cats</text>
+            <text x="250" y="168" text-anchor="middle" class="d-muted">c=0.52 · V=0.52</text>
+
+            <rect x="460" y="125" width="140" height="55" rx="10" class="d-box-orange" />
+            <text x="530" y="148" text-anchor="middle" class="d-label">dogs</text>
+            <text x="530" y="168" text-anchor="middle" class="d-muted">c=0.19 · V=0.19</text>
+
+            <path d="M220 180 L160 215" class="d-arrow-blue" />
+            <path d="M280 180 L340 215" class="d-arrow-blue" />
+            <path d="M530 180 L530 215" class="d-arrow-orange" stroke-dasharray="4 3" />
+
+            <rect x="90" y="220" width="140" height="45" rx="10" class="d-box-purple" />
+            <text x="160" y="240" text-anchor="middle" class="d-label">eat</text>
+            <text x="160" y="256" text-anchor="middle" class="d-muted">V=0.52×0.40</text>
+
+            <rect x="270" y="220" width="140" height="45" rx="10" class="d-box-purple" />
+            <text x="340" y="240" text-anchor="middle" class="d-label">to</text>
+            <text x="340" y="256" text-anchor="middle" class="d-muted">V=0.52×0.25</text>
+
+            <rect x="460" y="220" width="140" height="45" rx="10" class="d-box" />
+            <text x="530" y="248" text-anchor="middle" class="d-muted">本轮不扩（V 偏低）</text>
+          </svg>
+          <figcaption>
+            彩色示意：Expansion 优先扩 \(V\) 大的「cats」枝；「dogs」枝若预算紧张可以直接不扩。
+            Rerank 阶段再按全局 \(V\) 挑进验证序列——把有限的目标模型并行宽度花在最可能被接受的节点上。
+          </figcaption>
+        </figure>
+
+        <figure class="diagram-figure diagram-figure--wide">
+          <img src="../../assets/eagle/eagle2-x9.png" alt="EAGLE-2 Expansion 与 Rerank 流程原图" loading="lazy" width="900" height="520" />
+          <figcaption>
+            <strong>EAGLE-2 论文原图：Expansion + Rerank。</strong>
+            边上数字是草稿置信度，括号内是路径 value。先扩高 value 节点，再全局重排挑进验证序列，展平后按树结构构造 attention mask。
+            <span class="fig-source">Li et al., EMNLP 2024</span>
+          </figcaption>
+        </figure>
+
+        <p>
+          效果上，EAGLE-2 在保持无损的前提下，把 EAGLE-1 的加速比再抬一截（Vicuna-13B 上大致从 ~3× 到 ~4× 量级）。
+          草稿器本身没变聪明，是<strong>验证预算的分配变聪明了</strong>。
+        </p>
+
+        <h2>四、EAGLE-3：拆掉天花板，让数据真正管用</h2>
+        <p>
+          EAGLE-3（NeurIPS 2025）面对的问题换了：社区已经习惯「堆数据换智能」，但把同样的缩放逻辑套到 EAGLE 草稿器上，
+          <strong>收益很快饱和</strong>。作者把病灶定位到「特征预测」这个约束本身。
+        </p>
+
+        <figure class="diagram-figure diagram-figure--wide">
+          <img src="../../assets/eagle/eagle3-x3.png" alt="EAGLE-3 相对各方法的加速比柱状图" loading="lazy" width="900" height="360" />
+          <figcaption>
+            <strong>EAGLE-3 论文原图：加速比总览（temperature=0）。</strong>
+            Vicuna-13B 上 EAGLE → EAGLE-2 → EAGLE-3 大约 3.1× / 4.1× / 5.6×；在 LLaMA-3.1-8B、LLaMA-3.3-70B、
+            DeepSeek-R1-Distill-LLaMA-8B 上，EAGLE-3 相对 EAGLE-2 也稳定高出一截，最高约 6.5×（HumanEval）。
+            <span class="fig-source">Li et al., NeurIPS 2025</span>
+          </figcaption>
+        </figure>
+
+        <h3>4.1 为什么「预测特征」会卡住缩放</h3>
+        <p>
+          EAGLE / EAGLE-2 的草稿输出必须贴近目标次顶层特征，损失里有 \(l_{\text{fea}}+l_{\text{token}}\)。
+          \(l_{\text{fea}}\) 的好处是：只训单步也能泛化到多步——因为下一步输入仍落在「像真特征」的流形附近。
+          坏处是：特征回归是额外约束，草稿器表达能力被钉死，堆数据也抬不高上限。
+        </p>
+        <p>
+          若直接删掉 \(l_{\text{fea}}\)、只留 token 损失：第一步的 \(0\textrm{-}\alpha\)（输入全是真特征时的接受率）确实随数据上涨；
+          但草稿输出变成自由向量 \(\hat{a}_{t+1}\)，与真特征 \(f_{t+1}\) 不再同分布——第二步把 \(\hat{a}\) 当输入时，
+          \(1\textrm{-}\alpha\) 崩盘。这就是典型的 train–test mismatch / 误差累积。
+        </p>
+
+        <figure class="diagram-figure diagram-figure--wide">
+          <img src="../../assets/eagle/eagle3-x4.png" alt="EAGLE、去掉特征损失、EAGLE-3 Training-Time Test 三种训练方式对比" loading="lazy" width="900" height="700" />
+          <figcaption>
+            <strong>EAGLE-3 论文原图：Training-Time Test 的动机。</strong>
+            上：带 \(l_{\text{fea}}\) 的 EAGLE，多步靠特征对齐硬撑；中：去掉 \(l_{\text{fea}}\) 后第一步变准、第二步崩；
+            下：在训练里把自身输出 \(\hat{a}\) 喂回下一步（Training-Time Test），用 \(l_{\text{token}}\) 直接对齐多步推理分布。
+            <span class="fig-source">Li et al., NeurIPS 2025</span>
+          </figcaption>
+        </figure>
+
+        <h3>4.2 Training-Time Test：训练时就跑推理 rollout</h3>
+        <p>
+          EAGLE-3 的做法是：<strong>训练阶段完整模拟多步草稿</strong>——Step 1 用目标融合特征，Step 2/3…
+          把草稿自己刚产出的 \(a\) 接回去继续训。注意力 mask 也要跟着改：第一轮是普通下三角；
+          后续模拟步里，草稿预测 token 与原始上下文呈树状依赖，mask 按「只能看见自己的祖先」来写。
+          这样模型学会的不是「假设前面特征完美时该怎么预测」，而是「前面已经是自己的糊输出时，仍要给出此刻最合理的 token」。
+        </p>
+
+        <div class="callout">
+          <strong>和 HASS 差在哪？</strong>
+          HASS 也在训练里模拟多步，但动机是缓解特征误差累积，<strong>仍然做特征预测、仍保留 \(l_{\text{fea}}\)</strong>，
+          输入必须是次顶层特征。EAGLE-3 的动机是<strong>拆掉不必要约束</strong>：输出不必再拟合 \(f\)，
+          于是输入也自由了——这才给多层特征融合腾出空间，并让数据缩放曲线重新抬头。
+        </div>
+
+        <h3>4.3 多层特征融合：次顶层不够看「再下一个」</h3>
+        <p>
+          次顶层特征与「下一个 token 的 logits」几乎一一对应（满秩 LM head 下信息对齐 next-token）。
+          但草稿器要猜的是 next-next、next-next-next……只盯最后一层，等于用「只够看一步」的表示去推多步。
+          去掉特征回归约束之后，EAGLE-3 改从目标模型抽 <strong>低 / 中 / 高</strong> 三层隐藏状态 \(l,m,h\)，拼接后经 FC 压回维度 \(k\)，得到融合特征 \(g\)：
+        </p>
+        <div class="math-block" aria-label="多层融合">
+          \[
+            g = \mathrm{FC}\bigl([\,l;\,m;\,h\,]\bigr)\in\mathbb{R}^{k}
+          \]
+        </div>
+        <p>
+          直觉上：浅层偏词法与局部句式，中层偏语义关系，深层偏最终决策。草稿头同时看见三层，
+          比只看「即将变成 logits 的那一层」更适合做多步外推。
+        </p>
+
+        <figure class="diagram-figure diagram-figure--wide">
+          <img src="../../assets/eagle/eagle3-x7.png" alt="EAGLE-3 推理管线：低中高特征融合与多步草稿" loading="lazy" width="900" height="520" />
+          <figcaption>
+            <strong>EAGLE-3 论文原图：推理管线。</strong>
+            目标模型前向时抽出 \(l,m,h\)，拼成 \(g\)；Step 1 用真值 \(g\) + 采样 embedding；
+            从 Step 2 起，尚未被目标验证的位置用草稿输出 \(a\) 顶替 \(g\)，再与新采样的 \(e(\cdot)\) 拼接，
+            送入单层 decoder + LM head。动态草稿树技术完整继承自 EAGLE-2。
+            <span class="fig-source">Li et al., NeurIPS 2025</span>
+          </figcaption>
+        </figure>
+
+        <p>
+          继续「How can I」的论文例子：目标已采出「I」，并备好 \(g_{\text{how}},g_{\text{can}}\)。
+          Step 1 输入 \(g\) 与 \(e_{\text{I}}\)，采出草稿「do」；Step 2 没有真值 \(g_{\text{I}}\)，改用 \(a_{\text{I}}\) 配 \(e_{\text{do}}\)；
+          Step 3 同理用 \(a_{\text{do}}\) 配下一个 embedding。训练时这条链路被完整回放，所以推理时不会「第一次见自己的输出」。
+        </p>
+
+        <h3>4.4 缩放律重新出现</h3>
+        <p>
+          架构改完之后，增加 ShareGPT / UltraChat 等数据，加速比与接受长度都继续涨——论文称之为推理加速的 scaling law，
+          是旧版 EAGLE 没观察到的曲线。消融也很干净：去掉特征约束、再上融合特征，两步都对 \(\tau\) 和 speedup 有贡献。
+          端到端上，EAGLE-3 相对 EAGLE-2 大约再快 1.2×–1.4×；Vicuna-13B 的 HumanEval 上可到约 6.5×。
+          大 batch 下投机收益会收窄（算力闲置变少），但论文基于 vLLM 的吞吐实验里，EAGLE-3 在 batch 56 仍能打平甚至略优于无投机基线，
+          说明草稿质量提升把「破位点」往后推了。
+        </p>
+
+        <figure class="diagram-figure">
+          <img src="../../assets/eagle/eagle3-x1.png" alt="EAGLE-2 与 EAGLE-3 随数据规模变化的加速比" loading="lazy" width="480" height="360" />
+          <figcaption>
+            <strong>EAGLE-3 论文原图（缩放律面板）：</strong>
+            横轴是相对 ShareGPT 的数据倍数（1 / 2 / 4 / 8）。EAGLE-2 曲线很快走平；EAGLE-3 的 speedup 随数据持续上升。
+            <span class="fig-source">Li et al., NeurIPS 2025</span>
+          </figcaption>
+        </figure>
+
+        <h2>五、三代对照：每一跳改的是哪一层约束</h2>
+
+        <table class="decision-table">
+          <thead>
+            <tr>
+              <th>版本</th>
+              <th>核心改动</th>
+              <th>草稿在学什么</th>
+              <th>树 / 验证</th>
+              <th>典型收益</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>EAGLE</td>
+              <td>特征级 AR + shifted-token</td>
+              <td>拟合次顶层 \(f\)，再经共享 LM head 出 token</td>
+              <td>静态树 + tree attention</td>
+              <td>~2.7×–3.5×，显著超 Medusa / 独立小模型</td>
+            </tr>
+            <tr>
+              <td>EAGLE-2</td>
+              <td>置信度驱动的动态树</td>
+              <td>同 EAGLE（训练不变）</td>
+              <td>Expansion / Rerank，按 \(V=\prod c\) 分配预算</td>
+              <td>同草稿器再提一截 \(\tau\) 与 wall-time</td>
+            </tr>
+            <tr>
+              <td>EAGLE-3</td>
+              <td>去 \(l_{\text{fea}}\) + 多层融合 + TTT</td>
+              <td>直接拟合 token；输入可为 \(g\) 或自身 \(a\)</td>
+              <td>继承 EAGLE-2 动态树</td>
+              <td>最高 ~6.5×；加速比随数据 scale</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <figure class="diagram-figure">
+          <svg viewBox="0 0 780 210" role="img" aria-label="EAGLE 三代演进总览">
+            <rect x="20" y="40" width="220" height="130" rx="14" class="d-zone-blue" />
+            <text x="130" y="75" text-anchor="middle" class="d-tag-blue">EAGLE</text>
+            <text x="130" y="105" text-anchor="middle" class="d-label">猜得准：特征空间</text>
+            <text x="130" y="130" text-anchor="middle" class="d-muted">消解采样不确定性</text>
+            <text x="130" y="152" text-anchor="middle" class="d-muted">静态树验证</text>
+
+            <text x="260" y="105" text-anchor="middle" class="d-accent-orange" font-size="28">→</text>
+
+            <rect x="280" y="40" width="220" height="130" rx="14" class="d-zone-orange" />
+            <text x="390" y="75" text-anchor="middle" class="d-tag-orange">EAGLE-2</text>
+            <text x="390" y="105" text-anchor="middle" class="d-label">花得巧：动态树</text>
+            <text x="390" y="130" text-anchor="middle" class="d-muted">confidence ≈ accept</text>
+            <text x="390" y="152" text-anchor="middle" class="d-muted">训练零改动</text>
+
+            <text x="520" y="105" text-anchor="middle" class="d-accent-orange" font-size="28">→</text>
+
+            <rect x="540" y="40" width="220" height="130" rx="14" class="d-zone" />
+            <text x="650" y="75" text-anchor="middle" class="d-tag-purple">EAGLE-3</text>
+            <text x="650" y="105" text-anchor="middle" class="d-label">学得开：去约束</text>
+            <text x="650" y="130" text-anchor="middle" class="d-muted">TTT + 多层融合</text>
+            <text x="650" y="152" text-anchor="middle" class="d-muted">数据缩放生效</text>
+          </svg>
+          <figcaption>
+            三代不是在同一旋钮上拧三圈，而是依次松开三种不同约束：表示空间 → 树拓扑 → 训练目标与特征来源。
+          </figcaption>
+        </figure>
+
+        <h2>六、实践时心里要有数的几件事</h2>
+        <ul class="note-list">
+          <li>
+            <strong>无损是算法保证，不是实测运气。</strong>
+            必须用严格拒绝采样；某些方法在 temperature&gt;0 时放松接受条件，就不该再声称分布不变。
+          </li>
+          <li>
+            <strong>每个目标模型要训自己的草稿头。</strong>
+            官方与社区（SGLang SpecForge、vLLM 等）已覆盖一批主流模型；新架构 / MoE / 自定义注意力通常要从头训。
+          </li>
+          <li>
+            <strong>数据质量与 on-policy 很重要。</strong>
+            论文用目标模型在线生成回复当标签；生产里用真实流量 prompt 再生成，往往比单纯堆开源 SFT 更贴分布。
+          </li>
+          <li>
+            <strong>高并发会吃掉投机红利。</strong>
+            batch 变大后 GPU 闲置变少，破位 \(\alpha\) 上升；草稿越强，破位点越靠后——这正是 EAGLE-3 相对前代的工程价值之一。
+          </li>
+          <li>
+            <strong>串行起草仍是代价。</strong>
+            EAGLE 系草稿本质链式，\(T_{\text{draft}}\propto\) 深度，所以头通常只有一层。并行草稿（Medusa / MTP / DFlash 一脉）走的是另一条权衡曲线，本文不展开。
+          </li>
+        </ul>
+
+        <div class="essay-ending">
+          EAGLE 三代的主线其实很短：先把「猜」搬到更平滑的特征空间并钉死采样分支，再把验证预算按置信度花在刀刃上，
+          最后拆掉特征回归的紧箍咒，让草稿器真正吃得下数据——加速比这才重新变成一条能 scale 的曲线。
+        </div>
+
+        <section class="references-section" aria-label="参考与扩展阅读">
+          <h2>参考与扩展阅读</h2>
+          <ol class="reference-list">
+            <li>
+              <a href="https://arxiv.org/abs/2401.15077" target="_blank" rel="noopener noreferrer">
+                EAGLE: Speculative Sampling Requires Rethinking Feature Uncertainty (Li, Wei, Zhang &amp; Zhang, ICML 2024)
+              </a>
+              <span>特征级自回归、shifted-token 消解不确定性、静态树验证的奠基之作。</span>
+            </li>
+            <li>
+              <a href="https://arxiv.org/abs/2406.16858" target="_blank" rel="noopener noreferrer">
+                EAGLE-2: Faster Inference of Language Models with Dynamic Draft Trees (Li, Wei, Zhang &amp; Zhang, EMNLP 2024)
+              </a>
+              <span>用草稿置信度近似接受率，提出 Expansion / Rerank 动态草稿树。</span>
+            </li>
+            <li>
+              <a href="https://arxiv.org/abs/2503.01840" target="_blank" rel="noopener noreferrer">
+                EAGLE-3: Scaling up Inference Acceleration of LLMs via Training-Time Test (Li, Wei, Zhang &amp; Zhang, NeurIPS 2025)
+              </a>
+              <span>去掉特征预测约束、多层特征融合与 Training-Time Test；加速比随数据缩放。</span>
+            </li>
+            <li>
+              <a href="https://proceedings.mlr.press/v202/leviathan23a.html" target="_blank" rel="noopener noreferrer">
+                Fast Inference from Transformers via Speculative Decoding (Leviathan, Kalman &amp; Matias, ICML 2023)
+              </a>
+              <span>投机解码与拒绝采样无损性的经典框架。</span>
+            </li>
+            <li>
+              <a href="https://github.com/SafeAILab/EAGLE" target="_blank" rel="noopener noreferrer">
+                SafeAILab/EAGLE（官方实现）
+              </a>
+              <span>三代方法的参考实现；训练侧亦可对照 SGLang SpecForge 与各推理引擎集成。</span>
+            </li>
+          </ol>
+        </section>
+      </section>
+
+      <section class="comments-section" id="comments" aria-label="Discussion">
+        <div class="comments-header">
+          <h2>Discussion</h2>
+        </div>
+        <div id="utterances-container" class="utterances-container"></div>
+        <noscript>请启用 JavaScript 后查看评论区。</noscript>
+      </section>
+    </article>
+  </main>
+
+  <footer class="site-footer">
+    <span class="footer-credit">
+      <span class="footer-prefix">© 2026 by</span>
+      <a href="../../index.html" class="footer-brand">
+        <span class="brand-mascot-frame brand-mascot-frame--inline" aria-hidden="true">
+          <picture>
+            <source srcset="../../assets/avatar-mascot.webp" type="image/webp" />
+            <img src="../../assets/avatar-mascot.png" alt="" class="brand-mascot" width="27" height="27" decoding="async" />
+          </picture>
+        </span>
+        <span>MOFANG</span>
+      </a>
+    </span>
+  </footer>
+
+  <script src="../../app.js?v=39"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" crossorigin="anonymous"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js" crossorigin="anonymous"
+    onload="renderMathInElement(document.body, {
+      delimiters: [
+        {left: '\\[', right: '\\]', display: true},
+        {left: '\\(', right: '\\)', display: false}
+      ],
+      throwOnError: false
+    });"></script>
+</body>
+</html>
