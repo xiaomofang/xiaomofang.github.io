@@ -1,0 +1,602 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="night">
+<head>
+  <meta charset="UTF-8" />
+  <script>
+    (function () {
+      try {
+        var saved = localStorage.getItem("yichuan-theme");
+        var theme = saved || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "night" : "day");
+        document.documentElement.setAttribute("data-theme", theme);
+      } catch (e) {}
+    })();
+  </script>
+  <style>
+    html { font-size: 16px; }
+    @media (min-width: 1024px) { html { font-size: 26px; } }
+    @media (min-width: 1200px) { html { font-size: 34px; } }
+    html, body { margin: 0; min-height: 100%; }
+    html[data-theme="night"], html[data-theme="night"] body { background: #0c0c0c; color: #ededed; color-scheme: dark; }
+    html[data-theme="day"], html[data-theme="day"] body { background: #ffffff; color: #1a1a1a; color-scheme: light; }
+  </style>
+  <link rel="stylesheet" href="../../styles.css?v=42" />
+  <title>Envoy 与 AIBrix：从通用代理到 LLM 推理网关</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="description" content="从 Envoy 官网的「网络应对外应用透明」出发，讲清 L7 代理在做什么；再对照 AIBrix 如何用 Envoy Gateway 扩展出懂 KV、懂 PD、懂 SLO 的 LLM 网关。" />
+</head>
+<body>
+  <div class="ambient" aria-hidden="true"><span class="orb orb-a"></span><span class="orb orb-b"></span></div>
+  <canvas id="star-canvas"></canvas>
+
+  <header class="site-header">
+    <div class="header-inner">
+      <a href="../../index.html" class="logo">
+        <span class="logo-dot"></span>
+        <span class="logo-text">MOFANG</span>
+      </a>
+      <div class="header-actions">
+        <nav class="site-nav">
+          <a href="../../index.html">← Back</a>
+        </nav>
+        <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle theme">
+          <span class="icon-sun">☀️</span>
+          <span class="icon-moon">🌙</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="site-main">
+    <article class="post-page">
+      <header class="post-page-header">
+        <p class="post-page-category">Basic Knowledge</p>
+        <h1 class="post-page-title">Envoy 与 AIBrix：从通用代理到 LLM 推理网关</h1>
+        <p class="post-lead">
+          看一张推理架构图时，Envoy 和 AIBrix 常常并肩出现在入口层。
+          它们不是两个同级的「网关品牌」，而是<strong>通用数据面</strong>与<strong>LLM 控制面/路由智能</strong>的叠层关系。
+        </p>
+        <p class="post-page-meta" data-date="2026-08-10" data-author="MOFANG">2026年8月10日 · 14 分钟 · 3120 字 · MOFANG</p>
+      </header>
+
+      <section class="post-page-content">
+        <p>
+          在很多生产链路里，请求会先经过 Envoy，再进入 AIBrix，最后才落到 vLLM / PyMotor 一类推理引擎。
+          初学者最容易把二者当成「两个差不多的网关」。更准确的心智模型是：
+          <strong>Envoy 负责把网络做成可靠、可观测、可配置的管道；AIBrix 负责让这条管道听得懂推理语义</strong>
+          ——模型名、KV 占用、前缀缓存命中、Prefill/Decode 分离、SLO 等。
+        </p>
+
+        <p>
+          本文按「先通用、再专用、再叠在一起」的顺序展开，材料主要来自
+          <a href="https://www.envoyproxy.io/docs/envoy/latest/intro/what_is_envoy" target="_blank" rel="noopener noreferrer">Envoy 官方文档</a>、
+          <a href="https://aibrix.readthedocs.io/latest/designs/architecture.html" target="_blank" rel="noopener noreferrer">AIBrix Architecture</a>、
+          <a href="https://aibrix.readthedocs.io/latest/designs/aibrix-router.html" target="_blank" rel="noopener noreferrer">AIBrix Router</a>，
+          以及 <a href="https://vllm.ai/blog/2025-02-21-aibrix-release" target="_blank" rel="noopener noreferrer">vLLM Blog 的 AIBrix 发布说明</a>。
+        </p>
+
+        <div class="logic-map" aria-label="文章逻辑地图">
+          <div class="map-node">
+            <span>1</span>
+            <strong>Envoy</strong>
+            <p>L7 代理：透明网络、Filter Chain、负载均衡。</p>
+          </div>
+          <div class="map-arrow">→</div>
+          <div class="map-node">
+            <span>2</span>
+            <strong>AIBrix</strong>
+            <p>K8s 上的 LLM 控制面：路由、扩缩容、KV、LoRA。</p>
+          </div>
+          <div class="map-arrow">→</div>
+          <div class="map-node">
+            <span>3</span>
+            <strong>叠层关系</strong>
+            <p>Envoy 做数据面，AIBrix Router 做推理决策。</p>
+          </div>
+          <div class="map-arrow">→</div>
+          <div class="map-node">
+            <span>4</span>
+            <strong>读图能力</strong>
+            <p>能在真实架构图里分清入口、调度与引擎。</p>
+          </div>
+        </div>
+
+        <h2>一、Envoy 是什么：让网络对应用透明</h2>
+        <p>
+          Envoy 官方开篇写得很清楚：它是为大服务架构设计的 <strong>L7 proxy and communication bus</strong>。
+          核心理念不是「再做一个 Nginx」，而是——
+        </p>
+
+        <div class="callout">
+          <strong>Envoy 的信念：</strong>
+          The network should be transparent to applications.
+          网络应对应用透明；当真出问题时，应能快速定位是网络还是应用。
+        </div>
+
+        <p>
+          为了做到这一点，Envoy 选择 <strong>out-of-process</strong>：以独立进程跑在应用旁边（或集群边缘），
+          而不是把代理逻辑塞进某个语言的 SDK。好处有两条：
+        </p>
+        <ul>
+          <li><strong>语言无关</strong>：Java / Go / Python / C++ 都能共用同一套网格能力。</li>
+          <li><strong>可独立升级</strong>：不用跟着每个业务服务发版，就能升级重试、熔断、观测能力。</li>
+        </ul>
+
+        <h3>它实际在管什么</h3>
+        <p>
+          可以把 Envoy 想成「带插件链的高性能转发器」。官方强调的几层能力，正好对应一次请求会经过的路径：
+        </p>
+
+        <table class="decision-table">
+          <thead>
+            <tr>
+              <th>能力层</th>
+              <th>在干什么</th>
+              <th>对 LLM 服务意味着什么</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>L3/L4 Filter</td>
+              <td>TCP/UDP 连接级处理：代理、限连、TLS 等</td>
+              <td>入口安全、连接治理，还不懂 HTTP body</td>
+            </tr>
+            <tr>
+              <td>HTTP L7 Filter</td>
+              <td>按 path / host / header 路由、缓冲、限流</td>
+              <td>能按 <code>/v1/chat/completions</code> 分流，但仍不懂 KV</td>
+            </tr>
+            <tr>
+              <td>HTTP/2 · HTTP/3 · gRPC</td>
+              <td>多路复用、长连接、协议转换</td>
+              <td>流式 token 回传非常依赖这条能力</td>
+            </tr>
+            <tr>
+              <td>服务发现 · 健康检查 · LB</td>
+              <td>动态上游、主动/被动健康、重试与熔断</td>
+              <td>实例上下线时流量不至于「瞎打」</td>
+            </tr>
+            <tr>
+              <td>可观测性</td>
+              <td>stats、分布式追踪、admin 端口</td>
+              <td>TTFT 里「网关耗时」有据可查</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <figure class="diagram-figure diagram-figure--wide">
+          <svg viewBox="0 0 900 320" role="img" aria-label="Envoy 请求路径：Listener 到 Cluster">
+            <defs>
+              <marker id="arrow-blue" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+                <polygon points="0 0, 8 3, 0 6" class="d-accent-blue" />
+              </marker>
+              <marker id="arrow-green" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+                <polygon points="0 0, 8 3, 0 6" class="d-accent" />
+              </marker>
+            </defs>
+
+            <rect x="24" y="40" width="852" height="240" rx="14" class="d-zone-blue" />
+            <text x="44" y="68" class="d-tag-blue">ENVOY DATA PLANE</text>
+
+            <rect x="56" y="96" width="140" height="64" rx="10" class="d-box-blue" />
+            <text x="126" y="124" text-anchor="middle" class="d-label">Client</text>
+            <text x="126" y="144" text-anchor="middle" class="d-muted">下游连接</text>
+
+            <line x1="196" y1="128" x2="248" y2="128" class="d-arrow-blue" marker-end="url(#arrow-blue)" />
+
+            <rect x="252" y="88" width="180" height="80" rx="10" class="d-box-blue" />
+            <text x="342" y="116" text-anchor="middle" class="d-label">Listener</text>
+            <text x="342" y="138" text-anchor="middle" class="d-muted">接请求 · Filter Chain</text>
+            <text x="342" y="156" text-anchor="middle" class="d-muted">HTTP Codec</text>
+
+            <line x1="432" y1="128" x2="484" y2="128" class="d-arrow-blue" marker-end="url(#arrow-blue)" />
+
+            <rect x="488" y="88" width="180" height="80" rx="10" class="d-box-accent" />
+            <text x="578" y="116" text-anchor="middle" class="d-label">Router Filter</text>
+            <text x="578" y="138" text-anchor="middle" class="d-muted">选 Route / Cluster</text>
+            <text x="578" y="156" text-anchor="middle" class="d-muted">连接池转发</text>
+
+            <line x1="668" y1="128" x2="720" y2="128" class="d-arrow" marker-end="url(#arrow-green)" />
+
+            <rect x="724" y="96" width="130" height="64" rx="10" class="d-box" />
+            <text x="789" y="124" text-anchor="middle" class="d-label">Upstream</text>
+            <text x="789" y="144" text-anchor="middle" class="d-muted">后端实例</text>
+
+            <text x="450" y="236" text-anchor="middle" class="d-muted">
+              官方 Life of a Request：Listener 子系统管下游生命周期，Cluster 子系统管上游选路与连接池
+            </text>
+            <text x="450" y="258" text-anchor="middle" class="d-muted">
+              Envoy 懂协议与流量治理，默认不懂「哪个 pod 的 KV 更热」
+            </text>
+          </svg>
+          <figcaption>
+            Envoy 热路径的抽象：Client → Listener（Filter Chain）→ Router → Upstream。
+            颜色上蓝色表示网络数据面，绿色强调「已选出的路由终点」。
+          </figcaption>
+        </figure>
+
+        <p>
+          官方文档 <em>Life of a Request</em> 把这件事拆成两块：
+          <strong>Listener subsystem</strong>（管下游请求生命周期）与
+          <strong>Cluster subsystem</strong>（管上游 endpoint 选择、健康检查、负载均衡、连接池）。
+          对 LLM 服务来说，这意味着：只要后端还是「一堆 HTTP 端口」，Envoy 就能把流量接稳、转稳、可观测；
+          但「该打到哪个带前缀缓存的副本」——这已经超出通用代理的默认语义。
+        </p>
+
+        <div class="callout muted">
+          <strong>一句话：</strong>
+          Envoy = 云原生世界里的通用高性能代理 / 服务网格数据面。
+          它是「水管工」，不是「懂模型调度的调度员」。
+        </div>
+
+        <h2>二、AIBrix 是什么：为 vLLM 规模化而生的控制面</h2>
+        <p>
+          <a href="https://github.com/vllm-project/aibrix" target="_blank" rel="noopener noreferrer">AIBrix</a>
+          由字节跳动开源，现挂在 vLLM 项目组织下。vLLM Blog 的定位很直白：
+          <strong>vLLM 让单实例推理变简单，但规模化部署仍卡在路由、扩缩容与容错</strong>；
+          AIBrix 提供一组可插拔的云原生积木，专门补这块。
+        </p>
+
+        <p>
+          官方 Architecture 文档把组件分成 <strong>Control Plane</strong> 与 <strong>Data Plane</strong>：
+        </p>
+
+        <table class="decision-table">
+          <thead>
+            <tr>
+              <th>平面</th>
+              <th>代表组件</th>
+              <th>解决的问题</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Control Plane</td>
+              <td>LoRA Controller、RayClusterFleet、LLM Autoscaler、GPU Optimizer、AI Runtime Sidecar</td>
+              <td>模型/适配器注册、多机编排、按 KV 等推理指标扩缩、异构成本优化、故障诊断</td>
+            </tr>
+            <tr>
+              <td>Data Plane</td>
+              <td>Request Router、Distributed KV Cache Runtime</td>
+              <td>公平性 / TPM·RPM、工作负载隔离、跨节点 KV 复用</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <figure class="diagram-figure diagram-figure--wide">
+          <img
+            src="assets/envoy-aibrix/aibrix-architecture-v1.jpeg"
+            alt="AIBrix 官方架构总览：控制面与数据面组件如何嵌入 Kubernetes 与 LLM 生态"
+            loading="lazy"
+            width="1200"
+            height="675"
+          />
+          <figcaption>
+            AIBrix 官方架构图：控制面负责注册、扩缩与策略，数据面负责派发与 KV 复用。
+            <span class="fig-source">Source: AIBrix Architecture Docs</span>
+          </figcaption>
+        </figure>
+
+        <p>
+          和「再包一层 HTTP 网关」不同，AIBrix 的关键词是 <strong>system × inference engine co-design</strong>：
+          扩缩容看 KV 利用率，路由看前缀缓存与负载，异构 GPU 用 profiler 做成本优化。
+          这也是它和通用 KServe / 纯 Ingress 方案拉开差距的地方——
+          <strong>它从第一天就按 LLM 工作负载设计，而不是把普通微服务网关硬套过来</strong>。
+        </p>
+
+        <h2>三、关键叠层：AIBrix Router 如何扩展 Envoy</h2>
+        <p>
+          官方 Router 文档写得很明确：AIBrix Router 被设计成
+          <strong>Envoy Gateway 的扩展</strong>（via external processing hooks），
+          作为全部 LLM 推理请求的单一入口。换句话说：
+        </p>
+
+        <pre><code>Client
+  → Envoy（接流量、跑 Filter、做协议与连接治理）
+    → GatewayPlugin / Router（查本地缓存的 pod 指标与 KV 状态，做选路）
+      → Inference Pod（vLLM 等）</code></pre>
+
+        <figure class="diagram-figure diagram-figure--wide">
+          <img
+            src="assets/envoy-aibrix/gateway-design.png"
+            alt="AIBrix Gateway 设计：Envoy 与外部处理钩子、Router 插件协同"
+            loading="lazy"
+            width="1200"
+            height="700"
+          />
+          <figcaption>
+            AIBrix Gateway 官方设计图：Envoy 仍是流量入口，真正的 LLM 选路在 Gateway Plugin / Router。
+            <span class="fig-source">Source: AIBrix Router Docs</span>
+          </figcaption>
+        </figure>
+
+        <p>
+          设计上的一个关键点：Router <strong>高频本地缓存</strong> pod 指标（周期性拉取 / 订阅），
+          热路径上尽量不阻塞去「现场问」每个 pod。这样既能做多目标路由，又能撑到很高的 QPS。
+        </p>
+
+        <figure class="diagram-figure diagram-figure--wide">
+          <svg viewBox="0 0 920 420" role="img" aria-label="Envoy 与 AIBrix 叠层关系">
+            <defs>
+              <marker id="arr-b" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+                <polygon points="0 0, 8 3, 0 6" class="d-accent-blue" />
+              </marker>
+              <marker id="arr-o" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+                <polygon points="0 0, 8 3, 0 6" class="d-accent-orange" />
+              </marker>
+              <marker id="arr-g" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+                <polygon points="0 0, 8 3, 0 6" class="d-accent" />
+              </marker>
+            </defs>
+
+            <!-- zones -->
+            <rect x="40" y="36" width="200" height="300" rx="14" class="d-zone-blue" />
+            <text x="60" y="64" class="d-tag-blue">NETWORK</text>
+
+            <rect x="270" y="36" width="380" height="300" rx="14" class="d-zone-orange" />
+            <text x="290" y="64" class="d-tag-orange">AIBRIX GATEWAY</text>
+
+            <rect x="680" y="36" width="200" height="300" rx="14" class="d-zone" />
+            <text x="700" y="64" class="d-tag">ENGINE</text>
+
+            <!-- boxes -->
+            <rect x="60" y="100" width="160" height="56" rx="10" class="d-box-blue" />
+            <text x="140" y="134" text-anchor="middle" class="d-label">Client / Mass</text>
+
+            <rect x="60" y="190" width="160" height="72" rx="10" class="d-box-blue" />
+            <text x="140" y="220" text-anchor="middle" class="d-label">Envoy</text>
+            <text x="140" y="242" text-anchor="middle" class="d-muted">TLS · LB · HTTP/2</text>
+
+            <rect x="300" y="100" width="150" height="72" rx="10" class="d-box-orange" />
+            <text x="375" y="130" text-anchor="middle" class="d-label">ExtProc Hook</text>
+            <text x="375" y="152" text-anchor="middle" class="d-muted">外部处理回调</text>
+
+            <rect x="480" y="100" width="150" height="72" rx="10" class="d-box-orange" />
+            <text x="555" y="130" text-anchor="middle" class="d-label">Router</text>
+            <text x="555" y="152" text-anchor="middle" class="d-muted">选 pod / 策略</text>
+
+            <rect x="360" y="220" width="200" height="72" rx="10" class="d-box-purple" />
+            <text x="460" y="250" text-anchor="middle" class="d-label">Metrics / KV Cache</text>
+            <text x="460" y="272" text-anchor="middle" class="d-muted">本地快照，热路径可读</text>
+
+            <rect x="700" y="120" width="160" height="56" rx="10" class="d-box-accent" />
+            <text x="780" y="154" text-anchor="middle" class="d-label">vLLM Pods</text>
+
+            <rect x="700" y="210" width="160" height="56" rx="10" class="d-box" />
+            <text x="780" y="244" text-anchor="middle" class="d-label">PD / LoRA / …</text>
+
+            <!-- arrows -->
+            <line x1="140" y1="156" x2="140" y2="186" class="d-arrow-blue" marker-end="url(#arr-b)" />
+            <line x1="220" y1="226" x2="296" y2="140" class="d-arrow-blue" marker-end="url(#arr-b)" />
+            <line x1="450" y1="136" x2="476" y2="136" class="d-arrow-orange" marker-end="url(#arr-o)" />
+            <line x1="555" y1="172" x2="460" y2="216" class="d-arrow-orange" marker-end="url(#arr-o)" />
+            <line x1="630" y1="136" x2="696" y2="148" class="d-arrow" marker-end="url(#arr-g)" />
+
+            <text x="460" y="370" text-anchor="middle" class="d-muted">
+              蓝 = 通用网络代理 · 橙 = LLM 路由智能 · 紫 = 指标/KV 状态 · 绿 = 真正算 token 的引擎
+            </text>
+          </svg>
+          <figcaption>
+            叠层关系示意：Envoy 不解 LLM 语义；AIBrix Router 借 Envoy 的流量入口，注入推理感知的选路。
+          </figcaption>
+        </figure>
+
+        <h3>Router 会「看」哪些东西</h3>
+        <p>
+          官方内置策略可以粗分成几类（完整列表见 Router 文档）：
+        </p>
+        <ul>
+          <li><strong>通用负载</strong>：<code>least-request</code>、<code>least-latency</code>、<code>power-of-two</code>…</li>
+          <li><strong>KV / 缓存感知</strong>：<code>prefix-cache</code>、<code>least-kv-cache</code>、<code>prefix-cache-preble</code></li>
+          <li><strong>公平性</strong>：如 <code>vtc-basic</code>（按用户 token 公平与利用率折中）</li>
+          <li><strong>SLO 感知</strong>：<code>slo</code>、<code>slo-least-load</code> 等</li>
+          <li><strong>专用形态</strong>：<code>pd</code>（Prefill/Decode 分离路由）、<code>session-affinity</code></li>
+        </ul>
+
+        <p>
+          策略可以全局配置（环境变量 <code>ROUTING_ALGORITHM</code>），也可以按请求头
+          <code>routing-strategy</code> 覆盖。这正是「通用代理」做不到、而 LLM 网关必须做到的灵活性：
+          <strong>同一条 HTTP 入口，可以按业务目标切换调度哲学</strong>。
+        </p>
+
+        <div class="callout">
+          <strong>一句话：</strong>
+          AIBrix 不是取代 Envoy，而是<strong>站在 Envoy 上，把「转发」升级成「推理调度」</strong>。
+        </div>
+
+        <h2>四、对照表：什么时候想到谁</h2>
+        <table class="decision-table">
+          <thead>
+            <tr>
+              <th>问题</th>
+              <th>更靠近 Envoy</th>
+              <th>更靠近 AIBrix</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>TLS 终结、HTTP/2 流式、连接池</td>
+              <td>是</td>
+              <td>依赖 Envoy 能力</td>
+            </tr>
+            <tr>
+              <td>按 path / host 做普通分流</td>
+              <td>是</td>
+              <td>可叠加更细策略</td>
+            </tr>
+            <tr>
+              <td>按前缀缓存命中选 pod</td>
+              <td>否（默认不知 KV）</td>
+              <td>是（prefix-cache 等）</td>
+            </tr>
+            <tr>
+              <td>按 KV 利用率做秒级扩缩</td>
+              <td>否</td>
+              <td>是（LLM Autoscaler）</td>
+            </tr>
+            <tr>
+              <td>多 LoRA / 异构 GPU 成本优化</td>
+              <td>否</td>
+              <td>是（控制面组件）</td>
+            </tr>
+            <tr>
+              <td>PD 分离后把请求拆到 P/D 池</td>
+              <td>只能做粗分流</td>
+              <td><code>pd</code> 等策略直接支持</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h2>五、回到真实架构图：怎么读入口层</h2>
+        <p>
+          很多生产图会长成这样：
+        </p>
+
+        <pre><code>业务平台
+  → Envoy
+    → AIBrix 网关
+      → 调度 / KV Conductor
+        → vLLM Prefill / Decode</code></pre>
+
+        <p>
+          读图时建议按三层拆：
+        </p>
+        <ol>
+          <li><strong>接入层（Envoy）</strong>：流量怎么进来、协议与连接是否健康——对应 TTFT 里的「网络传输」。</li>
+          <li><strong>推理网关层（AIBrix）</strong>：这份请求该去哪个模型、哪个副本、哪种路由策略——对应「网关处理」。</li>
+          <li><strong>引擎与资源层</strong>：真正 Prefill / Decode、KV 分配与传输——才是算力和显存开销大头。</li>
+        </ol>
+
+        <figure class="diagram-figure diagram-figure--wide">
+          <svg viewBox="0 0 900 260" role="img" aria-label="TTFT 中入口层的位置">
+            <rect x="30" y="70" width="130" height="70" rx="10" class="d-box-blue" />
+            <text x="95" y="100" text-anchor="middle" class="d-label">网络</text>
+            <text x="95" y="120" text-anchor="middle" class="d-muted">Envoy</text>
+
+            <rect x="190" y="70" width="130" height="70" rx="10" class="d-box-orange" />
+            <text x="255" y="100" text-anchor="middle" class="d-label">网关</text>
+            <text x="255" y="120" text-anchor="middle" class="d-muted">AIBrix</text>
+
+            <rect x="350" y="70" width="130" height="70" rx="10" class="d-box-purple" />
+            <text x="415" y="100" text-anchor="middle" class="d-label">调度 / KV</text>
+            <text x="415" y="120" text-anchor="middle" class="d-muted">Coordinator</text>
+
+            <rect x="510" y="70" width="150" height="70" rx="10" class="d-box-accent" />
+            <text x="585" y="100" text-anchor="middle" class="d-label">Prefill</text>
+            <text x="585" y="120" text-anchor="middle" class="d-muted">vLLM-P</text>
+
+            <rect x="690" y="70" width="170" height="70" rx="10" class="d-box" />
+            <text x="775" y="100" text-anchor="middle" class="d-label">Decode…</text>
+            <text x="775" y="120" text-anchor="middle" class="d-muted">Generation Time</text>
+
+            <rect x="30" y="170" width="630" height="44" rx="10" class="d-box-accent" />
+            <text x="345" y="198" text-anchor="middle" class="d-label">TTFT = 网络 + 网关 + 调度/KV + Prefill</text>
+
+            <rect x="690" y="170" width="170" height="44" rx="10" class="d-box" />
+            <text x="775" y="198" text-anchor="middle" class="d-label">逐 token</text>
+          </svg>
+          <figcaption>
+            入口层（蓝/橙）通常不是最大算力开销，但决定请求会不会「走错地方」——走错会把后面 Prefill/Decode 全部放大。
+          </figcaption>
+        </figure>
+
+        <div class="callout">
+          <strong>排查直觉：</strong>
+          首字慢，先分清是「还在网关/调度」还是「已经在 Prefill」。
+          如果大量请求打到 KV 不命中的实例，看起来像引擎慢，根因可能在 AIBrix 路由策略，而不是 vLLM kernel。
+        </div>
+
+        <h2>六、小结</h2>
+        <ul>
+          <li><strong>Envoy</strong>：CNCF 生态里的通用 L7 代理；目标是网络透明、可观测、可治理。</li>
+          <li><strong>AIBrix</strong>：面向 LLM（尤其 vLLM）的云原生控制面 + 推理网关；路由、扩缩、KV、LoRA 都按推理语义设计。</li>
+          <li><strong>关系</strong>：AIBrix Router 扩展 Envoy Gateway；Envoy 管「怎么传」，AIBrix 管「传到哪更聪明」。</li>
+          <li><strong>读图</strong>：把入口层从引擎层拆开，TTFT 才拆得动，优化才找得到杠杆。</li>
+        </ul>
+
+        <div class="essay-ending">
+          Envoy 让网络透明，AIBrix 让推理可调度。入口层看懂了，后面的 Prefill / Decode 图才读得通。
+        </div>
+
+        <section class="references-section" aria-label="参考与扩展阅读">
+          <h2>参考与扩展阅读</h2>
+          <ol class="reference-list">
+            <li>
+              <a href="https://www.envoyproxy.io/docs/envoy/latest/intro/what_is_envoy" target="_blank" rel="noopener noreferrer">
+                What is Envoy — Envoy Documentation
+              </a>
+              <span>官方定义、out-of-process、L3/L4 与 HTTP L7 Filter、可观测性目标。</span>
+            </li>
+            <li>
+              <a href="https://www.envoyproxy.io/docs/envoy/latest/intro/life_of_a_request" target="_blank" rel="noopener noreferrer">
+                Life of a Request — Envoy Documentation
+              </a>
+              <span>Listener / Cluster 子系统与一次请求的完整生命周期。</span>
+            </li>
+            <li>
+              <a href="https://aibrix.readthedocs.io/latest/designs/architecture.html" target="_blank" rel="noopener noreferrer">
+                AIBrix Architecture
+              </a>
+              <span>控制面与数据面组件总览（含官方架构图）。</span>
+            </li>
+            <li>
+              <a href="https://aibrix.readthedocs.io/latest/designs/aibrix-router.html" target="_blank" rel="noopener noreferrer">
+                AIBrix Router
+              </a>
+              <span>Envoy Gateway 扩展方式、路由策略清单与插件接口。</span>
+            </li>
+            <li>
+              <a href="https://vllm.ai/blog/2025-02-21-aibrix-release" target="_blank" rel="noopener noreferrer">
+                Introducing AIBrix — vLLM Blog
+              </a>
+              <span>发布背景：规模化 vLLM 的路由、扩缩与容错缺口。</span>
+            </li>
+            <li>
+              <a href="https://github.com/vllm-project/aibrix" target="_blank" rel="noopener noreferrer">
+                vllm-project/aibrix
+              </a>
+              <span>源码与 issue；可对照 Gateway Plugin / Router 实现。</span>
+            </li>
+            <li>
+              <a href="https://thenewstack.io/a-look-at-aibrix-an-open-source-llm-inference-platform/" target="_blank" rel="noopener noreferrer">
+                A Look at AIBrix — The New Stack
+              </a>
+              <span>产业视角综述：基于 Envoy 的 LLM API Gateway 与智能路由。</span>
+            </li>
+            <li>
+              <a href="https://gateway.envoyproxy.io/v1.4/concepts/" target="_blank" rel="noopener noreferrer">
+                Envoy Gateway Concepts
+              </a>
+              <span>控制面如何把 Gateway API 编译成 Envoy 数据面配置。</span>
+            </li>
+          </ol>
+        </section>
+      </section>
+
+      <section class="comments-section" id="comments" aria-label="Discussion">
+        <div class="comments-header">
+          <h2>Discussion</h2>
+        </div>
+        <div id="utterances-container" class="utterances-container"></div>
+        <noscript>请启用 JavaScript 后查看评论区。</noscript>
+      </section>
+    </article>
+  </main>
+
+  <footer class="site-footer">
+    <span class="footer-credit">
+      <span class="footer-prefix">© 2026 by</span>
+      <a href="../../index.html" class="footer-brand">
+        <span class="brand-mascot-frame brand-mascot-frame--inline" aria-hidden="true">
+          <picture>
+            <source srcset="../../assets/avatar-mascot.webp" type="image/webp" />
+            <img src="../../assets/avatar-mascot.png" alt="" class="brand-mascot" width="27" height="27" decoding="async" />
+          </picture>
+        </span>
+        <span>MOFANG</span>
+      </a>
+    </span>
+  </footer>
+
+  <script src="../../app.js?v=39"></script>
+</body>
+</html>
