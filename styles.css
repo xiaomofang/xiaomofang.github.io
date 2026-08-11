@@ -1438,7 +1438,7 @@ body {
   color: var(--accent);
 }
 
-.reference-list span {
+.reference-list li > span {
   display: block;
   margin-top: 4px;
   line-height: 1.7;

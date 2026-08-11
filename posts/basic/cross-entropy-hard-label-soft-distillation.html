@@ -19,7 +19,7 @@
     html[data-theme="night"], html[data-theme="night"] body { background: #0c0c0c; color: #ededed; color-scheme: dark; }
     html[data-theme="day"], html[data-theme="day"] body { background: #ffffff; color: #1a1a1a; color-scheme: light; }
   </style>
-  <link rel="stylesheet" href="../../styles.css?v=44" />
+  <link rel="stylesheet" href="../../styles.css?v=45" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous" />
   <title>交叉熵、硬标签与软蒸馏：一份词表分布到底怎么算损失</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
@@ -512,7 +512,7 @@ soft = -(p_teacher * log_q).sum(dim=-1).mean()  # 软蒸馏 CE
               <a href="../inference/eagle-1-2-3-feature-extrapolation-evolution.html">
                 本站：EAGLE 三代演进
               </a>
-              <span>把本文的 CE 接回投机解码的 \(l_{\text{token}}\) 与 TTT。</span>
+              <span>把本文的 CE 接回投机解码的 token 损失（l_token）与 TTT。</span>
             </li>
           </ol>
         </section>
