@@ -19,7 +19,7 @@
     html[data-theme="night"], html[data-theme="night"] body { background: #0c0c0c; color: #ededed; color-scheme: dark; }
     html[data-theme="day"], html[data-theme="day"] body { background: #ffffff; color: #1a1a1a; color-scheme: light; }
   </style>
-  <link rel="stylesheet" href="../../styles.css?v=42" />
+  <link rel="stylesheet" href="../../styles.css?v=43" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous" />
   <title>投机解码四代演进：从 MTP、Medusa 到 EAGLE、DFlash、DSpark</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
@@ -58,6 +58,10 @@
           <strong>并行支线</strong>（Medusa / MTP → DFlash）追求起草延迟的下限，直到 DSpark 把两条支线重新
           缝合在一起。本文顺着这条演化脉络把每一步「为什么这么改」讲透。
         </p>
+        <div class="post-page-keywords" aria-label="Keywords">
+          <a class="post-keyword-chip" href="../../index.html?keyword=speculative">投机推理</a>
+          <a class="post-keyword-chip" href="../../index.html?keyword=training">训练</a>
+        </div>
         <p class="post-page-meta" data-date="2026-07-29" data-author="MOFANG">2026年7月29日 · 28 分钟 · 8293 字 · MOFANG</p>
       </header>
 
@@ -999,7 +1003,7 @@ torchrun --standalone --nproc_per_node 4 scripts/train.py --speculator-type dspa
     </span>
   </footer>
 
-  <script src="../../app.js?v=38"></script>
+  <script src="../../app.js?v=39"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" crossorigin="anonymous"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js" crossorigin="anonymous"
     onload="renderMathInElement(document.body, {

@@ -2,7 +2,18 @@
   const THEME_KEY = "yichuan-theme";
 
   let currentCategory = "all";
+  let currentKeyword = "all";
   let searchQuery = "";
+
+  const KEYWORD_LABELS = {
+    speculative: "投机推理",
+    attention: "Attention 加速",
+    "inference-systems": "推理框架",
+    training: "训练",
+    "llm-gateway": "LLM Gateway",
+    determinism: "确定性",
+    hardware: "硬件与 Kernel",
+  };
 
   function initTheme() {
     const saved = localStorage.getItem(THEME_KEY);
@@ -43,7 +54,7 @@
     window.addEventListener("resize", resize);
 
     document.addEventListener("click", function (e) {
-      if (e.target.closest("a, button, input, textarea, .theme-toggle, .tag-pill")) {
+      if (e.target.closest("a, button, input, textarea, .theme-toggle, .tag-pill, .keyword-pill, .post-keyword-chip")) {
         return;
       }
 
@@ -112,6 +123,22 @@
     }
   }
 
+  function setKeyword(keyword, syncUrl) {
+    currentKeyword = keyword || "all";
+    document.querySelectorAll(".keyword-pill").forEach((p) => {
+      p.classList.toggle("active", (p.dataset.keyword || "all") === currentKeyword);
+    });
+    if (syncUrl !== false) {
+      const url = new URL(window.location.href);
+      if (currentKeyword === "all") {
+        url.searchParams.delete("keyword");
+      } else {
+        url.searchParams.set("keyword", currentKeyword);
+      }
+      history.replaceState(null, "", url.pathname + url.search + url.hash);
+    }
+  }
+
   function filterPosts() {
     const cards = Array.from(document.querySelectorAll(".post-card[data-category]"));
     const list = document.getElementById("post-list");
@@ -120,13 +147,20 @@
 
     const q = searchQuery.toLowerCase().trim();
     const visible = cards.filter((card) => {
-      const categories = (card.dataset.category || "").split(/\s+/);
+      const categories = (card.dataset.category || "").split(/\s+/).filter(Boolean);
+      const keywords = (card.dataset.keywords || "").split(/\s+/).filter(Boolean);
       const catMatch = currentCategory === "all" || categories.includes(currentCategory);
       if (!catMatch) return false;
+      const kwMatch = currentKeyword === "all" || keywords.includes(currentKeyword);
+      if (!kwMatch) return false;
       if (!q) return true;
       const title = (card.dataset.title || "").toLowerCase();
       const excerpt = (card.querySelector(".post-excerpt")?.textContent || "").toLowerCase();
-      return title.includes(q) || excerpt.includes(q);
+      const keywordText = keywords
+        .map((k) => KEYWORD_LABELS[k] || k)
+        .join(" ")
+        .toLowerCase();
+      return title.includes(q) || excerpt.includes(q) || keywordText.includes(q);
     });
 
     visible.sort((a, b) => (b.dataset.date || "").localeCompare(a.dataset.date || ""));
@@ -150,6 +184,30 @@
         filterPosts();
       });
     });
+
+    document.querySelectorAll(".keyword-pill").forEach((pill) => {
+      pill.addEventListener("click", function () {
+        setKeyword(pill.dataset.keyword || "all");
+        filterPosts();
+      });
+    });
+
+    document.querySelectorAll(".post-keyword-chip[data-keyword]").forEach((chip) => {
+      chip.addEventListener("click", function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        setKeyword(chip.dataset.keyword || "all");
+        filterPosts();
+        const cloud = document.getElementById("keywords");
+        if (cloud) cloud.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      });
+    });
+
+    const params = new URLSearchParams(window.location.search);
+    const fromUrl = params.get("keyword");
+    if (fromUrl && (fromUrl === "all" || KEYWORD_LABELS[fromUrl])) {
+      setKeyword(fromUrl, false);
+    }
 
     const search = document.getElementById("search-input");
     if (search) {

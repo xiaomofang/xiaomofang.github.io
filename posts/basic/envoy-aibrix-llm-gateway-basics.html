@@ -19,7 +19,7 @@
     html[data-theme="night"], html[data-theme="night"] body { background: #0c0c0c; color: #ededed; color-scheme: dark; }
     html[data-theme="day"], html[data-theme="day"] body { background: #ffffff; color: #1a1a1a; color-scheme: light; }
   </style>
-  <link rel="stylesheet" href="../../styles.css?v=42" />
+  <link rel="stylesheet" href="../../styles.css?v=43" />
   <title>Envoy 与 AIBrix：数据面四件套、ExtProc 与 LLM 感知路由</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="description" content="从 Listener/Filter/Router/Cluster 与静态配置走通 Envoy；再看 AIBrix 如何用 ExtProc 把 KV、PD、SLO 写进热路径路由，而不只是「再包一层网关」。" />
@@ -55,6 +55,10 @@
           入口层如果只记得「两个网关名字」，排查 TTFT 时就会把调度误判成算力。
           本文把 Envoy 拆到 Listener / Filter / Router / Cluster，再把 AIBrix 拆到 ExtProc 与指标缓存驱动的选路。
         </p>
+        <div class="post-page-keywords" aria-label="Keywords">
+          <a class="post-keyword-chip" href="../../index.html?keyword=inference-systems">推理框架</a>
+          <a class="post-keyword-chip" href="../../index.html?keyword=llm-gateway">LLM Gateway</a>
+        </div>
         <p class="post-page-meta" data-date="2026-08-10" data-author="MOFANG">2026年8月10日 · 22 分钟 · 4680 字 · MOFANG</p>
       </header>
 

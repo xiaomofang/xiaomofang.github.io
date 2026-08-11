@@ -19,7 +19,7 @@
     html[data-theme="night"], html[data-theme="night"] body { background: #0c0c0c; color: #ededed; color-scheme: dark; }
     html[data-theme="day"], html[data-theme="day"] body { background: #ffffff; color: #1a1a1a; color-scheme: light; }
   </style>
-  <link rel="stylesheet" href="styles.css?v=42" />
+  <link rel="stylesheet" href="styles.css?v=43" />
   <title>MOFANG's Blog</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="description" content="LLM notes — understanding, one question at a time." />
@@ -66,22 +66,53 @@
     </section>
 
     <div class="controls">
-      <nav id="tags" class="tag-cloud" aria-label="Categories">
-        <button class="tag-pill active" data-category="all" type="button">All</button>
-        <button class="tag-pill" data-category="basic" type="button">Basic Knowledge</button>
-        <button class="tag-pill" data-category="inference" type="button">Inference</button>
-        <button class="tag-pill" data-category="rl" type="button">Reinforcement Learning</button>
-        <button class="tag-pill" data-category="training" type="button">Training</button>
-        <button class="tag-pill" data-category="hardware-kernels" type="button">Hardware & Kernels</button>
-      </nav>
-      <div class="search-box">
-        <input id="search-input" type="search" placeholder="Search…" autocomplete="off" />
+      <div class="controls-top">
+        <nav id="tags" class="tag-cloud" aria-label="Categories">
+          <button class="tag-pill active" data-category="all" type="button">All</button>
+          <button class="tag-pill" data-category="basic" type="button">Basic Knowledge</button>
+          <button class="tag-pill" data-category="inference" type="button">Inference</button>
+          <button class="tag-pill" data-category="rl" type="button">Reinforcement Learning</button>
+          <button class="tag-pill" data-category="training" type="button">Training</button>
+          <button class="tag-pill" data-category="hardware-kernels" type="button">Hardware & Kernels</button>
+        </nav>
+        <div class="search-box">
+          <input id="search-input" type="search" placeholder="Search…" autocomplete="off" />
+        </div>
+      </div>
+      <div class="keyword-row">
+        <span class="keyword-label">关键词</span>
+        <nav id="keywords" class="keyword-cloud" aria-label="Keywords">
+          <button class="keyword-pill active" data-keyword="all" type="button">全部</button>
+          <button class="keyword-pill" data-keyword="speculative" type="button">投机推理</button>
+          <button class="keyword-pill" data-keyword="attention" type="button">Attention 加速</button>
+          <button class="keyword-pill" data-keyword="inference-systems" type="button">推理框架</button>
+          <button class="keyword-pill" data-keyword="training" type="button">训练</button>
+          <button class="keyword-pill" data-keyword="llm-gateway" type="button">LLM Gateway</button>
+          <button class="keyword-pill" data-keyword="determinism" type="button">确定性</button>
+          <button class="keyword-pill" data-keyword="hardware" type="button">硬件与 Kernel</button>
+        </nav>
       </div>
     </div>
 
     <section id="blog" class="section">
       <div class="post-list" id="post-list">
-        <article class="post-card" data-category="basic" data-date="2026-08-10" data-title="Envoy 与 AIBrix：数据面四件套、ExtProc 与 LLM 感知路由">
+        <article class="post-card" data-category="basic" data-keywords="training" data-date="2026-08-10" data-title="交叉熵、硬标签与软蒸馏：一份词表分布到底怎么算损失">
+          <a href="posts/basic/cross-entropy-hard-label-soft-distillation.html" class="post-card-link">
+            <div class="post-meta-row">
+              <span class="post-tag">Basic Knowledge</span>
+            </div>
+            <h3 class="post-title">交叉熵、硬标签与软蒸馏：一份词表分布到底怎么算损失</h3>
+            <p class="post-excerpt">
+              结合苏剑林对 LM Loss 的推导，用彩色条形图讲清 \(\hat{p}\)、硬/软标签、Softmax+CE 梯度 \(q-e_i\)，并接到 EAGLE-3 的 token 损失与 TTT。
+            </p>
+            <p class="post-card-stats">2026年8月11日 · 14 分钟 · MOFANG</p>
+          </a>
+          <div class="post-card-keywords">
+            <button class="post-keyword-chip" data-keyword="training" type="button">训练</button>
+          </div>
+        </article>
+
+        <article class="post-card" data-category="basic" data-keywords="inference-systems llm-gateway" data-date="2026-08-10" data-title="Envoy 与 AIBrix：数据面四件套、ExtProc 与 LLM 感知路由">
           <a href="posts/basic/envoy-aibrix-llm-gateway-basics.html" class="post-card-link">
             <div class="post-meta-row">
               <span class="post-tag">Basic Knowledge</span>
@@ -92,9 +123,13 @@
             </p>
             <p class="post-card-stats">2026年8月10日 · 22 分钟 · 4680 字 · MOFANG</p>
           </a>
+          <div class="post-card-keywords">
+            <button class="post-keyword-chip" data-keyword="inference-systems" type="button">推理框架</button>
+            <button class="post-keyword-chip" data-keyword="llm-gateway" type="button">LLM Gateway</button>
+          </div>
         </article>
 
-        <article class="post-card" data-category="inference" data-date="2026-08-04" data-title="EAGLE 三代演进：从特征外推到 Training-Time Test">
+        <article class="post-card" data-category="inference" data-keywords="speculative training" data-date="2026-08-04" data-title="EAGLE 三代演进：从特征外推到 Training-Time Test">
           <a href="posts/inference/eagle-1-2-3-feature-extrapolation-evolution.html" class="post-card-link">
             <div class="post-meta-row">
               <span class="post-tag">Inference</span>
@@ -105,9 +140,13 @@
             </p>
             <p class="post-card-stats">2026年8月4日 · 22 分钟 · 4599 字 · MOFANG</p>
           </a>
+          <div class="post-card-keywords">
+            <button class="post-keyword-chip" data-keyword="speculative" type="button">投机推理</button>
+            <button class="post-keyword-chip" data-keyword="training" type="button">训练</button>
+          </div>
         </article>
 
-        <article class="post-card" data-category="inference" data-date="2026-07-29" data-title="投机解码四代演进：从 MTP、Medusa 到 EAGLE、DFlash、DSpark">
+        <article class="post-card" data-category="inference" data-keywords="speculative training" data-date="2026-07-29" data-title="投机解码四代演进：从 MTP、Medusa 到 EAGLE、DFlash、DSpark">
           <a href="posts/inference/speculative-decoding-evolution-mtp-eagle-dflash-dspark.html" class="post-card-link">
             <div class="post-meta-row">
               <span class="post-tag">Inference</span>
@@ -118,9 +157,13 @@
             </p>
             <p class="post-card-stats">2026年7月29日 · 28 分钟 · 8293 字 · MOFANG</p>
           </a>
+          <div class="post-card-keywords">
+            <button class="post-keyword-chip" data-keyword="speculative" type="button">投机推理</button>
+            <button class="post-keyword-chip" data-keyword="training" type="button">训练</button>
+          </div>
         </article>
 
-        <article class="post-card" data-category="inference" data-date="2026-07-28" data-title="DSpark 深度解析：半自回归生成与置信度调度，让推测解码「又快又不浪费」">
+        <article class="post-card" data-category="inference" data-keywords="speculative" data-date="2026-07-28" data-title="DSpark 深度解析：半自回归生成与置信度调度，让推测解码「又快又不浪费」">
           <a href="posts/inference/dspark-confidence-scheduled-speculative-decoding.html" class="post-card-link">
             <div class="post-meta-row">
               <span class="post-tag">Inference</span>
@@ -131,9 +174,12 @@
             </p>
             <p class="post-card-stats">2026年7月28日 · 24 分钟 · 7051 字 · MOFANG</p>
           </a>
+          <div class="post-card-keywords">
+            <button class="post-keyword-chip" data-keyword="speculative" type="button">投机推理</button>
+          </div>
         </article>
 
-        <article class="post-card" data-category="inference" data-date="2026-06-10" data-title="FlashAttention 深度剖析：从存储层级到 IO-Aware Exact Attention">
+        <article class="post-card" data-category="inference" data-keywords="attention hardware" data-date="2026-06-10" data-title="FlashAttention 深度剖析：从存储层级到 IO-Aware Exact Attention">
           <a href="posts/inference/flash-attention-deep-dive.html" class="post-card-link">
             <div class="post-meta-row">
               <span class="post-tag">Inference</span>
@@ -144,9 +190,13 @@
             </p>
             <p class="post-card-stats">2026年6月10日 · 11 分钟 · 3039 字 · MOFANG</p>
           </a>
+          <div class="post-card-keywords">
+            <button class="post-keyword-chip" data-keyword="attention" type="button">Attention 加速</button>
+            <button class="post-keyword-chip" data-keyword="hardware" type="button">硬件与 Kernel</button>
+          </div>
         </article>
 
-        <article class="post-card" data-category="inference" data-date="2026-06-08" data-title="Temperature=0 不等于确定性：从解码策略到 Batch Invariance">
+        <article class="post-card" data-category="inference" data-keywords="determinism training inference-systems" data-date="2026-06-08" data-title="Temperature=0 不等于确定性：从解码策略到 Batch Invariance">
           <a href="posts/inference/temperature-zero-determinism.html" class="post-card-link">
             <div class="post-meta-row">
               <span class="post-tag">Inference</span>
@@ -157,6 +207,11 @@
             </p>
             <p class="post-card-stats">2026年6月8日 · 8 分钟 · 2388 字 · MOFANG</p>
           </a>
+          <div class="post-card-keywords">
+            <button class="post-keyword-chip" data-keyword="determinism" type="button">确定性</button>
+            <button class="post-keyword-chip" data-keyword="training" type="button">训练</button>
+            <button class="post-keyword-chip" data-keyword="inference-systems" type="button">推理框架</button>
+          </div>
         </article>
       </div>
 
@@ -179,6 +234,6 @@
     </span>
   </footer>
 
-  <script src="app.js?v=38"></script>
+  <script src="app.js?v=39"></script>
 </body>
 </html>

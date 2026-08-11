@@ -19,7 +19,7 @@
     html[data-theme="night"], html[data-theme="night"] body { background: #0c0c0c; color: #ededed; color-scheme: dark; }
     html[data-theme="day"], html[data-theme="day"] body { background: #ffffff; color: #1a1a1a; color-scheme: light; }
   </style>
-  <link rel="stylesheet" href="../../styles.css?v=42" />
+  <link rel="stylesheet" href="../../styles.css?v=43" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous" />
   <title>FlashAttention 深度剖析：从存储层级到 IO-Aware Exact Attention</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
@@ -56,6 +56,10 @@
           FlashAttention 没有改变 attention 的数学定义，却改变了数据在 HBM 与片上 SRAM 之间的流动方式。
           理解它，需要先理解 GPU 的存储层级，再理解为什么标准 attention 是 memory-bound。
         </p>
+        <div class="post-page-keywords" aria-label="Keywords">
+          <a class="post-keyword-chip" href="../../index.html?keyword=attention">Attention 加速</a>
+          <a class="post-keyword-chip" href="../../index.html?keyword=hardware">硬件与 Kernel</a>
+        </div>
         <p class="post-page-meta" data-date="2026-06-10" data-author="MOFANG">2026年6月10日 · 11 分钟 · 3039 字 · MOFANG</p>
       </header>
 
@@ -762,7 +766,7 @@
     </span>
   </footer>
 
-  <script src="../../app.js?v=38"></script>
+  <script src="../../app.js?v=39"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" crossorigin="anonymous"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js" crossorigin="anonymous"
     onload="renderMathInElement(document.body, {

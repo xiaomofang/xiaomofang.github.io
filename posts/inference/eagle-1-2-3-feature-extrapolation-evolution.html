@@ -19,7 +19,7 @@
     html[data-theme="night"], html[data-theme="night"] body { background: #0c0c0c; color: #ededed; color-scheme: dark; }
     html[data-theme="day"], html[data-theme="day"] body { background: #ffffff; color: #1a1a1a; color-scheme: light; }
   </style>
-  <link rel="stylesheet" href="../../styles.css?v=42" />
+  <link rel="stylesheet" href="../../styles.css?v=43" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous" />
   <title>EAGLE 三代演进：从特征外推到 Training-Time Test</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
@@ -57,6 +57,10 @@
           而是把目标模型自己的隐藏状态借出来做外推——从特征级自回归（EAGLE），到按置信度长树（EAGLE-2），
           再到扔掉特征回归约束、用 Training-Time Test 吃下数据缩放（EAGLE-3）。本文把这三跳的底层逻辑逐一拆开。
         </p>
+        <div class="post-page-keywords" aria-label="Keywords">
+          <a class="post-keyword-chip" href="../../index.html?keyword=speculative">投机推理</a>
+          <a class="post-keyword-chip" href="../../index.html?keyword=training">训练</a>
+        </div>
         <p class="post-page-meta" data-date="2026-08-04" data-author="MOFANG">2026年8月4日 · MOFANG</p>
       </header>
 
@@ -202,7 +206,9 @@
         </ul>
         <p>
           三步串行前向换来草稿 <code>cats | eat | pizza</code>，再交给目标模型一次并行验证。
-          训练时损失是特征回归（Smooth L1）与 token 蒸馏（交叉熵）的加权和——特征损失让多步外推时输入分布不至于漂太远。
+          训练时损失是特征回归（Smooth L1）与 token 蒸馏（交叉熵）的加权和——特征损失让多步外推时输入分布不至于漂太远；
+          token 项则是「\(\hat{p}\) vs 真词 / 教师分布」的 CE，细节见下文 EAGLE-3 小节与
+          <a href="../basic/cross-entropy-hard-label-soft-distillation.html">交叉熵专题</a>。
         </p>
 
         <figure class="diagram-figure diagram-figure--wide">
@@ -419,6 +425,58 @@
           于是输入也自由了——这才给多层特征融合腾出空间，并让数据缩放曲线重新抬头。
         </div>
 
+        <h3>4.2.1 Token 损失到底在对齐什么：硬标签 vs 软蒸馏</h3>
+        <p>
+          去掉 \(l_{\text{fea}}\) 之后，EAGLE-3 的监督几乎只剩 \(l_{\text{token}}\)。
+          这里容易混成两件事：一是「接受率」——那是<strong>推理验收指标</strong>，一般不当可微 loss；
+          二是「词表上的交叉熵」——那才是<strong>训练目标</strong>。
+          TTT 模拟约 5 步，不是把 5 步概率拼成一条再算一次，而是：
+          <strong>每一轮、每一个要预测的位置，各自产出一份词表分布 \(\hat{p}\)，各自算一次 CE，再求和（或加权和）</strong>。
+        </p>
+        <p>
+          草稿侧始终是同一条链路：\(a \xrightarrow{\text{LM head}} \text{logits} \xrightarrow{\text{softmax}} \hat{p}\in\mathbb{R}^{|V|}\)。
+          \(\hat{p}\) 是<strong>当前这一个位置</strong>上「下一个词」的完整概率（和为 1），不是 5 步平均。
+          标签则在实现里<strong>二选一</strong>（或按仓库配置二选一），不是两个 CE 同时各算一遍硬拼：
+        </p>
+        <table class="decision-table">
+          <thead>
+            <tr>
+              <th>方式</th>
+              <th>标签是什么</th>
+              <th>Loss</th>
+              <th>在教草稿什么</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>硬标签</td>
+              <td>训练序列真 token \(y\) 的 one-hot</td>
+              <td>\(\mathrm{CE}(y,\hat{p})=-\log\hat{p}(y)\)</td>
+              <td>把概率质量尽量堆到「唯一正确词」上</td>
+            </tr>
+            <tr>
+              <td>软蒸馏</td>
+              <td>目标模型同位置整份分布 \(p\)</td>
+              <td>\(\mathrm{CE}(p,\hat{p})=-\sum_v p(v)\log\hat{p}(v)\)</td>
+              <td>连「次优词 / 相对排序」一起模仿目标模型</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          EAGLE-1 原文里的 \(L_{\text{cls}}\) 用的是软对齐味道更浓的写法：把预测特征与真特征各自过共享 LM head，
+          再对两份 softmax 分布做交叉熵（并设 \(w_{\text{cls}}=0.1\) 与 Smooth L1 特征回归加权）。
+          EAGLE-3 去掉特征回归后，开源实现（官方 EAGLE / SpecForge 等）常见仍是 <strong>token 级 CE / 蒸馏 CE</strong>；
+          具体硬标签还是软分布，以你用的训练脚本为准，但<strong>数学对象都是「一份 \(\hat{p}\) vs 一份标签分布」</strong>。
+        </p>
+        <div class="callout">
+          <strong>和「5 步平均接受率」的区别。</strong>
+          TTT 的 5 步是训练时的 rollout 深度：Step 0 吃真融合特征 \(g\)，Step 1… 混入自身 \(a\)，每步加 token CE。
+          接受率 \(n\textrm{-}\alpha\)、平均接受长度 \(\tau\) 是测出来的；
+          不会写成 \(\mathrm{loss}=\text{5 步平均接受率}\)。
+          交叉熵、硬标签与软蒸馏的公式、色条例子、以及「为何 LM 几乎必然是 Softmax+CE」（苏剑林恰当评分规则视角），见拓展阅读：
+          <a href="../basic/cross-entropy-hard-label-soft-distillation.html">交叉熵、硬标签与软蒸馏</a>。
+        </div>
+
         <h3>4.3 多层特征融合：次顶层不够看「再下一个」</h3>
         <p>
           次顶层特征与「下一个 token 的 logits」几乎一一对应（满秩 LM head 下信息对齐 next-token）。
@@ -597,6 +655,12 @@
                 SafeAILab/EAGLE（官方实现）
               </a>
               <span>三代方法的参考实现；训练侧亦可对照 SGLang SpecForge 与各推理引擎集成。</span>
+            </li>
+            <li>
+              <a href="../basic/cross-entropy-hard-label-soft-distillation.html">
+                交叉熵、硬标签与软蒸馏（本站拓展）
+              </a>
+              <span>弄清 \(l_{\text{token}}\) 在算什么：词表分布、硬 one-hot、软教师分布、TTT 多步如何加总 CE。</span>
             </li>
           </ol>
         </section>
