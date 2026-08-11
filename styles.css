@@ -1180,6 +1180,12 @@ body {
 .katex-display {
   overflow-x: auto;
   overflow-y: hidden;
+  padding: 0.1rem 0;
+}
+
+.post-lead .katex,
+.post-page-content > p .katex {
+  font-size: 1em;
 }
 
 .algo-steps {
@@ -1269,7 +1275,9 @@ body {
   box-shadow: 0 8px 20px -14px var(--map-color);
 }
 
-.map-node span {
+/* Only the step badge — never match KaTeX's internal <span>s */
+.map-node > .map-step,
+.map-node > span:first-of-type {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1294,8 +1302,25 @@ body {
 .map-node p {
   margin: 0;
   font-size: 0.86rem;
-  line-height: 1.6;
+  line-height: 1.55;
   color: var(--text-soft);
+  overflow-wrap: anywhere;
+}
+
+.map-node .katex {
+  font-size: 0.95em;
+}
+
+.map-node .katex span {
+  display: inline;
+  width: auto;
+  height: auto;
+  margin: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font-size: inherit;
+  font-weight: inherit;
 }
 
 .map-node--start { --map-color: var(--text-faint); }

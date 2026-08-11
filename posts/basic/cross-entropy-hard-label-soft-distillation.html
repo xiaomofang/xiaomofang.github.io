@@ -19,7 +19,7 @@
     html[data-theme="night"], html[data-theme="night"] body { background: #0c0c0c; color: #ededed; color-scheme: dark; }
     html[data-theme="day"], html[data-theme="day"] body { background: #ffffff; color: #1a1a1a; color-scheme: light; }
   </style>
-  <link rel="stylesheet" href="../../styles.css?v=43" />
+  <link rel="stylesheet" href="../../styles.css?v=44" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous" />
   <title>交叉熵、硬标签与软蒸馏：一份词表分布到底怎么算损失</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
@@ -74,27 +74,27 @@
 
         <div class="logic-map" aria-label="文章逻辑地图">
           <div class="map-node map-node--start">
-            <span>1</span>
+            <span class="map-step">1</span>
             <strong>词表分布</strong>
-            <p>一次预测 = 一整份 \(\hat{p}\)，和为 1。</p>
+            <p>一次预测 = 一整份概率向量，各词概率和为 1。</p>
           </div>
           <div class="map-arrow">→</div>
           <div class="map-node map-node--ar">
-            <span>2</span>
+            <span class="map-step">2</span>
             <strong>为何是 CE</strong>
             <p>一对多 + 只能采样 → 恰当评分规则。</p>
           </div>
           <div class="map-arrow">→</div>
           <div class="map-node map-node--par">
-            <span>3</span>
+            <span class="map-step">3</span>
             <strong>硬 / 软</strong>
-            <p>one-hot 或教师整份 \(p\)，公式同族。</p>
+            <p>one-hot 或教师整份分布，公式同族。</p>
           </div>
           <div class="map-arrow">→</div>
           <div class="map-node map-node--conv">
-            <span>4</span>
+            <span class="map-step">4</span>
             <strong>梯度与 EAGLE</strong>
-            <p>\(q-e_i\) 干净；TTT 多步求和。</p>
+            <p>梯度干净；TTT 多步交叉熵求和。</p>
           </div>
         </div>
 
@@ -112,7 +112,7 @@
 
         <figure class="diagram-figure diagram-figure--wide">
           <svg viewBox="0 0 780 320" role="img" aria-label="一次预测的词表分布条形图">
-            <text x="390" y="28" text-anchor="middle" class="d-title">一次预测 = 一份词表分布 \(q=\hat{p}\)</text>
+            <text x="390" y="28" text-anchor="middle" class="d-title">一次预测 = 一份词表分布 q = p̂</text>
             <text x="40" y="58" class="d-muted">前缀「I love」· 下一词概率（示例）</text>
 
             <rect x="120" y="80" width="45" height="180" rx="6" fill="#3b82f6" opacity="0.9" />
@@ -208,7 +208,7 @@
 
         <figure class="diagram-figure diagram-figure--wide">
           <svg viewBox="0 0 780 300" role="img" aria-label="硬标签只盯真词柱">
-            <text x="390" y="28" text-anchor="middle" class="d-title">硬标签：一次采样 → \(-\log q_y\)</text>
+            <text x="390" y="28" text-anchor="middle" class="d-title">硬标签：一次采样 → −log qᵧ</text>
 
             <rect x="40" y="60" width="320" height="200" rx="14" class="d-zone-blue" />
             <text x="200" y="90" text-anchor="middle" class="d-tag-blue">标签 \(y\)（采样）</text>
@@ -350,7 +350,7 @@
 
         <figure class="diagram-figure diagram-figure--wide">
           <svg viewBox="0 0 780 280" role="img" aria-label="梯度 q 减 e_i">
-            <text x="390" y="28" text-anchor="middle" class="d-title">梯度 \(q-e_i\)：抬真类、压其它类</text>
+            <text x="390" y="28" text-anchor="middle" class="d-title">梯度 q − eᵢ：抬真类、压其它类</text>
 
             <text x="130" y="70" text-anchor="middle" class="d-tag-blue">预测 \(q\)</text>
             <rect x="50" y="100" width="32" height="90" rx="4" fill="#3b82f6" />
@@ -461,7 +461,7 @@ soft = -(p_teacher * log_q).sum(dim=-1).mean()  # 软蒸馏 CE
             <text x="630" y="150" text-anchor="middle" class="d-muted">CE₄</text>
 
             <text x="390" y="210" text-anchor="middle" class="d-label">
-              \(L_{\text{token}}\approx \mathrm{CE}_0+\cdots+\mathrm{CE}_4\)（可加权；每步内部硬/软二选一）
+              L_token ≈ CE₀ + ⋯ + CE₄（可加权；每步内部硬/软二选一）
             </text>
           </svg>
           <figcaption>
@@ -543,7 +543,7 @@ soft = -(p_teacher * log_q).sum(dim=-1).mean()  # 软蒸馏 CE
     </span>
   </footer>
 
-  <script src="../../app.js?v=39"></script>
+  <script src="../../app.js?v=40"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" crossorigin="anonymous"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js" crossorigin="anonymous"
     onload="renderMathInElement(document.body, {
@@ -551,6 +551,7 @@ soft = -(p_teacher * log_q).sum(dim=-1).mean()  # 软蒸馏 CE
         {left: '\\[', right: '\\]', display: true},
         {left: '\\(', right: '\\)', display: false}
       ],
+      ignoredTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code', 'option', 'svg'],
       throwOnError: false
     });"></script>
 </body>
