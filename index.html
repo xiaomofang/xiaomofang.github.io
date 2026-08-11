@@ -19,7 +19,7 @@
     html[data-theme="night"], html[data-theme="night"] body { background: #0c0c0c; color: #ededed; color-scheme: dark; }
     html[data-theme="day"], html[data-theme="day"] body { background: #ffffff; color: #1a1a1a; color-scheme: light; }
   </style>
-  <link rel="stylesheet" href="styles.css?v=45" />
+  <link rel="stylesheet" href="styles.css?v=46" />
   <title>MOFANG's Blog</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="description" content="LLM notes — understanding, one question at a time." />
@@ -96,16 +96,16 @@
 
     <section id="blog" class="section">
       <div class="post-list" id="post-list">
-        <article class="post-card" data-category="basic" data-keywords="training" data-date="2026-08-11" data-title="交叉熵是什么：从信息量算到硬标签、软蒸馏">
+        <article class="post-card" data-category="basic" data-keywords="training" data-date="2026-08-11" data-title="交叉熵是什么：从信息量、凸优化到苏神的 LM Loss">
           <a href="posts/basic/cross-entropy-hard-label-soft-distillation.html" class="post-card-link">
             <div class="post-meta-row">
               <span class="post-tag">Basic Knowledge</span>
             </div>
-            <h3 class="post-title">交叉熵是什么：从信息量算到硬标签、软蒸馏</h3>
+            <h3 class="post-title">交叉熵是什么：从信息量、凸优化到苏神的 LM Loss</h3>
             <p class="post-excerpt">
-              先讲清 CE 从哪来、怎么算：信息量、熵、交叉熵、KL；再用五词词表手算硬标签与软蒸馏，最后接到 Softmax 梯度与 EAGLE。
+              从信息量与多项似然手算 CE，再展开苏剑林原文：恰当评分、logits 凸性、Fenchel–Young 与信息几何直觉，最后接到硬/软标签与 EAGLE。
             </p>
-            <p class="post-card-stats">2026年8月11日 · 16 分钟 · MOFANG</p>
+            <p class="post-card-stats">2026年8月11日 · 20 分钟 · MOFANG</p>
           </a>
           <div class="post-card-keywords">
             <button class="post-keyword-chip" data-keyword="training" type="button">训练</button>

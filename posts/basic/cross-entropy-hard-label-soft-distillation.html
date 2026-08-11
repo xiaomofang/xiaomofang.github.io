@@ -19,11 +19,11 @@
     html[data-theme="night"], html[data-theme="night"] body { background: #0c0c0c; color: #ededed; color-scheme: dark; }
     html[data-theme="day"], html[data-theme="day"] body { background: #ffffff; color: #1a1a1a; color-scheme: light; }
   </style>
-  <link rel="stylesheet" href="../../styles.css?v=45" />
+  <link rel="stylesheet" href="../../styles.css?v=46" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous" />
-  <title>交叉熵是什么：从信息量算到硬标签、软蒸馏</title>
+  <title>交叉熵是什么：从信息量、凸优化到苏神的 LM Loss</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="description" content="先讲清交叉熵从哪来、怎么算：信息量、熵、CE、KL；再用玩具词表手算硬标签与软蒸馏，最后接到 Softmax 梯度、PyTorch 与 EAGLE-3 的 token 损失。" />
+  <meta name="description" content="从信息量、多项似然手算交叉熵，再展开苏剑林《除了交叉熵，LM Loss还有什么选择？》：恰当评分、凸性、Fenchel–Young 与信息几何直觉，最后接到硬/软标签与 EAGLE。" />
 </head>
 <body>
   <div class="ambient" aria-hidden="true"><span class="orb orb-a"></span><span class="orb orb-b"></span></div>
@@ -51,11 +51,13 @@
     <article class="post-page">
       <header class="post-page-header">
         <p class="post-page-category">Basic Knowledge</p>
-        <h1 class="post-page-title">交叉熵是什么：从信息量算到硬标签、软蒸馏</h1>
+        <h1 class="post-page-title">交叉熵是什么：从信息量、凸优化到苏神的 LM Loss</h1>
         <p class="post-lead">
-          交叉熵（Cross Entropy，常写成 CE）不是「对了记 1、错了记 0」，也不是两根向量的欧氏距离。
-          它量的是：<strong>用你猜的那份概率，去编码真实世界里实际发生的事，平均要花多少nats</strong>。
-          本文先把这个定义算清楚，再谈硬标签、软蒸馏，最后才接到语言模型和 EAGLE。
+          交叉熵量的是：<strong>用你猜的概率去编码真实发生的事，平均要花多少</strong>。
+          本文先把概率公式手算清楚，再展开苏剑林
+          <a href="https://spaces.ac.cn/archives/11854" target="_blank" rel="noopener noreferrer">《除了交叉熵，LM Loss还有什么选择？》</a>
+          里多数人卡住的三块：<strong>恰当评分、logits 上的凸性、Fenchel–Young / 信息几何直觉</strong>。
+          不预设凸优化或信息几何背景。
         </p>
         <div class="post-page-keywords" aria-label="Keywords">
           <a class="post-keyword-chip" href="../../index.html?keyword=training">训练</a>
@@ -65,44 +67,41 @@
 
       <section class="post-page-content">
         <p>
-          若你是从
+          从
           <a href="../inference/eagle-1-2-3-feature-extrapolation-evolution.html">EAGLE 三代演进</a>
-          点进来的：那边写 \(l_{\text{token}}=\mathrm{CE}(p,\hat{p})\)，这里把 CE 本身拆开。
-          读完应能自己手算一个五词词表的损失，并说清硬标签和软蒸馏差在哪。
+          过来的读者：那边的 \(l_{\text{token}}=\mathrm{CE}(p,\hat{p})\) 就是下面这条公式。
+          读完应能自己算一个五词例子，并说清「为什么几乎只能是 Softmax + CE」。
         </p>
 
         <div class="logic-map" aria-label="文章逻辑地图">
           <div class="map-node map-node--start">
             <span class="map-step">1</span>
-            <strong>由来</strong>
-            <p>信息量 → 熵 → 交叉熵 → KL。</p>
+            <strong>概率定义</strong>
+            <p>信息量、熵、CE、似然。</p>
           </div>
           <div class="map-arrow">→</div>
           <div class="map-node map-node--ar">
             <span class="map-step">2</span>
-            <strong>怎么算</strong>
-            <p>一份真分布、一份预测，按公式加总。</p>
+            <strong>手算</strong>
+            <p>硬标签与软蒸馏是同一条式子。</p>
           </div>
           <div class="map-arrow">→</div>
           <div class="map-node map-node--par">
             <span class="map-step">3</span>
-            <strong>硬 / 软</strong>
-            <p>one-hot 或教师整份分布，同一条公式。</p>
+            <strong>苏神三问</strong>
+            <p>评分、凸性、对偶激活。</p>
           </div>
           <div class="map-arrow">→</div>
           <div class="map-node map-node--conv">
             <span class="map-step">4</span>
-            <strong>接到训练</strong>
-            <p>Softmax 梯度、PyTorch、EAGLE。</p>
+            <strong>落地</strong>
+            <p>PyTorch 与 EAGLE 的 token 损失。</p>
           </div>
         </div>
 
         <h2>一、交叉熵从哪来</h2>
         <p>
-          先忘掉神经网络。只问一件事：一件事发生了，它有多「意外」？
-        </p>
-        <p>
-          越稀有的事，说出来越费信息。信息论把「意外程度」写成
+          先忘掉神经网络。一件事发生了，它有多「意外」？越稀有，说出来越费信息：
         </p>
         <div class="math-block" aria-label="self-info">
           \[
@@ -110,428 +109,458 @@
           \]
         </div>
         <p>
-          概率 \(0.5\) 的事，\(I=-\ln 0.5\approx 0.69\)；概率 \(0.05\) 的事，\(I\approx 3.00\)。
-          模型训练里常用自然对数，单位是 <strong>nat</strong>（用 \(\log_2\) 则是 bit，差一个常数倍，不影响谁大谁小）。
+          \(p=0.5\) 时 \(I=-\ln 0.5\approx 0.693\)；\(p=0.05\) 时 \(I\approx 2.996\)。
+          训练里常用自然对数，单位是 <strong>nat</strong>（\(\log_2\) 则是 bit，只差常数倍）。
         </p>
         <p>
-          若世界本身按分布 \(p\) 出牌，平均意外程度就是<strong>熵</strong>：
+          世界按 \(p\) 出牌，平均意外程度是<strong>熵</strong>——用完美码本编码，平均最短码长：
         </p>
         <div class="math-block" aria-label="entropy">
           \[
-            H(p)=\mathbb{E}_{x\sim p}\bigl[-\log p(x)\bigr]=-\sum_x p(x)\log p(x)
+            H(p)=-\sum_x p(x)\log p(x)
           \]
         </div>
         <p>
-          熵只取决于真实世界 \(p\)，和模型无关。它是「用完美码本编码这件事，平均最少要花多少」。
-        </p>
-        <p>
-          模型给不出真 \(p\)，只能给一份猜测 \(q\)。你仍然按真实世界的频率遇到各个 \(x\)，
-          但编码时用的是自己的 \(-\log q(x)\)。平均花销就是<strong>交叉熵</strong>：
+          模型给不出真 \(p\)，只能猜一份 \(q\)。真实世界仍按 \(p\) 出现各个 \(x\)，你却用 \(-\log q(x)\) 去编码。
+          平均花销就是<strong>交叉熵</strong>：
         </p>
         <div class="math-block" aria-label="ce-def">
           \[
-            \mathrm{CE}(p,q)=H(p,q)=\mathbb{E}_{x\sim p}\bigl[-\log q(x)\bigr]=-\sum_x p(x)\log q(x)
+            \mathrm{CE}(p,q)=-\sum_x p(x)\log q(x)
           \]
         </div>
         <p>
-          「交叉」两个字：<strong>外层权重来自真分布 \(p\)，对数里却是你的猜测 \(q\)</strong>。两条分布交错在同一条求和里。
-        </p>
-        <p>
-          多花的那一截，正好是 KL 散度：
+          「交叉」：<strong>权重来自真分布 \(p\)，对数里却是猜测 \(q\)</strong>。多花的那截是 KL：
         </p>
         <div class="math-block" aria-label="kl">
           \[
-            \mathrm{CE}(p,q)=H(p)+D_{\mathrm{KL}}(p\|q)
+            \mathrm{CE}(p,q)=H(p)+D_{\mathrm{KL}}(p\|q),\qquad
+            D_{\mathrm{KL}}(p\|q)=\sum_x p(x)\log\frac{p(x)}{q(x)}\ge 0
           \]
         </div>
         <p>
-          \(H(p)\) 对固定数据是常数，训练时最小化 CE，等价于让 \(q\) 去贴 \(p\)（最小化 KL）。
-          \(q=p\) 时 KL 为零，交叉熵降到下界——就是熵本身。\(q\) 猜偏了，CE 一定比 \(H(p)\) 大。
+          \(H(p)\) 对固定数据是常数。最小化 CE ≡ 最小化 KL ≡ 让 \(q\) 去贴 \(p\)。
+          \(q=p\) 时 KL 为零，CE 降到下界 \(H(p)\)。
         </p>
 
         <figure class="diagram-figure diagram-figure--wide">
-          <svg viewBox="0 0 780 230" role="img" aria-label="交叉熵等于熵加KL">
-            <text x="390" y="28" text-anchor="middle" class="d-title">交叉熵 = 熵（底座）+ KL（猜错的代价）</text>
-
-            <rect x="60" y="70" width="280" height="70" rx="10" class="d-zone-blue" />
-            <text x="200" y="112" text-anchor="middle" class="d-tag-blue">H(p) · 与模型无关</text>
-
-            <rect x="340" y="70" width="180" height="70" rx="10" class="d-zone-orange" />
-            <text x="430" y="112" text-anchor="middle" class="d-tag-orange">KL(p ‖ q)</text>
-
-            <text x="560" y="112" text-anchor="middle" class="d-label">= CE(p, q)</text>
-
-            <text x="390" y="180" text-anchor="middle" class="d-muted">训练只能压缩橙色那段：让 q 靠近 p</text>
-            <text x="390" y="208" text-anchor="middle" class="d-muted">q 越离谱，橙色越长，损失越大</text>
+          <svg viewBox="0 0 840 220" role="img" aria-label="交叉熵等于熵加KL">
+            <text x="420" y="32" text-anchor="middle" class="d-title">交叉熵 = 熵（底座）+ KL（猜错多付的钱）</text>
+            <rect x="48" y="68" width="360" height="72" rx="14" class="d-box-blue" />
+            <text x="228" y="100" text-anchor="middle" class="d-tag-blue">H(p)</text>
+            <text x="228" y="122" text-anchor="middle" class="d-muted">与模型无关的最短码长</text>
+            <rect x="408" y="68" width="220" height="72" rx="14" class="d-box-orange" />
+            <text x="518" y="100" text-anchor="middle" class="d-tag-orange">KL(p ‖ q)</text>
+            <text x="518" y="122" text-anchor="middle" class="d-muted">q 偏离 p 的额外开销</text>
+            <text x="700" y="112" text-anchor="middle" class="d-label">= CE(p, q)</text>
+            <text x="420" y="180" text-anchor="middle" class="d-muted">训练只能压缩橙色：让 q 靠近 p。q 越离谱，橙色越长</text>
           </svg>
-          <figcaption>
-            交叉熵不是另起一套神秘指标。它就是「理想最短码长」加上「你猜错码本多付的钱」。
-          </figcaption>
+          <figcaption>交叉熵不是另起的神秘指标，就是理想码长加上猜错码本多付的钱。</figcaption>
         </figure>
 
-        <h2>二、怎么算：先给一个能手算的例子</h2>
+        <h2>二、概率视角：它就是最大似然</h2>
         <p>
-          词表先缩成五个词：<code>{cats, dogs, to, eat, pizza}</code>。
-          假设真实分布 \(p\)（或教师模型给出的软标签）是：
+          把「下一个词」看成词表上的分类。一次观测到真词 \(y\)，模型给出 \(q(y)\)，这条样本的似然就是 \(q(y)\)。
+          \(N\) 条独立样本的对数似然是
         </p>
-        <div class="math-block" aria-label="toy-p">
+        <div class="math-block" aria-label="nll">
           \[
-            p = (0.52,\ 0.19,\ 0.09,\ 0.07,\ 0.05)
+            \ell=\sum_{n=1}^{N}\log q(y_n)
+            \quad\Longleftrightarrow\quad
+            -\frac{1}{N}\ell=\frac{1}{N}\sum_{n=1}^{N}-\log q(y_n)
           \]
         </div>
         <p>
-          模型先输出五个分数（logits），再 softmax 压成概率 \(q\)。softmax 只做一件事：把任意实数变成「和为 1、且每项为正」的分布：
+          右边正是硬标签交叉熵。最大化似然 = 最小化 CE。若把 \(N\) 次采样看成对未知 \(p\) 的经验分布 \(\hat p\)，
+          这也是 \(\mathrm{CE}(\hat p,q)\)。
+        </p>
+        <p>
+          Softmax 从哪来？模型先产出无界分数 \(z\)（logits）。要变成概率，最常用的是指数族 / Gibbs 分布：
         </p>
         <div class="math-block" aria-label="softmax">
           \[
-            q(v)=\frac{e^{z_v}}{\sum_u e^{z_u}},\qquad \sum_v q(v)=1
+            q_i=\frac{e^{z_i}}{\sum_j e^{z_j}}
           \]
         </div>
         <p>
-          设模型此刻的预测是 \(q=(0.45,\ 0.25,\ 0.15,\ 0.10,\ 0.05)\)。代入定义：
+          它保证 \(q_i&gt;0\) 且 \(\sum q_i=1\)。后文会看到：若你希望损失对 \(z\) 的梯度等于 \(q-e_y\)，反推出来的激活恰好就是它。
         </p>
-        <div class="math-block" aria-label="hand-calc">
-          \[
-            \begin{aligned}
-            \mathrm{CE}(p,q)
-            &= -(0.52\ln 0.45 + 0.19\ln 0.25 + 0.09\ln 0.15 + 0.07\ln 0.10 + 0.05\ln 0.05)\\
-            &\approx 1.41
-            \end{aligned}
-          \]
-        </div>
+
+        <h2>三、手算一遍</h2>
         <p>
-          每项都是「这个词有多常发生」乘「模型觉得它有多意外」。真词概率被模型压得很低时，\(-\log q\) 会很大，这一项就把总损失拉高。
+          词表：<code>{cats, dogs, to, eat, pizza}</code>。教师（或真实）分布
+          \(p=(0.52,0.19,0.09,0.07,0.05)\)，学生
+          \(q=(0.45,0.25,0.15,0.10,0.05)\)。逐项：
         </p>
 
-        <figure class="diagram-figure diagram-figure--wide">
-          <svg viewBox="0 0 780 320" role="img" aria-label="一次预测的词表分布条形图">
-            <text x="390" y="28" text-anchor="middle" class="d-title">模型给出的一份词表分布 q</text>
-            <text x="40" y="58" class="d-muted">前缀「I love」· 下一词概率（示例）</text>
-
-            <rect x="120" y="80" width="45" height="180" rx="6" fill="#3b82f6" opacity="0.9" />
-            <text x="142" y="275" text-anchor="middle" class="d-label">cats</text>
-            <text x="142" y="72" text-anchor="middle" class="d-accent-blue">0.45</text>
-
-            <rect x="220" y="140" width="45" height="120" rx="6" fill="#f59e0b" opacity="0.9" />
-            <text x="242" y="275" text-anchor="middle" class="d-label">dogs</text>
-            <text x="242" y="132" text-anchor="middle" class="d-accent-orange">0.25</text>
-
-            <rect x="320" y="176" width="45" height="84" rx="6" fill="#a78bfa" opacity="0.9" />
-            <text x="342" y="275" text-anchor="middle" class="d-label">to</text>
-            <text x="342" y="168" text-anchor="middle" class="d-tag-purple">0.15</text>
-
-            <rect x="420" y="200" width="45" height="60" rx="6" fill="#34d399" opacity="0.9" />
-            <text x="442" y="275" text-anchor="middle" class="d-label">eat</text>
-            <text x="442" y="192" text-anchor="middle" class="d-muted">0.10</text>
-
-            <rect x="520" y="224" width="45" height="36" rx="6" fill="#fb7185" opacity="0.9" />
-            <text x="542" y="275" text-anchor="middle" class="d-label">pizza</text>
-            <text x="542" y="216" text-anchor="middle" class="d-muted">0.05</text>
-
-            <text x="640" y="150" class="d-muted">和 = 1.00</text>
-            <text x="640" y="178" class="d-muted">不是对错记分</text>
-            <text x="640" y="206" class="d-muted">不是向量距离</text>
-          </svg>
-          <figcaption>
-            每根柱子是模型给这个词的概率。交叉熵要拿这整份 \(q\)，去对一份标签 \(p\) 做加权求和；下一节看 \(p\) 是「一根柱子」还是「一座山」。
-          </figcaption>
-        </figure>
-
-        <h2>三、硬标签：语料只告诉你「这次出现的是谁」</h2>
-        <p>
-          预训练、SFT 里，一条样本通常只有一个真词，例如这次下一词就是 cats。
-          这相当于把未知的真实分布，用一次采样近似成 one-hot：
-        </p>
-        <div class="math-block" aria-label="onehot">
-          \[
-            p = (1,0,0,0,0)
-          \]
-        </div>
-        <p>
-          代回交叉熵定义，求和只剩一项：
-        </p>
-        <div class="math-block" aria-label="hard-ce">
-          \[
-            \mathrm{CE}(p,q)=-\log q(\text{cats})
-          \]
-        </div>
-        <p>
-          上图 \(q(\text{cats})=0.45\)，则 \(\mathrm{CE}=-\ln 0.45\approx 0.799\)。
-          dogs、to 那些柱子<strong>不直接出现在这一行公式里</strong>；它们只通过 softmax 的分母，把真词概率分走。
-          真词概率若被抬到 \(0.90\)，损失变成 \(-\ln 0.90\approx 0.105\)；若只剩 \(0.05\)，则约 \(3.00\)。
-          这是连续、可反传的惩罚，不是 0/1 记分。
-        </p>
-
-        <figure class="diagram-figure diagram-figure--wide">
-          <svg viewBox="0 0 780 300" role="img" aria-label="硬标签只盯真词柱">
-            <text x="390" y="28" text-anchor="middle" class="d-title">硬标签：一次采样 → −log q(y)</text>
-
-            <rect x="40" y="60" width="320" height="200" rx="14" class="d-zone-blue" />
-            <text x="200" y="90" text-anchor="middle" class="d-tag-blue">标签 y（采样）</text>
-            <rect x="70" y="120" width="40" height="100" rx="5" fill="#3b82f6" />
-            <rect x="130" y="200" width="40" height="20" rx="5" fill="#64748b" opacity="0.35" />
-            <rect x="190" y="200" width="40" height="20" rx="5" fill="#64748b" opacity="0.35" />
-            <rect x="250" y="200" width="40" height="20" rx="5" fill="#64748b" opacity="0.35" />
-            <rect x="310" y="200" width="40" height="20" rx="5" fill="#64748b" opacity="0.35" />
-            <text x="90" y="240" text-anchor="middle" class="d-label" font-size="11">1</text>
-            <text x="200" y="270" text-anchor="middle" class="d-muted">cats=1，其余=0</text>
-
-            <text x="390" y="160" text-anchor="middle" class="d-accent-orange" font-size="28">→</text>
-
-            <rect x="440" y="60" width="300" height="200" rx="14" class="d-zone-orange" />
-            <text x="590" y="90" text-anchor="middle" class="d-tag-orange">损失</text>
-            <text x="590" y="150" text-anchor="middle" class="d-label">−log 0.45</text>
-            <text x="590" y="185" text-anchor="middle" class="d-accent-orange">≈ 0.799</text>
-            <text x="590" y="225" text-anchor="middle" class="d-muted">真词越自信，loss 越小</text>
-          </svg>
-          <figcaption>
-            许多次「白切鸡 / 白切鸭」各自算 \(-\log q_y\)，再平均，就是在用采样去逼近完整的 \(\mathrm{CE}(p,q)\)。
-            语料永远只给你一个 token，交叉熵仍然能学整份分布，靠的就是这个期望。
-          </figcaption>
-        </figure>
-
-        <h2>四、软蒸馏：手里已经有整份 \(p\)</h2>
-        <p>
-          知识蒸馏、EAGLE 对齐目标模型时，教师可以直接给出同位置的整份词表分布，不必再压成 one-hot。
-          公式仍是第一节那个定义，只是 \(p\) 从「一次采样」变成「显式的一座山」：
-        </p>
-        <div class="math-block" aria-label="soft-ce">
-          \[
-            \mathrm{CE}(p,q)=-\sum_v p(v)\log q(v)
-          \]
-        </div>
-
-        <figure class="diagram-figure diagram-figure--wide">
-          <svg viewBox="0 0 780 360" role="img" aria-label="软蒸馏：教师与学生并排">
-            <text x="390" y="28" text-anchor="middle" class="d-title">软蒸馏：两份柱状分布逐词对齐</text>
-
-            <text x="200" y="58" text-anchor="middle" class="d-tag-blue">教师 p</text>
-            <rect x="60" y="90" width="36" height="156" rx="5" fill="#3b82f6" />
-            <rect x="110" y="150" width="36" height="96" rx="5" fill="#60a5fa" />
-            <rect x="160" y="190" width="36" height="56" rx="5" fill="#93c5fd" />
-            <rect x="210" y="200" width="36" height="46" rx="5" fill="#bfdbfe" />
-            <rect x="260" y="210" width="36" height="36" rx="5" fill="#dbeafe" />
-            <text x="78" y="270" text-anchor="middle" class="d-muted" font-size="11">.52</text>
-            <text x="128" y="270" text-anchor="middle" class="d-muted" font-size="11">.19</text>
-            <text x="178" y="270" text-anchor="middle" class="d-muted" font-size="11">.09</text>
-            <text x="228" y="270" text-anchor="middle" class="d-muted" font-size="11">.07</text>
-            <text x="278" y="270" text-anchor="middle" class="d-muted" font-size="11">.05</text>
-            <text x="78" y="292" text-anchor="middle" class="d-label" font-size="11">cats</text>
-            <text x="128" y="292" text-anchor="middle" class="d-label" font-size="11">dogs</text>
-            <text x="178" y="292" text-anchor="middle" class="d-label" font-size="11">to</text>
-            <text x="228" y="292" text-anchor="middle" class="d-label" font-size="11">eat</text>
-            <text x="278" y="292" text-anchor="middle" class="d-label" font-size="11">pizza</text>
-
-            <text x="390" y="180" text-anchor="middle" class="d-accent-orange" font-size="26">vs</text>
-
-            <text x="580" y="58" text-anchor="middle" class="d-tag-orange">学生 q</text>
-            <rect x="450" y="110" width="36" height="136" rx="5" fill="#f59e0b" />
-            <rect x="500" y="140" width="36" height="106" rx="5" fill="#fbbf24" />
-            <rect x="550" y="176" width="36" height="70" rx="5" fill="#fcd34d" />
-            <rect x="600" y="196" width="36" height="50" rx="5" fill="#fde68a" />
-            <rect x="650" y="216" width="36" height="30" rx="5" fill="#fef3c7" />
-            <text x="468" y="270" text-anchor="middle" class="d-muted" font-size="11">.45</text>
-            <text x="518" y="270" text-anchor="middle" class="d-muted" font-size="11">.25</text>
-            <text x="568" y="270" text-anchor="middle" class="d-muted" font-size="11">.15</text>
-            <text x="618" y="270" text-anchor="middle" class="d-muted" font-size="11">.10</text>
-            <text x="668" y="270" text-anchor="middle" class="d-muted" font-size="11">.05</text>
-            <text x="468" y="292" text-anchor="middle" class="d-label" font-size="11">cats</text>
-            <text x="518" y="292" text-anchor="middle" class="d-label" font-size="11">dogs</text>
-            <text x="568" y="292" text-anchor="middle" class="d-label" font-size="11">to</text>
-            <text x="618" y="292" text-anchor="middle" class="d-label" font-size="11">eat</text>
-            <text x="668" y="292" text-anchor="middle" class="d-label" font-size="11">pizza</text>
-
-            <text x="390" y="335" text-anchor="middle" class="d-muted">
-              CE ≈ 1.41（第二节手算）。argmax 都是 cats，山形不像也会挨罚
-            </text>
-          </svg>
-          <figcaption>
-            硬标签只逼真词那一根柱子升高；软蒸馏还要求次优词的相对高低跟老师像。投机解码验收看的是整份分布重叠，所以软对齐往往更贴。
-          </figcaption>
-        </figure>
-
-        <table class="decision-table">
+        <table class="calc-table">
           <thead>
             <tr>
-              <th></th>
-              <th>硬标签</th>
-              <th>软蒸馏</th>
+              <th>词</th>
+              <th>p</th>
+              <th>q</th>
+              <th>−ln q</th>
+              <th>p · (−ln q)</th>
             </tr>
           </thead>
           <tbody>
-            <tr>
-              <td>\(p\) 从哪来</td>
-              <td>语料一次采样 → one-hot</td>
-              <td>教师模型整份分布（可带温度）</td>
-            </tr>
-            <tr>
-              <td>公式</td>
-              <td>\(-\log q(y)\)</td>
-              <td>\(-\sum_v p(v)\log q(v)\)</td>
-            </tr>
-            <tr>
-              <td>关系</td>
-              <td>对未知 \(p\) 的蒙特卡洛估计</td>
-              <td>同一条 CE 的显式期望</td>
-            </tr>
-            <tr>
-              <td>常见场景</td>
-              <td>预训练 / SFT</td>
-              <td>知识蒸馏、EAGLE 类 token 对齐</td>
-            </tr>
+            <tr><td>cats</td><td>0.52</td><td>0.45</td><td>0.799</td><td>0.415</td></tr>
+            <tr><td>dogs</td><td>0.19</td><td>0.25</td><td>1.386</td><td>0.263</td></tr>
+            <tr><td>to</td><td>0.09</td><td>0.15</td><td>1.897</td><td>0.171</td></tr>
+            <tr><td>eat</td><td>0.07</td><td>0.10</td><td>2.303</td><td>0.161</td></tr>
+            <tr><td>pizza</td><td>0.05</td><td>0.05</td><td>2.996</td><td>0.150</td></tr>
+            <tr><td>合计 = CE(p, q)</td><td>1.00</td><td>1.00</td><td>—</td><td>≈ 1.160</td></tr>
           </tbody>
         </table>
         <p>
-          二者是<strong>同一条交叉熵</strong>，不是两种无关的损失。实务上通常按任务二选一，不必把硬 CE 和软 CE 无脑相加。
-          两个算出来的数字也不可直接比大小——\(p\) 不同，下界 \(H(p)\) 就不同。
+          每一项都是「这个词有多常发生 × 模型觉得它有多意外」。真词被模型压得很低时，\(-\ln q\) 会很大，这一项把总损失拉高。
+          （上表用 \(\ln\)；有的教材用 \(\log_2\)，数值差 \(\ln 2\)，排序不变。）
         </p>
-
-        <h2>五、为什么训练几乎总用 Softmax + CE</h2>
-        <p>
-          语言模型看起来像「逐 token 分类」，但语言是一对多的：「白切」后面可以是鸡、鸭、狗、羊。
-          要学的是整份条件分布，而语料又只零散地送来一个个采样。
-        </p>
-        <p>
-          苏剑林在
-          <a href="https://spaces.ac.cn/archives/11854" target="_blank" rel="noopener noreferrer">《除了交叉熵，LM Loss还有什么选择？》</a>
-          里把这件事说死了：损失必须对 \(p\) <strong>线性</strong>，才能写成「对采样到的那个 token 打分，再求期望」。
-          这类损失叫恰当评分规则。若再要求打分只依赖真类概率 \(q_y\)，本质上只剩下 \(-\log q_y\)，也就是交叉熵。
-        </p>
-        <p>
-          模型实际输出的是无界 logits \(z\)。配上 Softmax 之后，硬标签 CE 对 \(z\) 的梯度特别干净：
-        </p>
-        <div class="math-block" aria-label="ce grad">
-          \[
-            \nabla_z\bigl(-\log q_i\bigr)=q-e_i
-          \]
-        </div>
 
         <figure class="diagram-figure diagram-figure--wide">
-          <svg viewBox="0 0 780 280" role="img" aria-label="梯度 q 减 e_i">
-            <text x="390" y="28" text-anchor="middle" class="d-title">梯度 q − eᵢ：抬真类、压其它类</text>
+          <svg viewBox="0 0 840 340" role="img" aria-label="p 与 q 并排柱状图">
+            <text x="420" y="30" text-anchor="middle" class="d-title">同一词表上的两份分布</text>
+            <line class="d-axis" x1="70" y1="268" x2="390" y2="268" />
+            <line class="d-axis" x1="450" y1="268" x2="770" y2="268" />
+            <line class="d-grid" x1="70" y1="100" x2="390" y2="100" />
+            <line class="d-grid" x1="450" y1="100" x2="770" y2="100" />
+            <text x="230" y="56" text-anchor="middle" class="d-tag-blue">教师 / 真 p</text>
+            <text x="610" y="56" text-anchor="middle" class="d-tag-orange">学生 q</text>
 
-            <text x="130" y="70" text-anchor="middle" class="d-tag-blue">预测 q</text>
-            <rect x="50" y="100" width="32" height="90" rx="4" fill="#3b82f6" />
-            <rect x="95" y="130" width="32" height="60" rx="4" fill="#60a5fa" />
-            <rect x="140" y="110" width="32" height="80" rx="4" fill="#93c5fd" />
-            <rect x="185" y="145" width="32" height="45" rx="4" fill="#bfdbfe" />
-            <text x="66" y="210" text-anchor="middle" class="d-muted" font-size="11">.30</text>
-            <text x="111" y="210" text-anchor="middle" class="d-muted" font-size="11">.15</text>
-            <text x="156" y="210" text-anchor="middle" class="d-accent-orange" font-size="11">.40</text>
-            <text x="201" y="210" text-anchor="middle" class="d-muted" font-size="11">.15</text>
-            <text x="130" y="235" text-anchor="middle" class="d-muted">真类=第 2 类时看下一栏</text>
+            <rect x="92" y="112" width="36" height="156" rx="6" class="d-box-blue" />
+            <rect x="148" y="172" width="36" height="96" rx="6" class="d-box-blue" />
+            <rect x="204" y="212" width="36" height="56" rx="6" class="d-box-blue" />
+            <rect x="260" y="222" width="36" height="46" rx="6" class="d-box-blue" />
+            <rect x="316" y="232" width="36" height="36" rx="6" class="d-box-blue" />
+            <text x="110" y="104" text-anchor="middle" class="d-dim">.52</text>
+            <text x="166" y="164" text-anchor="middle" class="d-dim">.19</text>
+            <text x="222" y="204" text-anchor="middle" class="d-dim">.09</text>
+            <text x="278" y="214" text-anchor="middle" class="d-dim">.07</text>
+            <text x="334" y="224" text-anchor="middle" class="d-dim">.05</text>
+            <text x="110" y="288" text-anchor="middle" class="d-muted">cats</text>
+            <text x="166" y="288" text-anchor="middle" class="d-muted">dogs</text>
+            <text x="222" y="288" text-anchor="middle" class="d-muted">to</text>
+            <text x="278" y="288" text-anchor="middle" class="d-muted">eat</text>
+            <text x="334" y="288" text-anchor="middle" class="d-muted">pizza</text>
 
-            <text x="300" y="145" text-anchor="middle" class="d-accent-orange" font-size="22">−</text>
+            <rect x="472" y="133" width="36" height="135" rx="6" class="d-box-orange" />
+            <rect x="528" y="163" width="36" height="105" rx="6" class="d-box-orange" />
+            <rect x="584" y="193" width="36" height="75" rx="6" class="d-box-orange" />
+            <rect x="640" y="208" width="36" height="60" rx="6" class="d-box-orange" />
+            <rect x="696" y="223" width="36" height="45" rx="6" class="d-box-orange" />
+            <text x="490" y="125" text-anchor="middle" class="d-dim">.45</text>
+            <text x="546" y="155" text-anchor="middle" class="d-dim">.25</text>
+            <text x="602" y="185" text-anchor="middle" class="d-dim">.15</text>
+            <text x="658" y="200" text-anchor="middle" class="d-dim">.10</text>
+            <text x="714" y="215" text-anchor="middle" class="d-dim">.05</text>
+            <text x="490" y="288" text-anchor="middle" class="d-muted">cats</text>
+            <text x="546" y="288" text-anchor="middle" class="d-muted">dogs</text>
+            <text x="602" y="288" text-anchor="middle" class="d-muted">to</text>
+            <text x="658" y="288" text-anchor="middle" class="d-muted">eat</text>
+            <text x="714" y="288" text-anchor="middle" class="d-muted">pizza</text>
 
-            <text x="390" y="70" text-anchor="middle" class="d-tag-orange">真 eᵢ</text>
-            <rect x="340" y="160" width="32" height="20" rx="4" fill="#64748b" opacity="0.35" />
-            <rect x="385" y="90" width="32" height="90" rx="4" fill="#f59e0b" />
-            <rect x="430" y="160" width="32" height="20" rx="4" fill="#64748b" opacity="0.35" />
-            <rect x="475" y="160" width="32" height="20" rx="4" fill="#64748b" opacity="0.35" />
-            <text x="401" y="210" text-anchor="middle" class="d-accent-orange" font-size="11">1</text>
+            <text x="420" y="322" text-anchor="middle" class="d-muted">argmax 都是 cats，山形仍不同 → 软 CE 仍会惩罚</text>
+          </svg>
+          <figcaption>柱高是概率，不是对错。软蒸馏比的是整座山；硬标签只把左边压成「cats=1、其余=0」。</figcaption>
+        </figure>
 
-            <text x="545" y="145" text-anchor="middle" class="d-accent-orange" font-size="22">=</text>
+        <h3>3.1 硬标签：一次采样版</h3>
+        <p>
+          语料通常只给一个真词，相当于把 \(p\) 换成 one-hot \(e_y\)。求和只剩一项：
+        </p>
+        <div class="math-block" aria-label="hard-ce">
+          \[
+            \mathrm{CE}(e_y,q)=-\log q_y
+          \]
+        </div>
+        <p>
+          若 \(y=\text{cats}\)、\(q_y=0.45\)，则 \(-\ln 0.45\approx 0.799\)。
+          其它词不直接进这一行，只通过 softmax 分母分走真词概率。
+          \(q_y=0.90\) 时约 \(0.105\)；\(q_y=0.05\) 时约 \(3.00\)。连续可反传，不是 0/1 记分。
+        </p>
+        <p>
+          许多次「白切鸡 / 白切鸭」各自算 \(-\log q_y\) 再平均，就是用采样逼近完整的 \(\mathrm{CE}(p,q)\)。
+        </p>
 
-            <text x="650" y="70" text-anchor="middle" class="d-tag-purple">梯度</text>
-            <rect x="590" y="120" width="28" height="60" rx="4" fill="#fb7185" />
-            <rect x="630" y="90" width="28" height="90" rx="4" fill="#34d399" />
-            <rect x="670" y="115" width="28" height="65" rx="4" fill="#fb7185" />
-            <rect x="710" y="140" width="28" height="40" rx="4" fill="#fb7185" />
-            <text x="604" y="210" text-anchor="middle" class="d-muted" font-size="10">+</text>
-            <text x="644" y="210" text-anchor="middle" class="d-muted" font-size="10">−</text>
-            <text x="684" y="210" text-anchor="middle" class="d-muted" font-size="10">+</text>
-            <text x="724" y="210" text-anchor="middle" class="d-muted" font-size="10">+</text>
-            <text x="390" y="260" text-anchor="middle" class="d-muted">绿：抬真类；红：压错类。未达 eᵢ 时梯度不为零</text>
+        <h3>3.2 软蒸馏：整座山对齐</h3>
+        <p>
+          教师若能给出整份 \(p\)，公式仍是 \(\mathrm{CE}(p,q)=-\sum p_v\log q_v\)，只是 \(p\) 不再是尖峰。
+          硬 / 软是<strong>同一条交叉熵</strong>：一个是蒙特卡洛，一个是显式期望。实务上按任务二选一，数字也不可直接比——\(p\) 不同，下界 \(H(p)\) 就不同。
+        </p>
+
+        <table class="decision-table">
+          <thead>
+            <tr><th></th><th>硬标签</th><th>软蒸馏</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>\(p\) 从哪来</td><td>语料一次采样 → one-hot</td><td>教师整份分布（可带温度）</td></tr>
+            <tr><td>公式</td><td>\(-\log q(y)\)</td><td>\(-\sum_v p(v)\log q(v)\)</td></tr>
+            <tr><td>场景</td><td>预训练 / SFT</td><td>蒸馏、EAGLE 对齐目标分布</td></tr>
+          </tbody>
+        </table>
+
+        <h2>四、苏神在问什么：LM Loss 为什么几乎只能是它</h2>
+        <p>
+          苏剑林
+          <a href="https://spaces.ac.cn/archives/11854" target="_blank" rel="noopener noreferrer">《除了交叉熵，LM Loss还有什么选择？》</a>
+          （2026-08-09）的出发点不是再背一遍公式，而是：交叉熵看起来理所当然，<strong>能不能换？换了要满足什么？</strong>
+          下面按他的三条线展开，补上凸优化和信息几何里缺的直觉。
+        </p>
+
+        <h3>4.1 恰当评分：损失必须能对「一次采样」打分</h3>
+        <p>
+          图像分类常是一对一；语言是一对多——「白切」后面可以是鸡、鸭、狗、羊。要学的是整份条件分布。
+          可训练时语料是零散送来的：这次「白切鸡」，下次「白切鸭」，事先没有完整频率表。
+        </p>
+        <p>
+          因此损失必须对目标分布 \(p\) <strong>线性</strong>，才能写成「只看见一个采样 token \(i\)，打一个分 \(S(q,i)\)，再求期望」：
+        </p>
+        <div class="math-block" aria-label="proper">
+          \[
+            L(p,q)=\sum_i p_i\,S(q,i)=\mathbb{E}_{i\sim p}\bigl[S(q,i)\bigr],
+            \quad p=\arg\min_q L(p,q)
+          \]
+        </div>
+        <p>
+          这就是<strong>恰当评分规则（Proper Scoring Rules）</strong>：诚实报出真分布时，期望分数最好。
+          Total Variation \(\sum|p_i-q_i|\) 虽然直观，改写成采样形式时会出现 \(q_i/p_i\)，而 \(p_i\) 你并不知道——所以它当不了 LM Loss。
+        </p>
+        <p>
+          苏神进一步证明：固定 \(p\) 时 \(L\) 的最小值是 \(H(p)=L(p,p)\)；\(L\) 对 \(p\) 又是线性的，于是 \(L(\,\cdot\,,q)\) 必须是凹函数 \(H\) 在 \(q\) 处的切平面。
+          任选一个凹的 \(H\)，就能造出一套评分。对数评分对应 \(H(p)=-\sum p_i\log p_i\)，切出来正好是 \(S(q,i)=-\log q_i\)。
+        </p>
+        <div class="callout">
+          <strong>唯一性。</strong>
+          若再要求 \(S(q,i)\) <strong>只依赖真类概率 \(q_i\)</strong>（不显式看其它类），恰当评分里本质上只剩下 \(-\log q_i\)。
+          这不是习惯，是结构。Brier / Tsallis / 球面 / Rényi 都是合法推广，但它们的 \(S\) 会看见整份 \(q\)；\(\alpha\to 1\) 时都退回交叉熵。
+        </div>
+
+        <table class="decision-table">
+          <thead>
+            <tr><th>名称</th><th>H(p) 的直觉</th><th>S(q, i) 看见什么</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>对数 / 交叉熵</td><td>香农熵</td><td>只看 \(q_i\)</td></tr>
+            <tr><td>Brier（平方）</td><td>\(1-\|p\|_2^2\)</td><td>整份 \(q\) 到 one-hot 的平方距离</td></tr>
+            <tr><td>Tsallis / 球面 / Rényi</td><td>带 \(\alpha\) 的广义熵</td><td>整份 \(q\) 的 \(\alpha\) 次方结构</td></tr>
+          </tbody>
+        </table>
+
+        <h3>4.2 凸优化：在 logits 上看，CE 是「干净的碗」</h3>
+        <p>
+          网络最后一层给出 \(z\in\mathbb{R}^{|V|}\)，再 Softmax 成 \(q\)。我们真正拿去给 Adam 的，是 \(L\) 对 \(z\) 的梯度。
+          Softmax + 硬标签 CE 有著名结论：
+        </p>
+        <div class="math-block" aria-label="grad">
+          \[
+            \nabla_z\bigl(-\log q_y\bigr)=q-e_y
+          \]
+        </div>
+        <p>
+          含义直白：把真类概率往上抬，把其它类往下压；偏差多大，梯度就多大。只有 \(q=e_y\) 时梯度为零。
+        </p>
+        <p>
+          再看 Hessian。Softmax 的雅可比是 \(\mathrm{diag}(q)-qq^\top\)（半正定），CE 对 \(z\) 的二阶导就是它。
+          所以 <strong>\(-\log q_y\) 作为 \(z\) 的函数是凸的</strong>：碗只有一个底，任意点的梯度都指向 \(e_y\) 那一侧。
+        </p>
+        <p>
+          Brier（平方损失）配 Softmax 时，梯度多乘一项同一个雅可比：
+        </p>
+        <div class="math-block" aria-label="brier-grad">
+          \[
+            \nabla_z\|q-e_y\|_2^2=2\bigl(\mathrm{diag}(q)-qq^\top\bigr)(q-e_y)
+          \]
+        </div>
+        <p>
+          若模型「自信地错了」——\(q\) 几乎是另一个 one-hot \(e_j\neq e_y\)——括号里的矩阵在这个顶点附近接近零，<strong>梯度消失</strong>。
+          前中期大部分预测都不准，平方损失学得很慢；后期那些死磕错答案的样本，它反而可能跳过（有时对噪声更稳）。
+          苏神的判断：<strong>CE 应作主损失；平方损失最多后期当辅。</strong>
+        </p>
+
+        <figure class="diagram-figure diagram-figure--wide">
+          <svg viewBox="0 0 840 300" role="img" aria-label="CE凸碗与平方损失陷阱">
+            <text x="420" y="30" text-anchor="middle" class="d-title">对 logits z：CE 是凸碗，平方损失会陷在「自信的错」</text>
+
+            <rect x="36" y="52" width="368" height="210" rx="16" class="d-zone-blue" />
+            <text x="220" y="78" text-anchor="middle" class="d-tag-blue">Softmax + CE</text>
+            <path d="M70 210 Q220 70 370 210" class="d-arrow-blue" fill="none" stroke-width="2.2" />
+            <circle cx="220" cy="92" r="6" class="d-accent-blue" />
+            <text x="220" y="128" text-anchor="middle" class="d-muted">唯一最低点 q = e_y</text>
+            <text x="220" y="228" text-anchor="middle" class="d-label">处处有指向底的梯度</text>
+
+            <rect x="436" y="52" width="368" height="210" rx="16" class="d-zone-orange" />
+            <text x="620" y="78" text-anchor="middle" class="d-tag-orange">Softmax + 平方</text>
+            <path d="M480 150 Q560 210 620 120 Q690 50 780 160" class="d-arrow-orange" fill="none" stroke-width="2.2" />
+            <circle cx="690" cy="58" r="6" class="d-accent-orange" />
+            <text x="620" y="228" text-anchor="middle" class="d-label">自信错在顶点时梯度≈0</text>
+            <text x="620" y="250" text-anchor="middle" class="d-muted">非凸，可能走不出去</text>
           </svg>
           <figcaption>
-            离目标越远，梯度越大；只有 \(q=e_i\) 时才为零。平方损失在 Softmax 下会出现「自信地错了、梯度却消失」的饱和区，前中期更难学。
+            深度学习对权重已经非凸。苏神的意思是：至少别在最后一层再添乱。要求对 \(z\) 凸，是少给优化器找麻烦。
           </figcaption>
         </figure>
 
+        <figure class="diagram-figure diagram-figure--wide">
+          <svg viewBox="0 0 840 270" role="img" aria-label="梯度 q 减 e_y">
+            <text x="420" y="28" text-anchor="middle" class="d-title">梯度 q − e_y：抬真类、压其它类</text>
+            <text x="150" y="58" text-anchor="middle" class="d-tag-blue">预测 q</text>
+            <text x="400" y="58" text-anchor="middle" class="d-tag-orange">真 e_y</text>
+            <text x="680" y="58" text-anchor="middle" class="d-tag-purple">梯度</text>
+
+            <rect x="80" y="100" width="28" height="78" rx="5" class="d-box-blue" />
+            <rect x="118" y="128" width="28" height="50" rx="5" class="d-box-blue" />
+            <rect x="156" y="88" width="28" height="90" rx="5" class="d-box-blue" />
+            <rect x="194" y="138" width="28" height="40" rx="5" class="d-box-blue" />
+            <text x="94" y="196" text-anchor="middle" class="d-dim">.30</text>
+            <text x="132" y="196" text-anchor="middle" class="d-dim">.15</text>
+            <text x="170" y="196" text-anchor="middle" class="d-dim">.40</text>
+            <text x="208" y="196" text-anchor="middle" class="d-dim">.15</text>
+            <text x="150" y="222" text-anchor="middle" class="d-muted">真类 = 第 2 根</text>
+
+            <text x="268" y="140" text-anchor="middle" class="d-accent-orange" font-size="22">−</text>
+
+            <rect x="330" y="158" width="28" height="20" rx="5" fill="#64748b" opacity="0.35" />
+            <rect x="368" y="88" width="28" height="90" rx="5" class="d-box-orange" />
+            <rect x="406" y="158" width="28" height="20" rx="5" fill="#64748b" opacity="0.35" />
+            <rect x="444" y="158" width="28" height="20" rx="5" fill="#64748b" opacity="0.35" />
+            <text x="382" y="196" text-anchor="middle" class="d-dim">1</text>
+
+            <text x="520" y="140" text-anchor="middle" class="d-accent-orange" font-size="22">=</text>
+
+            <rect x="590" y="118" width="28" height="60" rx="5" fill="#fb7185" opacity="0.85" />
+            <rect x="632" y="80" width="28" height="98" rx="5" fill="#34d399" opacity="0.9" />
+            <rect x="674" y="110" width="28" height="68" rx="5" fill="#fb7185" opacity="0.85" />
+            <rect x="716" y="138" width="28" height="40" rx="5" fill="#fb7185" opacity="0.85" />
+            <text x="604" y="196" text-anchor="middle" class="d-muted">+</text>
+            <text x="646" y="196" text-anchor="middle" class="d-muted">−</text>
+            <text x="688" y="196" text-anchor="middle" class="d-muted">+</text>
+            <text x="730" y="196" text-anchor="middle" class="d-muted">+</text>
+            <text x="420" y="250" text-anchor="middle" class="d-muted">绿：抬真类；红：压错类。未到 e_y 时梯度不为零</text>
+          </svg>
+          <figcaption>这就是「干净」：梯度等于概率误差本身，落在 [−1, 1]，幅度自适应。</figcaption>
+        </figure>
+
+        <h3>4.3 信息几何直觉：单纯形上的对偶，不是玄学</h3>
         <p>
-          这也是 Softmax 和 CE 几乎总成对出现的原因：要梯度保持 \(q-e_i\) 这么干净，反推出来的激活就是 Softmax。
-          换损失往往还得换激活，所以预训练默认仍是这一套。
+          不必先去读信息几何教材。需要的画面只有一张：所有词表分布住在<strong>概率单纯形</strong>
+          \(\Delta=\{q:q_i\ge 0,\sum q_i=1\}\) 上——三维时就是一个三角形，顶点是各个 one-hot。
+        </p>
+        <p>
+          KL 不是欧氏距离：它不对称，\(D_{\mathrm{KL}}(p\|q)\neq D_{\mathrm{KL}}(q\|p)\)。
+          它是负熵 \(\psi(q)=\sum q_i\log q_i\) 生成的 <strong>Bregman 散度</strong>：
+        </p>
+        <div class="math-block" aria-label="bregman">
+          \[
+            D_\psi(p\|q)=\psi(p)-\psi(q)-\langle\nabla\psi(q),\,p-q\rangle
+          \]
+        </div>
+        <p>
+          几何直觉：用 \(q\) 处的切平面去近似凹/凸函数 \(\psi\)，点和切面的竖直差距就是「散度」。
+          交叉熵里多出来的 KL，正是这份差距。欧氏平方距离是 \(\psi(x)=\frac12\|x\|^2\) 生成的 Bregman——所以 Brier 是另一套几何，不是同一把尺子。
+        </p>
+        <p>
+          苏神后半篇用 <strong>Fenchel–Young</strong> 把「评分」和「激活」锁死成一对对偶。人话版：
+        </p>
+        <ul class="note-list">
+          <li>你希望 \(\nabla_z S(q,i)=q-e_i\)（梯度干净）。</li>
+          <li>这迫使存在一个凸函数 \(\Phi(z)\)，使得 \(q=\nabla\Phi(z)\)，且 \(\Phi\) 是 \(-H\) 的凸共轭：\(\Phi(z)=\max_p\,p\cdot z+H(p)\)。</li>
+          <li>取香农熵时，这个 \(\max\) 的解就是 Softmax，\(\Phi(z)=\mathrm{LogSumExp}(z)\)。</li>
+          <li>换一套 \(H\)（Tsallis 等），对偶激活就变成 Sparsemax / Entmax-\(\alpha\)：可以输出精确的零，分布更稀疏。</li>
+        </ul>
+        <p>
+          所以 Softmax 和 CE 几乎总成对出现：<strong>一个是另一个的凸对偶</strong>。换损失往往还得换激活，预训练默认不动，原因在这里。
         </p>
 
-        <h2>六、落到 PyTorch</h2>
+        <figure class="diagram-figure diagram-figure--wide">
+          <svg viewBox="0 0 840 280" role="img" aria-label="单纯形与对偶">
+            <text x="420" y="28" text-anchor="middle" class="d-title">概率住在单纯形上；Softmax 是负熵的对偶映射</text>
+
+            <polygon points="90,230 250,70 410,230" class="d-zone-blue" />
+            <circle cx="210" cy="170" r="7" fill="#3b82f6" />
+            <circle cx="280" cy="150" r="7" fill="#f59e0b" />
+            <text x="198" y="192" class="d-tag-blue">p</text>
+            <text x="292" y="146" class="d-tag-orange">q</text>
+            <text x="250" y="258" text-anchor="middle" class="d-muted">单纯形 Δ：顶点 = one-hot</text>
+
+            <text x="470" y="150" text-anchor="middle" class="d-accent-orange" font-size="22">→</text>
+
+            <rect x="530" y="70" width="260" height="160" rx="16" class="d-box-purple" />
+            <text x="660" y="112" text-anchor="middle" class="d-tag-purple">z 无界 logits</text>
+            <text x="660" y="148" text-anchor="middle" class="d-label">q = softmax(z)</text>
+            <text x="660" y="176" text-anchor="middle" class="d-muted">= ∇ LogSumExp(z)</text>
+            <text x="660" y="204" text-anchor="middle" class="d-muted">换 H → Entmax / Sparsemax</text>
+          </svg>
+          <figcaption>
+            信息几何在这里只需要一句：分布的「距离」由生成函数 \(\psi\) 决定；CE 选的是负熵，对偶回来就是 Softmax。
+          </figcaption>
+        </figure>
+
+        <h2>五、落到 PyTorch</h2>
         <p>
-          <a href="https://docs.pytorch.org/docs/stable/generated/torch.nn.CrossEntropyLoss.html" target="_blank" rel="noopener noreferrer">
-            <code>torch.nn.CrossEntropyLoss</code>
-          </a>
-          默认吃的是 <strong>logits + 类别下标</strong>，内部自己做 log-softmax，对应硬标签 \(-\log q_y\)：
+          <a href="https://docs.pytorch.org/docs/stable/generated/torch.nn.CrossEntropyLoss.html" target="_blank" rel="noopener noreferrer"><code>CrossEntropyLoss</code></a>
+          吃 <strong>logits + 类别下标</strong>，内部做 log-softmax，对应 \(-\log q_y\)：
         </p>
         <pre><code>import torch
 import torch.nn.functional as F
 
 logits = torch.tensor([[2.0, 1.2, 0.5, 0.1, -0.3]])
-hard = F.cross_entropy(logits, torch.tensor([0]))  # 真类 = cats
+hard = F.cross_entropy(logits, torch.tensor([0]))  # 硬标签
 
-p_teacher = torch.tensor([[0.52, 0.19, 0.09, 0.07, 0.05]])
-log_q = F.log_softmax(logits, dim=-1)
-soft = -(p_teacher * log_q).sum(dim=-1).mean()  # 软蒸馏：显式 CE(p, q)
+p = torch.tensor([[0.52, 0.19, 0.09, 0.07, 0.05]])
+soft = -(p * F.log_softmax(logits, dim=-1)).sum(-1).mean()  # 软 CE(p, q)
 </code></pre>
         <div class="callout">
-          <strong>别混。</strong>
           已经 softmax 过的概率，不要再丢进默认 <code>CrossEntropyLoss</code>。
-          软标签用手写 \(-\sum p\log q\)，或 <code>kl_div(log_softmax(logits), p)</code>（注意它吃的是 log-prob）。
+          软标签用手写 \(-\sum p\log q\)，或 <code>kl_div(log_softmax(logits), p)</code>（它吃 log-prob）。
         </div>
 
-        <h2>七、再回到 EAGLE：TTT 只是多份 CE 相加</h2>
+        <h2>六、再回到 EAGLE</h2>
         <p>
-          EAGLE-3 去掉特征回归之后，token 损失就是上面这种 CE（硬或软，看训练脚本）。
-          Training-Time Test 模拟约 5 步，不是把 5 个位置的概率拼成一条再算一次，而是：
-          <strong>每一步各自产出一份 \(q\)，各自算一次 CE，再求和</strong>。
+          EAGLE-3 的 token 损失就是上面的 CE（硬或软看脚本）。TTT 模拟约 5 步，不是把 5 个位置拼成一条再算，
+          而是每步各自一份 \(q\)、各自一次 CE，再求和。接受率是推理指标，不是这个 sum。
         </p>
         <figure class="diagram-figure diagram-figure--wide">
-          <svg viewBox="0 0 780 240" role="img" aria-label="TTT 五步各自算 CE 再求和">
-            <text x="390" y="28" text-anchor="middle" class="d-title">TTT：多步 = 多份 CE 相加</text>
-
-            <rect x="30" y="60" width="120" height="110" rx="12" class="d-zone-blue" />
-            <text x="90" y="95" text-anchor="middle" class="d-tag-blue">Step 0</text>
-            <text x="90" y="125" text-anchor="middle" class="d-label">真 g</text>
-            <text x="90" y="150" text-anchor="middle" class="d-muted">CE0</text>
-
-            <text x="165" y="120" text-anchor="middle" class="d-accent-orange">+</text>
-
-            <rect x="185" y="60" width="120" height="110" rx="12" class="d-zone-orange" />
-            <text x="245" y="95" text-anchor="middle" class="d-tag-orange">Step 1</text>
-            <text x="245" y="125" text-anchor="middle" class="d-label">混入 a</text>
-            <text x="245" y="150" text-anchor="middle" class="d-muted">CE1</text>
-
-            <text x="320" y="120" text-anchor="middle" class="d-accent-orange">+</text>
-
-            <rect x="340" y="60" width="120" height="110" rx="12" class="d-zone" />
-            <text x="400" y="95" text-anchor="middle" class="d-tag-purple">Step 2</text>
-            <text x="400" y="125" text-anchor="middle" class="d-label">再混 a</text>
-            <text x="400" y="150" text-anchor="middle" class="d-muted">CE2</text>
-
-            <text x="475" y="120" text-anchor="middle" class="d-accent-orange">+</text>
-            <text x="510" y="120" text-anchor="middle" class="d-muted">…</text>
-            <text x="545" y="120" text-anchor="middle" class="d-accent-orange">+</text>
-
-            <rect x="570" y="60" width="120" height="110" rx="12" class="d-box-purple" />
-            <text x="630" y="95" text-anchor="middle" class="d-tag-purple">Step 4</text>
-            <text x="630" y="125" text-anchor="middle" class="d-label">更深 rollout</text>
-            <text x="630" y="150" text-anchor="middle" class="d-muted">CE4</text>
-
-            <text x="390" y="210" text-anchor="middle" class="d-label">
-              L_token ≈ CE0 + … + CE4（可加权；每步内部硬/软二选一）
-            </text>
+          <svg viewBox="0 0 840 230" role="img" aria-label="TTT 多份 CE 相加">
+            <text x="420" y="28" text-anchor="middle" class="d-title">TTT：多步 = 多份 CE 相加</text>
+            <rect x="36" y="58" width="140" height="100" rx="14" class="d-box-blue" />
+            <text x="106" y="96" text-anchor="middle" class="d-tag-blue">Step 0</text>
+            <text x="106" y="124" text-anchor="middle" class="d-muted">真 g → CE0</text>
+            <text x="196" y="112" text-anchor="middle" class="d-accent-orange">+</text>
+            <rect x="220" y="58" width="140" height="100" rx="14" class="d-box-orange" />
+            <text x="290" y="96" text-anchor="middle" class="d-tag-orange">Step 1</text>
+            <text x="290" y="124" text-anchor="middle" class="d-muted">混入 a → CE1</text>
+            <text x="380" y="112" text-anchor="middle" class="d-accent-orange">+</text>
+            <rect x="404" y="58" width="140" height="100" rx="14" class="d-box-purple" />
+            <text x="474" y="96" text-anchor="middle" class="d-tag-purple">Step 2</text>
+            <text x="474" y="124" text-anchor="middle" class="d-muted">再混 a → CE2</text>
+            <text x="564" y="112" text-anchor="middle" class="d-accent-orange">+</text>
+            <text x="596" y="112" text-anchor="middle" class="d-muted">…</text>
+            <text x="628" y="112" text-anchor="middle" class="d-accent-orange">+</text>
+            <rect x="652" y="58" width="152" height="100" rx="14" class="d-box-purple" />
+            <text x="728" y="96" text-anchor="middle" class="d-tag-purple">Step 4</text>
+            <text x="728" y="124" text-anchor="middle" class="d-muted">更深 → CE4</text>
+            <text x="420" y="198" text-anchor="middle" class="d-label">L_token ≈ CE0 + … + CE4</text>
           </svg>
           <figcaption>
-            接受率是推理时测出来的，不是这个求和本身。细节见
+            细节见
             <a href="../inference/eagle-1-2-3-feature-extrapolation-evolution.html">EAGLE 三代演进 · §4.2.1</a>。
           </figcaption>
         </figure>
 
         <div class="essay-ending">
-          交叉熵先是信息论里的「用错码本要多花多少」；落到分类上，硬标签是一次采样版，软蒸馏是整座山对齐版；
-          Softmax 让梯度变成 \(q-e_i\)，所以训练几乎总用这一对。EAGLE 的 token 损失，只是把同一件事做了多步。
+          交叉熵先是「用错码本要多花多少」；硬标签是采样版，软蒸馏是整座山。
+          苏神说明白的是：要能对一次采样打分、要在 logits 上凸、要梯度干净——对偶回来就几乎只能是 Softmax + CE。
         </div>
 
         <section class="references-section" aria-label="参考与扩展阅读">
           <h2>参考与扩展阅读</h2>
           <ol class="reference-list">
+            <li>
+              <a href="https://spaces.ac.cn/archives/11854" target="_blank" rel="noopener noreferrer">
+                苏剑林：除了交叉熵，LM Loss还有什么选择？（科学空间，2026-08-09）
+              </a>
+              <span>本文第四节的底本：恰当评分、凸性、Fenchel–Young 与对偶激活。</span>
+            </li>
             <li>
               <a href="https://www.vectorexplore.com/tech/loss-functions/cross-entropy/" target="_blank" rel="noopener noreferrer">
                 交叉熵损失函数：图示+公式+代码（VectorExplore）
@@ -539,28 +568,20 @@ soft = -(p_teacher * log_q).sum(dim=-1).mean()  # 软蒸馏：显式 CE(p, q)
               <span>二分类 / 多分类手算与 sklearn、PyTorch 对照。</span>
             </li>
             <li>
-              <a href="https://spaces.ac.cn/archives/11854" target="_blank" rel="noopener noreferrer">
-                苏剑林：除了交叉熵，LM Loss还有什么选择？（科学空间，2026-08-09）
-              </a>
-              <span>恰当评分规则、采样线性、Softmax+CE 梯度与凸性。</span>
-            </li>
-            <li>
               <a href="https://docs.pytorch.org/docs/stable/generated/torch.nn.CrossEntropyLoss.html" target="_blank" rel="noopener noreferrer">
                 PyTorch: torch.nn.CrossEntropyLoss
               </a>
-              <span>默认吃 logits + 类别下标；软标签需手写或配合 KLDivLoss。</span>
+              <span>默认吃 logits + 类别下标。</span>
             </li>
             <li>
               <a href="https://arxiv.org/abs/1503.02531" target="_blank" rel="noopener noreferrer">
                 Distilling the Knowledge in a Neural Network (Hinton et al., 2015)
               </a>
-              <span>软目标与温度蒸馏的经典论文。</span>
+              <span>软目标与温度蒸馏。</span>
             </li>
             <li>
-              <a href="../inference/eagle-1-2-3-feature-extrapolation-evolution.html">
-                本站：EAGLE 三代演进
-              </a>
-              <span>把本文的 CE 接回投机解码的 token 损失与 TTT。</span>
+              <a href="../inference/eagle-1-2-3-feature-extrapolation-evolution.html">本站：EAGLE 三代演进</a>
+              <span>把 CE 接回投机解码的 token 损失与 TTT。</span>
             </li>
           </ol>
         </section>
