@@ -211,7 +211,7 @@
             <text x="390" y="28" text-anchor="middle" class="d-title">硬标签：一次采样 → −log qᵧ</text>
 
             <rect x="40" y="60" width="320" height="200" rx="14" class="d-zone-blue" />
-            <text x="200" y="90" text-anchor="middle" class="d-tag-blue">标签 \(y\)（采样）</text>
+            <text x="200" y="90" text-anchor="middle" class="d-tag-blue">标签 y（采样）</text>
             <rect x="70" y="120" width="40" height="100" rx="5" fill="#3b82f6" />
             <rect x="130" y="200" width="40" height="20" rx="5" fill="#64748b" opacity="0.35" />
             <rect x="190" y="200" width="40" height="20" rx="5" fill="#64748b" opacity="0.35" />
@@ -224,7 +224,7 @@
 
             <rect x="440" y="60" width="300" height="200" rx="14" class="d-zone-orange" />
             <text x="590" y="90" text-anchor="middle" class="d-tag-orange">损失</text>
-            <text x="590" y="150" text-anchor="middle" class="d-label">\(-\log 0.45\)</text>
+            <text x="590" y="150" text-anchor="middle" class="d-label">−log 0.45</text>
             <text x="590" y="185" text-anchor="middle" class="d-accent-orange">≈ 0.799</text>
             <text x="590" y="225" text-anchor="middle" class="d-muted">真词越自信，loss 越小</text>
           </svg>
@@ -256,7 +256,7 @@
           <svg viewBox="0 0 780 360" role="img" aria-label="软蒸馏：教师与学生并排">
             <text x="390" y="28" text-anchor="middle" class="d-title">软蒸馏：两份柱状分布逐词对齐</text>
 
-            <text x="200" y="58" text-anchor="middle" class="d-tag-blue">教师 \(p\)</text>
+            <text x="200" y="58" text-anchor="middle" class="d-tag-blue">教师 p</text>
             <rect x="60" y="90" width="36" height="156" rx="5" fill="#3b82f6" />
             <rect x="110" y="150" width="36" height="96" rx="5" fill="#60a5fa" />
             <rect x="160" y="190" width="36" height="56" rx="5" fill="#93c5fd" />
@@ -275,7 +275,7 @@
 
             <text x="390" y="180" text-anchor="middle" class="d-accent-orange" font-size="26">vs</text>
 
-            <text x="580" y="58" text-anchor="middle" class="d-tag-orange">学生 \(q\)</text>
+            <text x="580" y="58" text-anchor="middle" class="d-tag-orange">学生 q</text>
             <rect x="450" y="110" width="36" height="136" rx="5" fill="#f59e0b" />
             <rect x="500" y="140" width="36" height="106" rx="5" fill="#fbbf24" />
             <rect x="550" y="176" width="36" height="70" rx="5" fill="#fcd34d" />
@@ -352,7 +352,7 @@
           <svg viewBox="0 0 780 280" role="img" aria-label="梯度 q 减 e_i">
             <text x="390" y="28" text-anchor="middle" class="d-title">梯度 q − eᵢ：抬真类、压其它类</text>
 
-            <text x="130" y="70" text-anchor="middle" class="d-tag-blue">预测 \(q\)</text>
+            <text x="130" y="70" text-anchor="middle" class="d-tag-blue">预测 q</text>
             <rect x="50" y="100" width="32" height="90" rx="4" fill="#3b82f6" />
             <rect x="95" y="130" width="32" height="60" rx="4" fill="#60a5fa" />
             <rect x="140" y="110" width="32" height="80" rx="4" fill="#93c5fd" />
@@ -365,7 +365,7 @@
 
             <text x="300" y="145" text-anchor="middle" class="d-accent-orange" font-size="22">−</text>
 
-            <text x="390" y="70" text-anchor="middle" class="d-tag-orange">真 \(e_i\)</text>
+            <text x="390" y="70" text-anchor="middle" class="d-tag-orange">真 eᵢ</text>
             <rect x="340" y="160" width="32" height="20" rx="4" fill="#64748b" opacity="0.35" />
             <rect x="385" y="90" width="32" height="90" rx="4" fill="#f59e0b" />
             <rect x="430" y="160" width="32" height="20" rx="4" fill="#64748b" opacity="0.35" />
@@ -383,7 +383,7 @@
             <text x="644" y="210" text-anchor="middle" class="d-muted" font-size="10">−</text>
             <text x="684" y="210" text-anchor="middle" class="d-muted" font-size="10">+</text>
             <text x="724" y="210" text-anchor="middle" class="d-muted" font-size="10">+</text>
-            <text x="390" y="260" text-anchor="middle" class="d-muted">绿：抬真类；红：压错类。未达 \(e_i\) 时梯度不为零</text>
+            <text x="390" y="260" text-anchor="middle" class="d-muted">绿：抬真类；红：压错类。未达 eᵢ 时梯度不为零</text>
           </svg>
           <figcaption>
             Softmax+CE：距离目标越远，梯度越大；只有 \(q=e_i\) 时梯度才为零。
@@ -434,21 +434,21 @@ soft = -(p_teacher * log_q).sum(dim=-1).mean()  # 软蒸馏 CE
 
             <rect x="30" y="60" width="120" height="110" rx="12" class="d-zone-blue" />
             <text x="90" y="95" text-anchor="middle" class="d-tag-blue">Step 0</text>
-            <text x="90" y="125" text-anchor="middle" class="d-label">真 \(g\)</text>
+            <text x="90" y="125" text-anchor="middle" class="d-label">真 g</text>
             <text x="90" y="150" text-anchor="middle" class="d-muted">CE₀</text>
 
             <text x="165" y="120" text-anchor="middle" class="d-accent-orange">+</text>
 
             <rect x="185" y="60" width="120" height="110" rx="12" class="d-zone-orange" />
             <text x="245" y="95" text-anchor="middle" class="d-tag-orange">Step 1</text>
-            <text x="245" y="125" text-anchor="middle" class="d-label">混入 \(a\)</text>
+            <text x="245" y="125" text-anchor="middle" class="d-label">混入 a</text>
             <text x="245" y="150" text-anchor="middle" class="d-muted">CE₁</text>
 
             <text x="320" y="120" text-anchor="middle" class="d-accent-orange">+</text>
 
             <rect x="340" y="60" width="120" height="110" rx="12" class="d-zone" />
             <text x="400" y="95" text-anchor="middle" class="d-tag-purple">Step 2</text>
-            <text x="400" y="125" text-anchor="middle" class="d-label">再混 \(a\)</text>
+            <text x="400" y="125" text-anchor="middle" class="d-label">再混 a</text>
             <text x="400" y="150" text-anchor="middle" class="d-muted">CE₂</text>
 
             <text x="475" y="120" text-anchor="middle" class="d-accent-orange">+</text>
