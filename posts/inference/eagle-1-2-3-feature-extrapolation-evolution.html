@@ -208,7 +208,7 @@
           三步串行前向换来草稿 <code>cats | eat | pizza</code>，再交给目标模型一次并行验证。
           训练时损失是特征回归（Smooth L1）与 token 蒸馏（交叉熵）的加权和——特征损失让多步外推时输入分布不至于漂太远；
           token 项则是「\(\hat{p}\) vs 真词 / 教师分布」的 CE，细节见下文 EAGLE-3 小节与
-          <a href="../basic/cross-entropy-hard-label-soft-distillation.html">交叉熵专题</a>。
+          <a href="../basic/cross-entropy-hard-label-soft-distillation.html">交叉熵是什么</a>。
         </p>
 
         <figure class="diagram-figure diagram-figure--wide">
@@ -474,7 +474,7 @@
           接受率 \(n\textrm{-}\alpha\)、平均接受长度 \(\tau\) 是测出来的；
           不会写成 \(\mathrm{loss}=\text{5 步平均接受率}\)。
           交叉熵、硬标签与软蒸馏的公式、色条例子、以及「为何 LM 几乎必然是 Softmax+CE」（苏剑林恰当评分规则视角），见拓展阅读：
-          <a href="../basic/cross-entropy-hard-label-soft-distillation.html">交叉熵、硬标签与软蒸馏</a>。
+          <a href="../basic/cross-entropy-hard-label-soft-distillation.html">交叉熵是什么：从信息量算到硬标签、软蒸馏</a>。
         </div>
 
         <h3>4.3 多层特征融合：次顶层不够看「再下一个」</h3>
@@ -658,9 +658,9 @@
             </li>
             <li>
               <a href="../basic/cross-entropy-hard-label-soft-distillation.html">
-                交叉熵、硬标签与软蒸馏（本站拓展）
+                交叉熵是什么：从信息量算到硬标签、软蒸馏
               </a>
-              <span>弄清 \(l_{\text{token}}\) 在算什么：词表分布、硬 one-hot、软教师分布、TTT 多步如何加总 CE。</span>
+              <span>先讲清交叉熵从哪来、怎么算，再接到硬/软标签与 token 损失。</span>
             </li>
           </ol>
         </section>
