@@ -21,9 +21,9 @@
   </style>
   <link rel="stylesheet" href="../../styles.css?v=46" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous" />
-  <title>交叉熵是什么：从信息量、凸优化到苏神的 LM Loss</title>
+  <title>交叉熵是什么：从信息量、凸优化到 LM Loss</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="description" content="从信息量、多项似然手算交叉熵，再展开苏剑林《除了交叉熵，LM Loss还有什么选择？》：恰当评分、凸性、Fenchel–Young 与信息几何直觉，最后接到硬/软标签与 EAGLE。" />
+  <meta name="description" content="从信息量、多项似然手算交叉熵；再展开恰当评分、logits 凸性、Fenchel–Young 与信息几何直觉；最后接到硬/软标签与 EAGLE。" />
 </head>
 <body>
   <div class="ambient" aria-hidden="true"><span class="orb orb-a"></span><span class="orb orb-b"></span></div>
@@ -51,10 +51,10 @@
     <article class="post-page">
       <header class="post-page-header">
         <p class="post-page-category">Basic Knowledge</p>
-        <h1 class="post-page-title">交叉熵是什么：从信息量、凸优化到苏神的 LM Loss</h1>
+        <h1 class="post-page-title">交叉熵是什么：从信息量、凸优化到 LM Loss</h1>
         <p class="post-lead">
           交叉熵量的是：<strong>用你猜的概率去编码真实发生的事，平均要花多少</strong>。
-          本文先把概率公式手算清楚，再展开苏剑林
+          本文先把概率公式手算清楚，再展开原文中的关键推导与直觉
           <a href="https://spaces.ac.cn/archives/11854" target="_blank" rel="noopener noreferrer">《除了交叉熵，LM Loss还有什么选择？》</a>
           里多数人卡住的三块：<strong>恰当评分、logits 上的凸性、Fenchel–Young / 信息几何直觉</strong>。
           不预设凸优化或信息几何背景。
@@ -88,7 +88,7 @@
           <div class="map-arrow">→</div>
           <div class="map-node map-node--par">
             <span class="map-step">3</span>
-            <strong>苏神三问</strong>
+            <strong>三条关键问题</strong>
             <p>评分、凸性、对偶激活。</p>
           </div>
           <div class="map-arrow">→</div>
@@ -299,12 +299,11 @@
           </tbody>
         </table>
 
-        <h2>四、苏神在问什么：LM Loss 为什么几乎只能是它</h2>
+        <h2>四、LM Loss 为什么几乎只能是交叉熵</h2>
         <p>
-          苏剑林
           <a href="https://spaces.ac.cn/archives/11854" target="_blank" rel="noopener noreferrer">《除了交叉熵，LM Loss还有什么选择？》</a>
           （2026-08-09）的出发点不是再背一遍公式，而是：交叉熵看起来理所当然，<strong>能不能换？换了要满足什么？</strong>
-          下面按他的三条线展开，补上凸优化和信息几何里缺的直觉。
+          下面按三条线展开，补上凸优化和信息几何里缺的直觉。
         </p>
 
         <h3>4.1 恰当评分：损失必须能对「一次采样」打分</h3>
@@ -326,7 +325,7 @@
           Total Variation \(\sum|p_i-q_i|\) 虽然直观，改写成采样形式时会出现 \(q_i/p_i\)，而 \(p_i\) 你并不知道——所以它当不了 LM Loss。
         </p>
         <p>
-          苏神进一步证明：固定 \(p\) 时 \(L\) 的最小值是 \(H(p)=L(p,p)\)；\(L\) 对 \(p\) 又是线性的，于是 \(L(\,\cdot\,,q)\) 必须是凹函数 \(H\) 在 \(q\) 处的切平面。
+          可得：固定 \(p\) 时 \(L\) 的最小值是 \(H(p)=L(p,p)\)；\(L\) 对 \(p\) 又是线性的，于是 \(L(\,\cdot\,,q)\) 必须是凹函数 \(H\) 在 \(q\) 处的切平面。
           任选一个凹的 \(H\)，就能造出一套评分。对数评分对应 \(H(p)=-\sum p_i\log p_i\)，切出来正好是 \(S(q,i)=-\log q_i\)。
         </p>
         <div class="callout">
@@ -374,7 +373,7 @@
         <p>
           若模型「自信地错了」——\(q\) 几乎是另一个 one-hot \(e_j\neq e_y\)——括号里的矩阵在这个顶点附近接近零，<strong>梯度消失</strong>。
           前中期大部分预测都不准，平方损失学得很慢；后期那些死磕错答案的样本，它反而可能跳过（有时对噪声更稳）。
-          苏神的判断：<strong>CE 应作主损失；平方损失最多后期当辅。</strong>
+          因此：<strong>CE 更适合作为主损失；平方损失最多在后期作为辅。</strong>
         </p>
 
         <figure class="diagram-figure diagram-figure--wide">
@@ -396,7 +395,7 @@
             <text x="620" y="250" text-anchor="middle" class="d-muted">非凸，可能走不出去</text>
           </svg>
           <figcaption>
-            深度学习对权重已经非凸。苏神的意思是：至少别在最后一层再添乱。要求对 \(z\) 凸，是少给优化器找麻烦。
+            深度网络对权重本身已非凸。直观上，若再在输出层引入非凸/饱和的目标，会让优化更难；要求对 \(z\) 凸，是减少额外优化负担。
           </figcaption>
         </figure>
 
@@ -459,7 +458,7 @@
           交叉熵里多出来的 KL，正是这份差距。欧氏平方距离是 \(\psi(x)=\frac12\|x\|^2\) 生成的 Bregman——所以 Brier 是另一套几何，不是同一把尺子。
         </p>
         <p>
-          苏神后半篇用 <strong>Fenchel–Young</strong> 把「评分」和「激活」锁死成一对对偶。人话版：
+          后半部分用 <strong>Fenchel–Young</strong> 把「评分」和「激活」锁定为一对对偶。人话版：
         </p>
         <ul class="note-list">
           <li>你希望 \(\nabla_z S(q,i)=q-e_i\)（梯度干净）。</li>
@@ -549,7 +548,7 @@ soft = -(p * F.log_softmax(logits, dim=-1)).sum(-1).mean()  # 软 CE(p, q)
 
         <div class="essay-ending">
           交叉熵先是「用错码本要多花多少」；硬标签是采样版，软蒸馏是整座山。
-          苏神说明白的是：要能对一次采样打分、要在 logits 上凸、要梯度干净——对偶回来就几乎只能是 Softmax + CE。
+          归结起来：要能对一次采样打分、要在 logits 上凸、要梯度干净——对偶回来几乎只能得到 Softmax + CE。
         </div>
 
         <section class="references-section" aria-label="参考与扩展阅读">
@@ -557,7 +556,7 @@ soft = -(p * F.log_softmax(logits, dim=-1)).sum(-1).mean()  # 软 CE(p, q)
           <ol class="reference-list">
             <li>
               <a href="https://spaces.ac.cn/archives/11854" target="_blank" rel="noopener noreferrer">
-                苏剑林：除了交叉熵，LM Loss还有什么选择？（科学空间，2026-08-09）
+                《除了交叉熵，LM Loss还有什么选择？》（科学空间，2026-08-09）
               </a>
               <span>本文第四节的底本：恰当评分、凸性、Fenchel–Young 与对偶激活。</span>
             </li>
