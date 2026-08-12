@@ -1311,8 +1311,8 @@ body {
   display: flex;
   flex-wrap: wrap;
   align-items: stretch;
-  gap: 16px 10px;
-  margin: 34px 0 38px;
+  gap: 12px 8px;
+  margin: 24px 0 28px;
 }
 
 .map-node {
@@ -1322,7 +1322,7 @@ body {
   border-top: 3px solid var(--map-color);
   border-radius: var(--radius);
   background: var(--surface-muted);
-  padding: 18px 18px 20px;
+  padding: 14px 14px 16px;
   transition: transform var(--transition), box-shadow var(--transition);
 }
 
@@ -1337,28 +1337,28 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 26px;
-  margin-bottom: 12px;
+  width: 22px;
+  height: 22px;
+  margin-bottom: 10px;
   border-radius: 50%;
   background: var(--map-color);
   color: var(--bg);
-  font-size: 0.78rem;
+  font-size: 0.74rem;
   font-weight: 700;
 }
 
 .map-node strong {
   display: block;
   color: var(--text);
-  font-size: 0.98rem;
-  line-height: 1.4;
-  margin-bottom: 6px;
+  font-size: 0.94rem;
+  line-height: 1.35;
+  margin-bottom: 4px;
 }
 
 .map-node p {
   margin: 0;
-  font-size: 0.86rem;
-  line-height: 1.55;
+  font-size: 0.82rem;
+  line-height: 1.45;
   color: var(--text-soft);
   overflow-wrap: anywhere;
 }
@@ -1390,10 +1390,10 @@ body {
   align-items: center;
   justify-content: center;
   flex: 0 0 auto;
-  width: 20px;
+  width: 16px;
   color: var(--text-faint);
   font-family: var(--font-serif);
-  font-size: 1.3rem;
+  font-size: 1.15rem;
 }
 
 .callout {
