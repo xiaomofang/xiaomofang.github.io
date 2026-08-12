@@ -473,8 +473,8 @@
           TTT 的 5 步是训练时的 rollout 深度：Step 0 吃真融合特征 \(g\)，Step 1… 混入自身 \(a\)，每步加 token CE。
           接受率 \(n\textrm{-}\alpha\)、平均接受长度 \(\tau\) 是测出来的；
           不会写成 \(\mathrm{loss}=\text{5 步平均接受率}\)。
-          交叉熵、硬标签与软蒸馏的公式、色条例子、以及「为何 LM 几乎必然是 Softmax+CE」（苏剑林恰当评分规则视角），见拓展阅读：
-          <a href="../basic/cross-entropy-hard-label-soft-distillation.html">交叉熵是什么：从信息量算到硬标签、软蒸馏</a>。
+          交叉熵、硬标签与软蒸馏的公式、色条例子、以及「为何 LM 几乎必然是 Softmax+CE」（恰当评分规则视角），见拓展阅读：
+          <a href="../basic/cross-entropy-hard-label-soft-distillation.html">交叉熵是什么：从信息量、凸优化到 LM Loss</a>。
         </div>
 
         <h3>4.3 多层特征融合：次顶层不够看「再下一个」</h3>
@@ -658,7 +658,7 @@
             </li>
             <li>
               <a href="../basic/cross-entropy-hard-label-soft-distillation.html">
-                交叉熵是什么：从信息量、凸优化到苏神的 LM Loss
+                交叉熵是什么：从信息量、凸优化到 LM Loss
               </a>
               <span>先讲清交叉熵从哪来、怎么算，再接到硬/软标签与 token 损失。</span>
             </li>
