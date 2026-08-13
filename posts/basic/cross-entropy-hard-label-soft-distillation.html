@@ -19,7 +19,7 @@
     html[data-theme="night"], html[data-theme="night"] body { background: #0c0c0c; color: #ededed; color-scheme: dark; }
     html[data-theme="day"], html[data-theme="day"] body { background: #ffffff; color: #1a1a1a; color-scheme: light; }
   </style>
-  <link rel="stylesheet" href="../../styles.css?v=54" />
+  <link rel="stylesheet" href="../../styles.css?v=55" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous" />
   <title>交叉熵是什么：从信息量、凸优化到 LM Loss</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
@@ -219,8 +219,13 @@
 
         <h2>二、概率视角：它就是最大似然</h2>
         <p>
-          把「下一个词」看成词表上的分类。一次观测到真词 \(y\)，模型给出 \(q(y)\)，这条样本的似然就是 \(q(y)\)。
-          \(N\) 条独立样本的对数似然是
+          上一节的 \(\mathrm{CE}(p,q)\) 要一份完整的真分布 \(p\)。
+          可训练时语料往往<strong>只给你一个真词</strong>：上下文后面出现了 \(y\)（比如 cats），没有「整座概率山」。
+          这时怎么接到交叉熵？
+        </p>
+        <p>
+          把「下一个词」看成分类。模型给出该词的概率 \(q(y)\)，这条样本的似然就是 \(q(y)\)。
+          \(N\) 条独立样本的对数似然，取负再平均：
         </p>
         <div class="math-block" aria-label="nll">
           \[
@@ -230,17 +235,24 @@
           \]
         </div>
         <p>
-          右边正是硬标签交叉熵。最大化似然 = 最小化 CE。若把 \(N\) 次采样看成对未知 \(p\) 的经验分布 \(\hat p\)，
-          这也是 \(\mathrm{CE}(\hat p,q)\)。
+          右边每一项都是「真词那一格的 \(-\log q(y)\)」——也就是把完整 CE 里的 \(p\) 换成
+          「只有真词为 1、其余为 0」的尖峰后再求和，只剩一项。
+          所以：<strong>最大化似然 = 最小化这种「只盯真词」的交叉熵</strong>。
+          （第三节会正式叫它<strong>硬标签</strong>；若标签是教师吐出的整份 \(p\)，则叫软蒸馏——同一条 CE，标签不同。）
         </p>
         <p>
-          Softmax 从哪来？语言模型最后一层（LM head）对词表每个词先打一个分 \(z_i\)，叫 <strong>logit</strong>。
+          若把 \(N\) 次「真词」看成对未知 \(p\) 的经验分布 \(\hat p\)（哪个词出现几次就占几分），
+          上面的平均正好是 \(\mathrm{CE}(\hat p,q)\)。
+        </p>
+        <p>
+          还有一块没交代：公式里的 \(q(y)\) 从哪来？
+          网络不会直接吐出合法概率。语言模型最后一层（LM head）对词表每个词先打一个分 \(z_i\)，叫 <strong>logit</strong>。
           这个分是<strong>无界</strong>的：\(z_i\in\mathbb{R}\)，可正可负、可很大可很小——
           <strong>不必</strong>落在 \([0,1]\)，也<strong>不必</strong>加起来等于 1。
           它只表示「模型觉得这个词有多强」的相对高低，还不是概率。
         </p>
         <p>
-          但交叉熵 / 似然要的是概率 \(q\)：\(q_i&gt;0\) 且 \(\sum_i q_i=1\)。
+          交叉熵 / 似然要的却是概率 \(q\)：\(q_i&gt;0\) 且 \(\sum_i q_i=1\)。
           所以要把无界的 \(z\) 压成合法分布，最常用的就是 Softmax（指数族 / Gibbs 分布）：
         </p>
         <div class="math-block" aria-label="softmax">
@@ -256,6 +268,7 @@
 
         <h2>三、手算一遍</h2>
         <p>
+          先用手算完整的 \(\mathrm{CE}(p,q)\)（标签是整份 \(p\)）。
           词表：<code>{cats, dogs, to, eat, pizza}</code>。教师（或真实）分布
           \(p=(0.52,0.19,0.09,0.07,0.05)\)，学生
           \(q=(0.45,0.25,0.15,0.10,0.05)\)。逐项：
@@ -330,7 +343,8 @@
             <text x="420" y="322" text-anchor="middle" class="d-muted">argmax 都是 cats，山形仍不同 → 软 CE 仍会惩罚</text>
           </svg>
           <figcaption>
-            左：软标签看整座山；硬标签会把这座山压成「只有 cats=1」。右：学生 \(q\)。两边 argmax 可以相同，软 CE 仍会因山形不同而惩罚。
+            柱高是概率。左边是一份完整的 \(p\)（第三节会叫「软标签」那种山）；右边是学生 \(q\)。
+            两边 argmax 可以都是 cats，山形不同时，用整份 \(p\) 算的 CE 仍会惩罚。
           </figcaption>
         </figure>
 
