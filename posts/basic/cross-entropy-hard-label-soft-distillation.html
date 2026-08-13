@@ -19,7 +19,7 @@
     html[data-theme="night"], html[data-theme="night"] body { background: #0c0c0c; color: #ededed; color-scheme: dark; }
     html[data-theme="day"], html[data-theme="day"] body { background: #ffffff; color: #1a1a1a; color-scheme: light; }
   </style>
-  <link rel="stylesheet" href="../../styles.css?v=50" />
+  <link rel="stylesheet" href="../../styles.css?v=51" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous" />
   <title>交叉熵是什么：从信息量、凸优化到 LM Loss</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
@@ -297,12 +297,37 @@
 
             <text x="420" y="322" text-anchor="middle" class="d-muted">argmax 都是 cats，山形仍不同 → 软 CE 仍会惩罚</text>
           </svg>
-          <figcaption>柱高是概率，不是对错。软蒸馏比的是整座山；硬标签只把左边压成「cats=1、其余=0」。</figcaption>
+          <figcaption>
+            左：软标签看整座山；硬标签会把这座山压成「只有 cats=1」。右：学生 \(q\)。两边 argmax 可以相同，软 CE 仍会因山形不同而惩罚。
+          </figcaption>
         </figure>
 
-        <h3>3.1 硬标签：一次采样版</h3>
+        <h3>3.1 先分清两件事：硬标签 vs 软蒸馏</h3>
         <p>
-          语料通常只给一个真词，相当于把 \(p\) 换成 one-hot \(e_y\)。求和只剩一项：
+          交叉熵公式 \(\mathrm{CE}(p,q)=-\sum p\log q\) 里，模型侧永远是 \(q\)；差别只在<strong>标签 \(p\) 长什么样</strong>。
+          实务上常见两种喂法：
+        </p>
+        <ul>
+          <li>
+            <strong>硬标签（hard label）</strong>：语料只告诉你「下一个词是哪个」——比如这次答案是 cats。
+            标签是尖峰：真词概率 = 1，其余 = 0。这就是 <strong>one-hot</strong>（独热编码）：一整行里只有一格是 1，其它全是 0。
+            注意：不是「整个训练只用一个样本」（那是 one-shot 学习，另一回事）；而是<strong>每一条样本各自一个 one-hot</strong>。
+          </li>
+          <li>
+            <strong>软蒸馏（soft distillation）</strong>：标签不是尖峰，而是教师模型吐出的整份概率山——cats 0.52、dogs 0.19…
+            学生要学的是「整座山长得像不像老师」，不是只盯住一个词。
+          </li>
+        </ul>
+        <p>
+          <strong>各自用来做什么？</strong>
+          硬标签是预训练 / SFT 的默认：语料天然就是「上下文 → 下一个真词」，便宜、好造。
+          软蒸馏用在知识蒸馏、投机解码草稿器对齐目标模型等场景：你有一个更强的教师（或目标 LM），希望学生不只猜对 argmax，还学到「第二名、第三名有多像」。
+        </p>
+
+        <h3>3.2 硬标签：一条样本一个 one-hot，再批量平均</h3>
+        <p>
+          一条训练样本进来，真词是 \(y\)（比如 cats）。把 \(p\) 换成 one-hot \(e_y=(1,0,0,\ldots)\)，
+          交叉熵求和只剩真词那一项：
         </p>
         <div class="math-block" aria-label="hard-ce">
           \[
@@ -311,17 +336,33 @@
         </div>
         <p>
           若 \(y=\text{cats}\)、\(q_y=0.45\)，则 \(-\ln 0.45\approx 0.799\)。
-          其它词不直接进这一行，只通过 softmax 分母分走真词概率。
-          \(q_y=0.90\) 时约 \(0.105\)；\(q_y=0.05\) 时约 \(3.00\)。连续可反传，不是 0/1 记分。
+          其它词<strong>不直接</strong>出现在这一行里，但会通过 Softmax 分母分走真词的概率——你把 dogs 抬高，cats 的 \(q_y\) 就会掉，loss 仍会涨。
+          \(q_y=0.90\) 时约 \(0.105\)；\(q_y=0.05\) 时约 \(3.00\)。连续可反传，不是 0/1 对错记分。
         </p>
         <p>
-          许多次「白切鸡 / 白切鸭」各自算 \(-\log q_y\) 再平均，就是用采样逼近完整的 \(\mathrm{CE}(p,q)\)。
+          <strong>一条算完就完了吗？不是。</strong>
+          训练是「一个个算，再聚合」：
+        </p>
+        <ol>
+          <li>样本 1：「白切」→ 鸡，算 \(-\log q(\text{鸡})\)</li>
+          <li>样本 2：「白切」→ 鸭，算 \(-\log q(\text{鸭})\)</li>
+          <li>样本 3、4、… 同理</li>
+          <li>一个 batch / 整个 epoch 里把这些数<strong>平均</strong>（或求和再除以 \(N\)），得到这一步的 loss，再反传</li>
+        </ol>
+        <p>
+          所以：<strong>单条 = 一个 one-hot → 一项 \(-\log q_y\)；多条 = 多次这样算，再平均</strong>。
+          平均得多了，就在用采样逼近「若把所有可能下一词的真实频率摊开」时的完整 \(\mathrm{CE}(p,q)\)。
         </p>
 
-        <h3>3.2 软蒸馏：整座山对齐</h3>
+        <h3>3.3 软蒸馏：一次对齐整座山</h3>
         <p>
-          教师若能给出整份 \(p\)，公式仍是 \(\mathrm{CE}(p,q)=-\sum p_v\log q_v\)，只是 \(p\) 不再是尖峰。
-          硬 / 软是<strong>同一条交叉熵</strong>：一个是蒙特卡洛，一个是显式期望。实务上按任务二选一，数字也不可直接比——\(p\) 不同，下界 \(H(p)\) 就不同。
+          教师若能给出整份 \(p\)（例如目标模型同位置的 Softmax），公式仍是
+          \(\mathrm{CE}(p,q)=-\sum_v p(v)\log q(v)\)——就是第三节开头那张表整行加总，不再压成尖峰。
+          一条样本里，cats、dogs、to… <strong>每一格都进 loss</strong>：教师觉得可能的词，学生也要分到相近的概率。
+        </p>
+        <p>
+          硬 / 软是<strong>同一条交叉熵</strong>：硬是「每次只看见一个采样词」的蒙特卡洛版；软是「标签已是完整分布」的显式期望版。
+          实务上按任务二选一；两边算出的数字也<strong>不可直接比大小</strong>——因为标签 \(p\) 不同，下界 \(H(p)\) 就不同（硬标签 one-hot 的熵是 0，软标签熵通常 &gt; 0）。
         </p>
 
         <table class="decision-table">
@@ -329,9 +370,11 @@
             <tr><th></th><th>硬标签</th><th>软蒸馏</th></tr>
           </thead>
           <tbody>
-            <tr><td>\(p\) 从哪来</td><td>语料一次采样 → one-hot</td><td>教师整份分布（可带温度）</td></tr>
-            <tr><td>公式</td><td>\(-\log q(y)\)</td><td>\(-\sum_v p(v)\log q(v)\)</td></tr>
-            <tr><td>场景</td><td>预训练 / SFT</td><td>蒸馏、EAGLE 对齐目标分布</td></tr>
+            <tr><td>标签长什么样</td><td>one-hot：真词=1，其余=0</td><td>整份概率分布（可带温度）</td></tr>
+            <tr><td>\(p\) 从哪来</td><td>语料里的真词 \(y\)</td><td>教师 / 目标模型同位置 Softmax</td></tr>
+            <tr><td>一条样本怎么算</td><td>只算 \(-\log q(y)\)</td><td>对词表求和 \(-\sum p\log q\)</td></tr>
+            <tr><td>多条怎么聚合</td><td>逐条算完再平均</td><td>同样：逐条 CE 再平均</td></tr>
+            <tr><td>典型用途</td><td>预训练 / SFT</td><td>蒸馏、EAGLE 对齐目标分布</td></tr>
           </tbody>
         </table>
 
