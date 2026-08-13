@@ -19,7 +19,7 @@
     html[data-theme="night"], html[data-theme="night"] body { background: #0c0c0c; color: #ededed; color-scheme: dark; }
     html[data-theme="day"], html[data-theme="day"] body { background: #ffffff; color: #1a1a1a; color-scheme: light; }
   </style>
-  <link rel="stylesheet" href="../../styles.css?v=52" />
+  <link rel="stylesheet" href="../../styles.css?v=54" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous" />
   <title>交叉熵是什么：从信息量、凸优化到 LM Loss</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
@@ -234,9 +234,10 @@
           这也是 \(\mathrm{CE}(\hat p,q)\)。
         </p>
         <p>
-          Softmax 从哪来？语言模型最后一层（LM head）对词表每个词输出一个实数 \(z_i\)，叫 <strong>logit</strong>。
-          这里的「无界分数」指：\(z_i\) 可以是任意实数——可正可负、可很大可很小，<strong>不必</strong>落在 \([0,1]\)，也<strong>不必</strong>加起来等于 1。
-          它只表示「模型觉得这个词有多强」的相对打分，还不是概率。
+          Softmax 从哪来？语言模型最后一层（LM head）对词表每个词先打一个分 \(z_i\)，叫 <strong>logit</strong>。
+          这个分是<strong>无界</strong>的：\(z_i\in\mathbb{R}\)，可正可负、可很大可很小——
+          <strong>不必</strong>落在 \([0,1]\)，也<strong>不必</strong>加起来等于 1。
+          它只表示「模型觉得这个词有多强」的相对高低，还不是概率。
         </p>
         <p>
           但交叉熵 / 似然要的是概率 \(q\)：\(q_i&gt;0\) 且 \(\sum_i q_i=1\)。
