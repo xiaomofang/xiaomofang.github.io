@@ -19,7 +19,7 @@
     html[data-theme="night"], html[data-theme="night"] body { background: #0c0c0c; color: #ededed; color-scheme: dark; }
     html[data-theme="day"], html[data-theme="day"] body { background: #ffffff; color: #1a1a1a; color-scheme: light; }
   </style>
-  <link rel="stylesheet" href="../../styles.css?v=49" />
+  <link rel="stylesheet" href="../../styles.css?v=50" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous" />
   <title>交叉熵是什么：从信息量、凸优化到 LM Loss</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
@@ -131,12 +131,7 @@
           数据越「乱」、下一词越不确定，\(H(p)\) 越高，loss 地板就抬得越高——所以看到 CE 降不动时，先问一句：是模型还没学好，还是数据本身熵就很大。
         </p>
         <p>
-          「与模型无关的最短码长」说的是同一件事的编码视角：
-          若你<strong>事先就知道真分布 \(p\)</strong>，按香农编码给每个 \(x\) 分配约 \(-\log p(x)\) 长的码，平均码长恰好是 \(H(p)\)——这是无噪声信道上平均码长的理论最短。
-          「与模型无关」= 码本按真 \(p\) 来设计，不依赖你的神经网络猜的 \(q\)；模型再差也改变不了这块蓝色底座。
-        </p>
-        <p>
-          模型给不出真 \(p\)，只能猜一份 \(q\)。真实世界仍按 \(p\) 出现各个 \(x\)，你却用 \(-\log q(x)\) 去编码。
+          模型给不出真 \(p\)，只能猜一份 \(q\)。真实世界仍按 \(p\) 出现各个 \(x\)，你却用 \(-\log q(x)\) 去计量「花了多少」。
           平均花销就是<strong>交叉熵</strong>：
         </p>
         <div class="math-block" aria-label="ce-def">
@@ -155,7 +150,7 @@
         </div>
         <p>
           \(H(p)\) 对固定数据是常数。最小化 CE ≡ 最小化 KL ≡ 让 \(q\) 去贴 \(p\)。
-          \(q=p\) 时 KL 为零，CE 降到下界 \(H(p)\)——蓝色底座碰不到，橙色才是训练能压的部分。
+          \(q=p\) 时 KL 为零，CE 降到下界 \(H(p)\)。
         </p>
 
         <figure class="diagram-figure diagram-figure--wide">
@@ -177,6 +172,19 @@
             \(H(p)\) 是「数据有多难猜」的地板；KL 是「模型猜偏了」多付的钱。交叉熵 = 两者之和。
           </figcaption>
         </figure>
+
+        <p>
+          上图蓝色块旁写的「最短平均码长」，是把熵换成<strong>压缩 / 通信</strong>语言来说同一件事。
+          这里的<strong>码长</strong>：给每个可能出现的符号 \(x\) 编一串码（例如一串 0/1），这串有多长，就叫该符号的码长；
+          平均码长 = 按真实频率 \(p(x)\) 对各个码长取期望——传一条消息平均要花多少比特（或 nat）。
+          常见的例子：Zip 压缩、哈夫曼编码——越常出现的符号，码应越短。
+        </p>
+        <p>
+          香农定理说：若你<strong>事先知道真分布 \(p\)</strong>，并按 \(p\) 来设计码本（给 \(x\) 大约 \(-\log p(x)\) 那么长的码），
+          平均码长最低可以逼近 \(H(p)\)，再短就不行了——这就是图里蓝色底座。
+          「与模型无关」的意思是：这块下界只由数据 \(p\) 决定；神经网络猜的是 \(q\)，再差也动不了蓝色，只能把橙色 KL 压小。
+          若你不知道 \(p\)、只好按猜的 \(q\) 来编，平均码长就变成交叉熵 \(\mathrm{CE}(p,q)\)，比 \(H(p)\) 多出来的正是橙色。
+        </p>
 
         <h2>二、概率视角：它就是最大似然</h2>
         <p>
