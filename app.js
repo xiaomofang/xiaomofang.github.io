@@ -245,8 +245,11 @@
     return cjk + latinWords;
   }
 
-  function formatReadingMeta(isoDate, chars, author) {
-    const minutes = Math.max(1, Math.ceil(chars / CHARS_PER_MINUTE));
+  function formatReadingMeta(isoDate, chars, author, minutesOverride) {
+    const minutes =
+      minutesOverride != null
+        ? Math.max(1, minutesOverride)
+        : Math.max(1, Math.ceil(chars / CHARS_PER_MINUTE));
     return formatZhDate(isoDate) + " · " + minutes + " 分钟 · " + chars + " 字 · " + (author || "MOFANG");
   }
 
@@ -256,10 +259,13 @@
     if (!meta || !content) return;
 
     const chars = countReadableChars(content);
+    const overrideRaw = meta.getAttribute("data-minutes");
+    const minutesOverride = overrideRaw ? Number(overrideRaw) : null;
     meta.textContent = formatReadingMeta(
       meta.getAttribute("data-date"),
       chars,
-      meta.getAttribute("data-author") || "MOFANG"
+      meta.getAttribute("data-author") || "MOFANG",
+      Number.isFinite(minutesOverride) ? minutesOverride : null
     );
     meta.setAttribute("data-chars", String(chars));
   }

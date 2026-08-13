@@ -19,7 +19,7 @@
     html[data-theme="night"], html[data-theme="night"] body { background: #0c0c0c; color: #ededed; color-scheme: dark; }
     html[data-theme="day"], html[data-theme="day"] body { background: #ffffff; color: #1a1a1a; color-scheme: light; }
   </style>
-  <link rel="stylesheet" href="../../styles.css?v=55" />
+  <link rel="stylesheet" href="../../styles.css?v=56" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous" />
   <title>交叉熵是什么：从信息量、凸优化到 LM Loss</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
@@ -62,7 +62,7 @@
         <div class="post-page-keywords" aria-label="Keywords">
           <a class="post-keyword-chip" href="../../index.html?keyword=training">训练</a>
         </div>
-        <p class="post-page-meta" data-date="2026-08-11" data-author="MOFANG">2026年8月11日 · MOFANG</p>
+        <p class="post-page-meta" data-date="2026-08-11" data-author="MOFANG" data-minutes="35">2026年8月11日 · MOFANG</p>
       </header>
 
       <section class="post-page-content">
@@ -263,7 +263,15 @@
         <p>
           指数 \(e^{z_i}\) 先把任意实数变成正数，再除以总和做归一化——于是 \(q_i&gt;0\) 且 \(\sum q_i=1\)。
           \(z_i\) 越大，对应词的概率越高；\(z\) 整体加减同一个常数，\(q\) 不变（只比相对高低）。
-          后文会看到：若你希望损失对 \(z\) 的梯度等于 \(q-e_y\)，反推出来的激活恰好就是它。
+        </p>
+        <p>
+          这里先埋一个后文（§4.2）会用到的好处，读到可以回头对照：
+          训练反传时，真正更新的是 logits \(z\)。若损失是硬标签交叉熵 \(-\log q_y\)，再配上 Softmax，
+          对 \(z\) 的梯度会<strong>恰好等于</strong>「预测概率 − 真标签」：
+          \(\nabla_z(-\log q_y)=q-e_y\)。
+          人话：真词那一维梯度是 \(q_y-1\)（负的，所以往上抬真词），其它维是 \(q_i\)（正的，往下压错词）。
+          反过来说：如果你<strong>事先要求</strong>「损失对 \(z\) 的梯度必须长成 \(q-e_y\) 这么干净」，
+          能配得上的激活函数几乎就只能是 Softmax——所以 Softmax 和 CE 经常成对出现，不是随便凑的。
         </p>
 
         <h2>三、手算一遍</h2>
@@ -482,6 +490,7 @@
         </div>
         <p>
           含义直白：把真类概率往上抬，把其它类往下压；偏差多大，梯度就多大。只有 \(q=e_y\) 时梯度为零。
+          这就是第二节预告的「干净梯度」：不用再乘一堆奇怪系数，误差本身就是更新方向。
         </p>
         <p>
           再看 Hessian。Softmax 的雅可比是 \(\mathrm{diag}(q)-qq^\top\)（半正定），CE 对 \(z\) 的二阶导就是它。
@@ -736,7 +745,7 @@ soft = -(p * F.log_softmax(logits, dim=-1)).sum(-1).mean()  # 软 CE(p, q)
     </span>
   </footer>
 
-  <script src="../../app.js?v=40"></script>
+  <script src="../../app.js?v=41"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" crossorigin="anonymous"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js" crossorigin="anonymous"
     onload="renderMathInElement(document.body, {
