@@ -19,7 +19,7 @@
     html[data-theme="night"], html[data-theme="night"] body { background: #0c0c0c; color: #ededed; color-scheme: dark; }
     html[data-theme="day"], html[data-theme="day"] body { background: #ffffff; color: #1a1a1a; color-scheme: light; }
   </style>
-  <link rel="stylesheet" href="../../styles.css?v=48" />
+  <link rel="stylesheet" href="../../styles.css?v=49" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous" />
   <title>交叉熵是什么：从信息量、凸优化到 LM Loss</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
@@ -195,7 +195,13 @@
           这也是 \(\mathrm{CE}(\hat p,q)\)。
         </p>
         <p>
-          Softmax 从哪来？模型先产出无界分数 \(z\)（logits）。要变成概率，最常用的是指数族 / Gibbs 分布：
+          Softmax 从哪来？语言模型最后一层（LM head）对词表每个词输出一个实数 \(z_i\)，叫 <strong>logit</strong>。
+          这里的「无界分数」指：\(z_i\) 可以是任意实数——可正可负、可很大可很小，<strong>不必</strong>落在 \([0,1]\)，也<strong>不必</strong>加起来等于 1。
+          它只表示「模型觉得这个词有多强」的相对打分，还不是概率。
+        </p>
+        <p>
+          但交叉熵 / 似然要的是概率 \(q\)：\(q_i&gt;0\) 且 \(\sum_i q_i=1\)。
+          所以要把无界的 \(z\) 压成合法分布，最常用的就是 Softmax（指数族 / Gibbs 分布）：
         </p>
         <div class="math-block" aria-label="softmax">
           \[
@@ -203,7 +209,9 @@
           \]
         </div>
         <p>
-          它保证 \(q_i&gt;0\) 且 \(\sum q_i=1\)。后文会看到：若你希望损失对 \(z\) 的梯度等于 \(q-e_y\)，反推出来的激活恰好就是它。
+          指数 \(e^{z_i}\) 先把任意实数变成正数，再除以总和做归一化——于是 \(q_i&gt;0\) 且 \(\sum q_i=1\)。
+          \(z_i\) 越大，对应词的概率越高；\(z\) 整体加减同一个常数，\(q\) 不变（只比相对高低）。
+          后文会看到：若你希望损失对 \(z\) 的梯度等于 \(q-e_y\)，反推出来的激活恰好就是它。
         </p>
 
         <h2>三、手算一遍</h2>
