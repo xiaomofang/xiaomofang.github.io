@@ -109,8 +109,22 @@
           \]
         </div>
         <p>
-          \(p=0.5\) 时 \(I=-\ln 0.5\approx 0.693\)；\(p=0.05\) 时 \(I\approx 2.996\)。
-          训练里常用自然对数，单位是 <strong>nat</strong>（\(\log_2\) 则是 bit，只差常数倍）。
+          \(p=0.5\) 时 \(I=-\ln 0.5\approx 0.693\,\mathrm{nat}\)；\(p=0.05\) 时 \(I\approx 2.996\,\mathrm{nat}\)。
+          训练里（PyTorch 等）常用自然对数 \(\ln\)，单位是 <strong>nat</strong>（natural unit）；
+          信息论教材常用 \(\log_2\)，单位是 <strong>bit</strong>。两者只差一个常数：
+        </p>
+        <div class="math-block" aria-label="nat-bit">
+          \[
+            1\,\mathrm{nat}=\log_2 e\approx 1.443\,\mathrm{bit},
+            \qquad
+            1\,\mathrm{bit}=\ln 2\approx 0.693\,\mathrm{nat}
+          \]
+        </div>
+        <p>
+          换算：\(\mathrm{bit}=\mathrm{nat}/\ln 2\approx 1.443\times\mathrm{nat}\)。
+          例如上面 \(p=0.5\)：\(0.693\,\mathrm{nat}=1\,\mathrm{bit}\)（抛硬币恰好 1 bit）；
+          \(p=0.05\)：\(2.996\,\mathrm{nat}\approx 4.32\,\mathrm{bit}\)。
+          loss 用哪种对数，数值会差这个倍数，但<strong>谁大谁小、梯度方向不变</strong>——只是尺子刻度不同。
         </p>
         <p>
           世界按 \(p\) 出牌，平均意外程度是<strong>熵</strong>：
