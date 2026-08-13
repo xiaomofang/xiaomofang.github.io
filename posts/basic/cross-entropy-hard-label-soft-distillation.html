@@ -19,7 +19,7 @@
     html[data-theme="night"], html[data-theme="night"] body { background: #0c0c0c; color: #ededed; color-scheme: dark; }
     html[data-theme="day"], html[data-theme="day"] body { background: #ffffff; color: #1a1a1a; color-scheme: light; }
   </style>
-  <link rel="stylesheet" href="../../styles.css?v=51" />
+  <link rel="stylesheet" href="../../styles.css?v=52" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous" />
   <title>交叉熵是什么：从信息量、凸优化到 LM Loss</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
@@ -140,7 +140,23 @@
           \]
         </div>
         <p>
-          「交叉」：<strong>权重来自真分布 \(p\)，对数里却是猜测 \(q\)</strong>。多花的那截是 KL：
+          「交叉」：<strong>权重来自真分布 \(p\)，对数里却是猜测 \(q\)</strong>。
+          上下两条公式不是两套定义——下面是上面<strong>恒等变形</strong>拆出来的：在 \(\log q\) 里插入 \(\log p\)：
+        </p>
+        <div class="math-block" aria-label="ce-to-kl">
+          \[
+            \begin{aligned}
+            \mathrm{CE}(p,q)
+            &= -\sum_x p(x)\log q(x) \\
+            &= -\sum_x p(x)\bigl(\log p(x)+\log\tfrac{q(x)}{p(x)}\bigr) \\
+            &= \underbrace{-\sum_x p(x)\log p(x)}_{H(p)}
+              \;+\;
+              \underbrace{\sum_x p(x)\log\frac{p(x)}{q(x)}}_{D_{\mathrm{KL}}(p\|q)}
+            \end{aligned}
+          \]
+        </div>
+        <p>
+          所以写成：
         </p>
         <div class="math-block" aria-label="kl">
           \[
@@ -149,8 +165,9 @@
           \]
         </div>
         <p>
-          \(H(p)\) 对固定数据是常数。最小化 CE ≡ 最小化 KL ≡ 让 \(q\) 去贴 \(p\)。
-          \(q=p\) 时 KL 为零，CE 降到下界 \(H(p)\)。
+          KL \(\ge 0\)（Gibbs 不等式），等号当且仅当 \(p=q\)。
+          因此 \(H(p)\) 对固定数据是常数：最小化 CE ≡ 最小化 KL ≡ 让 \(q\) 去贴 \(p\)。
+          \(q=p\) 时橙色为零，CE 降到下界 \(H(p)\)。
         </p>
 
         <figure class="diagram-figure diagram-figure--wide">
