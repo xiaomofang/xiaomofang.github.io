@@ -19,7 +19,7 @@
     html[data-theme="night"], html[data-theme="night"] body { background: #0c0c0c; color: #ededed; color-scheme: dark; }
     html[data-theme="day"], html[data-theme="day"] body { background: #ffffff; color: #1a1a1a; color-scheme: light; }
   </style>
-  <link rel="stylesheet" href="../../styles.css?v=47" />
+  <link rel="stylesheet" href="../../styles.css?v=48" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous" />
   <title>交叉熵是什么：从信息量、凸优化到 LM Loss</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
@@ -113,13 +113,28 @@
           训练里常用自然对数，单位是 <strong>nat</strong>（\(\log_2\) 则是 bit，只差常数倍）。
         </p>
         <p>
-          世界按 \(p\) 出牌，平均意外程度是<strong>熵</strong>——用完美码本编码，平均最短码长：
+          世界按 \(p\) 出牌，平均意外程度是<strong>熵</strong>：
         </p>
         <div class="math-block" aria-label="entropy">
           \[
             H(p)=-\sum_x p(x)\log p(x)
           \]
         </div>
+        <p>
+          直觉上：每个 \(x\) 的意外程度是 \(-\log p(x)\)，再按它真正出现的频率 \(p(x)\) 加权平均。
+          若某件事几乎必然发生（\(p\approx 1\)），熵接近 0——没什么好「惊讶」的；
+          若许多结果差不多均匀（词表上每个词都差不多可能），熵就大——下一词本来就更难猜。
+        </p>
+        <p>
+          <strong>为什么要盯 \(H(p)\)？</strong>
+          它不是训练目标本身，而是交叉熵的<strong>理论下界</strong>：再怎么训，CE 也不能低于 \(H(p)\)。
+          数据越「乱」、下一词越不确定，\(H(p)\) 越高，loss 地板就抬得越高——所以看到 CE 降不动时，先问一句：是模型还没学好，还是数据本身熵就很大。
+        </p>
+        <p>
+          「与模型无关的最短码长」说的是同一件事的编码视角：
+          若你<strong>事先就知道真分布 \(p\)</strong>，按香农编码给每个 \(x\) 分配约 \(-\log p(x)\) 长的码，平均码长恰好是 \(H(p)\)——这是无噪声信道上平均码长的理论最短。
+          「与模型无关」= 码本按真 \(p\) 来设计，不依赖你的神经网络猜的 \(q\)；模型再差也改变不了这块蓝色底座。
+        </p>
         <p>
           模型给不出真 \(p\)，只能猜一份 \(q\)。真实世界仍按 \(p\) 出现各个 \(x\)，你却用 \(-\log q(x)\) 去编码。
           平均花销就是<strong>交叉熵</strong>：
@@ -140,22 +155,27 @@
         </div>
         <p>
           \(H(p)\) 对固定数据是常数。最小化 CE ≡ 最小化 KL ≡ 让 \(q\) 去贴 \(p\)。
-          \(q=p\) 时 KL 为零，CE 降到下界 \(H(p)\)。
+          \(q=p\) 时 KL 为零，CE 降到下界 \(H(p)\)——蓝色底座碰不到，橙色才是训练能压的部分。
         </p>
 
         <figure class="diagram-figure diagram-figure--wide">
-          <svg viewBox="0 0 840 220" role="img" aria-label="交叉熵等于熵加KL">
-            <text x="420" y="32" text-anchor="middle" class="d-title">交叉熵 = 熵（底座）+ KL（猜错多付的钱）</text>
-            <rect x="48" y="68" width="360" height="72" rx="14" class="d-box-blue" />
-            <text x="228" y="100" text-anchor="middle" class="d-tag-blue">H(p)</text>
-            <text x="228" y="122" text-anchor="middle" class="d-muted">与模型无关的最短码长</text>
-            <rect x="408" y="68" width="220" height="72" rx="14" class="d-box-orange" />
-            <text x="518" y="100" text-anchor="middle" class="d-tag-orange">KL(p ‖ q)</text>
-            <text x="518" y="122" text-anchor="middle" class="d-muted">q 偏离 p 的额外开销</text>
-            <text x="700" y="112" text-anchor="middle" class="d-label">= CE(p, q)</text>
-            <text x="420" y="180" text-anchor="middle" class="d-muted">训练只能压缩橙色：让 q 靠近 p。q 越离谱，橙色越长</text>
+          <svg viewBox="0 0 840 240" role="img" aria-label="交叉熵等于熵加KL">
+            <text x="420" y="28" text-anchor="middle" class="d-title">交叉熵 = 熵（底座）+ KL（猜错多付的钱）</text>
+            <rect x="48" y="56" width="360" height="88" rx="14" class="d-box-blue" />
+            <text x="228" y="88" text-anchor="middle" class="d-tag-blue">H(p)</text>
+            <text x="228" y="110" text-anchor="middle" class="d-muted">真分布本身的平均不确定性</text>
+            <text x="228" y="128" text-anchor="middle" class="d-muted">（已知 p 时的最短平均码长）</text>
+            <rect x="408" y="56" width="220" height="88" rx="14" class="d-box-orange" />
+            <text x="518" y="88" text-anchor="middle" class="d-tag-orange">KL(p ‖ q)</text>
+            <text x="518" y="110" text-anchor="middle" class="d-muted">q 偏离 p 的额外开销</text>
+            <text x="518" y="128" text-anchor="middle" class="d-muted">（训练能压的部分）</text>
+            <text x="700" y="108" text-anchor="middle" class="d-label">= CE(p, q)</text>
+            <text x="420" y="180" text-anchor="middle" class="d-muted">蓝色只取决于数据 p，与模型无关；训练只能压缩橙色：让 q 靠近 p</text>
+            <text x="420" y="208" text-anchor="middle" class="d-muted">q = p 时橙色消失，CE 触底到 H(p)</text>
           </svg>
-          <figcaption>交叉熵不是另起的神秘指标，就是理想码长加上猜错码本多付的钱。</figcaption>
+          <figcaption>
+            \(H(p)\) 是「数据有多难猜」的地板；KL 是「模型猜偏了」多付的钱。交叉熵 = 两者之和。
+          </figcaption>
         </figure>
 
         <h2>二、概率视角：它就是最大似然</h2>
