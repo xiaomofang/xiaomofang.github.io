@@ -19,7 +19,7 @@
     html[data-theme="night"], html[data-theme="night"] body { background: #0c0c0c; color: #ededed; color-scheme: dark; }
     html[data-theme="day"], html[data-theme="day"] body { background: #ffffff; color: #1a1a1a; color-scheme: light; }
   </style>
-  <link rel="stylesheet" href="styles.css?v=46" />
+  <link rel="stylesheet" href="styles.css?v=47" />
   <title>MOFANG's Blog</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="description" content="LLM notes — understanding, one question at a time." />
@@ -86,6 +86,7 @@
           <button class="keyword-pill" data-keyword="speculative" type="button">投机推理</button>
           <button class="keyword-pill" data-keyword="attention" type="button">Attention 加速</button>
           <button class="keyword-pill" data-keyword="inference-systems" type="button">推理框架</button>
+          <button class="keyword-pill" data-keyword="pd-disagg" type="button">PD 分离</button>
           <button class="keyword-pill" data-keyword="training" type="button">训练</button>
           <button class="keyword-pill" data-keyword="llm-gateway" type="button">LLM Gateway</button>
           <button class="keyword-pill" data-keyword="determinism" type="button">确定性</button>
@@ -96,6 +97,23 @@
 
     <section id="blog" class="section">
       <div class="post-list" id="post-list">
+        <article class="post-card" data-category="inference" data-keywords="pd-disagg inference-systems" data-date="2026-08-14" data-title="Mooncake Connector 读码（一）：PD 分离里，vLLM 到底在编排什么">
+          <a href="posts/inference/mooncake-connector-pd-control-plane.html" class="post-card-link">
+            <div class="post-meta-row">
+              <span class="post-tag">Inference</span>
+            </div>
+            <h3 class="post-title">Mooncake Connector 读码（一）：PD 分离里，vLLM 到底在编排什么</h3>
+            <p class="post-excerpt">
+              先分清 Mooncake 本体与 vLLM-Ascend Connector，再顺着 Scheduler 控制面走通一次 Prefill→Decode 交接：delay_free、kv_transfer_params，以及 Decode 侧三连。
+            </p>
+            <p class="post-card-stats">2026年8月14日 · 18 分钟 · MOFANG</p>
+          </a>
+          <div class="post-card-keywords">
+            <button class="post-keyword-chip" data-keyword="pd-disagg" type="button">PD 分离</button>
+            <button class="post-keyword-chip" data-keyword="inference-systems" type="button">推理框架</button>
+          </div>
+        </article>
+
         <article class="post-card" data-category="basic" data-keywords="training" data-date="2026-08-11" data-title="交叉熵是什么：从信息量、凸优化到 LM Loss">
           <a href="posts/basic/cross-entropy-hard-label-soft-distillation.html" class="post-card-link">
             <div class="post-meta-row">
@@ -234,6 +252,6 @@
     </span>
   </footer>
 
-  <script src="app.js?v=41"></script>
+  <script src="app.js?v=42"></script>
 </body>
 </html>

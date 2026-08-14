@@ -1,0 +1,578 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="night">
+<head>
+  <meta charset="UTF-8" />
+  <script>
+    (function () {
+      try {
+        var saved = localStorage.getItem("yichuan-theme");
+        var theme = saved || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "night" : "day");
+        document.documentElement.setAttribute("data-theme", theme);
+      } catch (e) {}
+    })();
+  </script>
+  <style>
+    html { font-size: 16px; }
+    @media (min-width: 1024px) { html { font-size: 26px; } }
+    @media (min-width: 1200px) { html { font-size: 34px; } }
+    html, body { margin: 0; min-height: 100%; }
+    html[data-theme="night"], html[data-theme="night"] body { background: #0c0c0c; color: #ededed; color-scheme: dark; }
+    html[data-theme="day"], html[data-theme="day"] body { background: #ffffff; color: #1a1a1a; color-scheme: light; }
+  </style>
+  <link rel="stylesheet" href="../../styles.css?v=47" />
+  <title>Mooncake Connector 读码（一）：PD 分离里，vLLM 到底在编排什么</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="description" content="先分清 Mooncake 本体与 vLLM-Ascend Connector，再顺着 Scheduler 控制面走通一次 Prefill→Decode 的 KV 交接：delay_free、kv_transfer_params，以及 Decode 侧三连。" />
+</head>
+<body>
+  <div class="ambient" aria-hidden="true"><span class="orb orb-a"></span><span class="orb orb-b"></span></div>
+  <canvas id="star-canvas"></canvas>
+
+  <header class="site-header">
+    <div class="header-inner">
+      <a href="../../index.html" class="logo">
+        <span class="logo-dot"></span>
+        <span class="logo-text">MOFANG</span>
+      </a>
+      <div class="header-actions">
+        <nav class="site-nav">
+          <a href="../../index.html">← Back</a>
+        </nav>
+        <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle theme">
+          <span class="icon-sun">☀️</span>
+          <span class="icon-moon">🌙</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="site-main">
+    <article class="post-page">
+      <header class="post-page-header">
+        <p class="post-page-category">Inference</p>
+        <h1 class="post-page-title">Mooncake Connector 读码（一）：PD 分离里，vLLM 到底在编排什么</h1>
+        <p class="post-lead">
+          打开 <code>mooncake_connector.py</code> 的第一件事，不是去跟 TransferEngine 的 RDMA。
+          是先问：一次请求从 Prefill 算完，到 Decode 开始拉 KV，<strong>调度器手里交换的到底是什么</strong>。
+        </p>
+        <div class="post-page-keywords" aria-label="Keywords">
+          <a class="post-keyword-chip" href="../../index.html?keyword=pd-disagg">PD 分离</a>
+          <a class="post-keyword-chip" href="../../index.html?keyword=inference-systems">推理框架</a>
+        </div>
+        <p class="post-page-meta" data-date="2026-08-14" data-author="MOFANG">2026年8月14日 · MOFANG</p>
+      </header>
+
+      <section class="post-page-content">
+        <p>
+          Prefill–Decode 分离把「算 prompt」和「逐 token 生成」拆到两套实例。
+          中间必须搬家的，是已经写好的 KV Cache。
+          很多人把这件事直接叫做「用 Mooncake」——名字没错，层级却容易混：
+          <strong>Mooncake 仓库负责把字节从一块 NPU 搬到另一块；vLLM-Ascend 的 Connector 负责决定何时搬、搬哪些 block、搬完才能释放。</strong>
+        </p>
+
+        <p>
+          本系列对着
+          <a href="https://github.com/vllm-project/vllm-ascend/blob/main/vllm_ascend/distributed/kv_transfer/kv_p2p/mooncake_connector.py" target="_blank" rel="noopener noreferrer"><code>mooncake_connector.py</code></a>
+          读。第一篇只走控制面：Scheduler 进程里的四个钩子。
+          Worker、ZMQ 握手、TransferEngine 的 <code>batch_transfer_sync_read</code>，放到后面几篇。
+        </p>
+
+        <div class="series-nav" aria-label="系列目录">
+          <p class="series-nav-kicker">Mooncake Connector 读码</p>
+          <h3>五篇怎么拆</h3>
+          <ol>
+            <li class="series-current">地图与控制面：vLLM 如何编排一次 P→D 交接</li>
+            <li class="series-soon">Worker：注册 KV 地址、start_load_kv、ZMQ 握手</li>
+            <li class="series-soon">数据面：block 切分、GQA pull、TransferEngine read</li>
+            <li class="series-soon">两条变体：Hybrid Pull 与 Layerwise Push</li>
+            <li class="series-soon">边界：<code>use_ascend_direct</code> 与 Mooncake 本体</li>
+          </ol>
+        </div>
+
+        <div class="logic-map" aria-label="文章逻辑地图">
+          <div class="map-node map-node--start">
+            <span>1</span>
+            <strong>先分三层</strong>
+            <p>vLLM 接口 · Connector 编排 · Mooncake 搬运。</p>
+          </div>
+          <div class="map-arrow">→</div>
+          <div class="map-node map-node--ar">
+            <span>2</span>
+            <strong>Prefill 交棒</strong>
+            <p><code>request_finished</code> 延迟释放，写出寻宝图。</p>
+          </div>
+          <div class="map-arrow">→</div>
+          <div class="map-node map-node--par">
+            <span>3</span>
+            <strong>Decode 三连</strong>
+            <p>匹配 token → 记待拉队列 → 打包 meta。</p>
+          </div>
+          <div class="map-arrow">→</div>
+          <div class="map-node map-node--conv">
+            <span>4</span>
+            <strong>读完能答</strong>
+            <p>delay_free 为什么存在；两个 do_remote_* 各在哪侧。</p>
+          </div>
+        </div>
+
+        <h2>一、读码前先画地图：三层，不是一个名字</h2>
+        <p>
+          开源仓库里，「Mooncake」至少出现三次，职责完全不同：
+        </p>
+
+        <table class="decision-table">
+          <thead>
+            <tr>
+              <th>层</th>
+              <th>在哪</th>
+              <th>管什么</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>vLLM 接口</td>
+              <td>上游 vLLM 的 <code>KVConnectorBase_V1</code></td>
+              <td>规定 Scheduler / Worker 各有哪些钩子。Connector 必须实现它们，才能挂进引擎生命周期。</td>
+            </tr>
+            <tr>
+              <td>Connector</td>
+              <td>vllm-ascend 的 <code>kv_p2p/mooncake_*.py</code></td>
+              <td>何时传、传哪些 block、TP/PP 怎么切、握手端口、延迟释放。本文读的就是这一层。</td>
+            </tr>
+            <tr>
+              <td>Mooncake 本体</td>
+              <td><a href="https://github.com/kvcache-ai/Mooncake" target="_blank" rel="noopener noreferrer">kvcache-ai/Mooncake</a></td>
+              <td>Transfer Engine（高速搬运）+ Store（分布式 KV 池）。vLLM / vllm-ascend <strong>不包含</strong>这份源码，运行时 <code>import mooncake.engine</code>。</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <ul class="palette-legend" aria-label="本系列配色">
+          <li><span class="palette-swatch palette-swatch--green"></span>绿：Connector / vLLM 编排（本篇主色）</li>
+          <li><span class="palette-swatch palette-swatch--blue"></span>蓝：Prefill / 生产 / 发送 / 延迟释放</li>
+          <li><span class="palette-swatch palette-swatch--orange"></span>橙：Decode / 消费 / 拉取</li>
+          <li><span class="palette-swatch palette-swatch--purple"></span>紫：Mooncake TransferEngine（本篇只标边界）</li>
+        </ul>
+
+        <figure class="diagram-figure diagram-figure--wide">
+          <svg viewBox="0 0 920 420" role="img" aria-label="vLLM 接口、Connector 与 Mooncake 本体三层关系">
+            <defs>
+              <marker id="arr-g" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+                <polygon points="0 0, 8 3, 0 6" class="d-accent" />
+              </marker>
+              <marker id="arr-p" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+                <polygon points="0 0, 8 3, 0 6" class="d-accent" fill="#c084fc" />
+              </marker>
+            </defs>
+
+            <rect x="28" y="24" width="864" height="118" rx="14" class="d-zone" />
+            <text x="48" y="52" class="d-tag">VLLM · INTERFACE</text>
+            <rect x="48" y="68" width="240" height="52" rx="10" class="d-box" />
+            <text x="168" y="90" text-anchor="middle" class="d-label">KVConnectorBase_V1</text>
+            <text x="168" y="108" text-anchor="middle" class="d-muted">Scheduler / Worker 钩子</text>
+            <rect x="310" y="68" width="250" height="52" rx="10" class="d-box" />
+            <text x="435" y="90" text-anchor="middle" class="d-label">Request 生命周期</text>
+            <text x="435" y="108" text-anchor="middle" class="d-muted">alloc · finish · step</text>
+            <rect x="582" y="68" width="286" height="52" rx="10" class="d-box" />
+            <text x="725" y="90" text-anchor="middle" class="d-label">kv_transfer_params</text>
+            <text x="725" y="108" text-anchor="middle" class="d-muted">请求上携带的寻宝图</text>
+
+            <rect x="28" y="160" width="864" height="118" rx="14" class="d-zone" />
+            <text x="48" y="188" class="d-tag">VLLM-ASCEND · CONNECTOR · 本篇</text>
+            <rect x="48" y="204" width="250" height="52" rx="10" class="d-box-accent" />
+            <text x="173" y="226" text-anchor="middle" class="d-label">MooncakeConnector</text>
+            <text x="173" y="244" text-anchor="middle" class="d-muted">按 role 分发</text>
+            <rect x="320" y="204" width="250" height="52" rx="10" class="d-box-blue" />
+            <text x="445" y="226" text-anchor="middle" class="d-label">Scheduler</text>
+            <text x="445" y="244" text-anchor="middle" class="d-muted">finished / matched / meta</text>
+            <rect x="592" y="204" width="276" height="52" rx="10" class="d-box-orange" />
+            <text x="730" y="226" text-anchor="middle" class="d-label">Worker</text>
+            <text x="730" y="244" text-anchor="middle" class="d-muted">register / start_load_kv</text>
+
+            <rect x="28" y="296" width="864" height="100" rx="14" class="d-zone-purple" />
+            <text x="48" y="324" class="d-tag-purple">MOONCAKE · 独立仓库 · 不在 vllm-ascend 源码树</text>
+            <rect x="48" y="340" width="390" height="36" rx="8" class="d-box-purple" />
+            <text x="243" y="364" text-anchor="middle" class="d-label">TransferEngine</text>
+            <rect x="460" y="340" width="408" height="36" rx="8" class="d-box-purple" />
+            <text x="664" y="364" text-anchor="middle" class="d-label">Store / 分层 KV 池</text>
+          </svg>
+          <figcaption>
+            三层叠在一起才构成「用 Mooncake 做 PD」。读 <code>mooncake_connector.py</code> 只能吃透中间那一层；紫色那一层要另 clone
+            <a href="https://github.com/kvcache-ai/Mooncake" target="_blank" rel="noopener noreferrer">kvcache-ai/Mooncake</a>。
+          </figcaption>
+        </figure>
+
+        <div class="callout">
+          <strong>官方镜像会预装 Mooncake，不等于源码合进了 vllm-ascend。</strong>
+          Connector 里真正碰到本体的地方，目前几乎只有
+          <code>from mooncake.engine import TransferEngine</code>
+          以及 <code>initialize(..., "P2PHANDSHAKE", "ascend", ...)</code>。
+        </div>
+
+        <h2>二、门面类：一个进程只活一半</h2>
+        <p>
+          <code>MooncakeConnector</code> 几乎不做业务，只按 <code>KVConnectorRole</code> 分叉。
+          这是读后面所有方法前必须钉死的事实：<strong>Scheduler 进程没有 Worker 对象，Worker 进程没有 Scheduler 对象。</strong>
+        </p>
+
+        <pre><code class="language-python">class MooncakeConnector(KVConnectorBase_V1, SupportsHMA):
+    def __init__(self, vllm_config, role, kv_cache_config=None):
+        ...
+        if role == KVConnectorRole.SCHEDULER:
+            self.connector_scheduler = MooncakeConnectorScheduler(...)
+            self.connector_worker = None
+        elif role == KVConnectorRole.WORKER:
+            self.connector_scheduler = None
+            self.connector_worker = MooncakeConnectorWorker(...)</code></pre>
+        <p class="code-source">来源：vllm-ascend · <code>mooncake_connector.py</code> · <code>MooncakeConnector.__init__</code>（约 1453 行）</p>
+
+        <p>
+          门面上的 Scheduler 方法全部 <code>assert self.connector_scheduler is not None</code> 再转发；
+          Worker 方法同理。Pull 模型下，<code>save_kv_layer</code> / <code>wait_for_layer_load</code> 是空实现——
+          KV 不是按层推的。那是第四篇 Layerwise 的故事。
+        </p>
+
+        <figure class="diagram-figure">
+          <svg viewBox="0 0 720 260" role="img" aria-label="Scheduler 进程与 Worker 进程各持一半对象">
+            <rect x="30" y="28" width="300" height="200" rx="14" class="d-zone-blue" />
+            <text x="50" y="56" class="d-tag-blue">PREFILL / DECODE · SCHEDULER 进程</text>
+            <rect x="58" y="84" width="244" height="56" rx="10" class="d-box-accent" />
+            <text x="180" y="108" text-anchor="middle" class="d-label">connector_scheduler</text>
+            <text x="180" y="126" text-anchor="middle" class="d-muted">有</text>
+            <rect x="58" y="154" width="244" height="48" rx="10" class="d-box" />
+            <text x="180" y="184" text-anchor="middle" class="d-muted">connector_worker = None</text>
+
+            <rect x="390" y="28" width="300" height="200" rx="14" class="d-zone-orange" />
+            <text x="410" y="56" class="d-tag-orange">PREFILL / DECODE · WORKER 进程</text>
+            <rect x="418" y="84" width="244" height="48" rx="10" class="d-box" />
+            <text x="540" y="114" text-anchor="middle" class="d-muted">connector_scheduler = None</text>
+            <rect x="418" y="146" width="244" height="56" rx="10" class="d-box-orange" />
+            <text x="540" y="170" text-anchor="middle" class="d-label">connector_worker</text>
+            <text x="540" y="188" text-anchor="middle" class="d-muted">有</text>
+          </svg>
+          <figcaption>
+            同一套类名，两边实例化的对象不同。排查「为什么 start_load_kv 没跑」时，先确认你看的是 Worker 进程日志。
+          </figcaption>
+        </figure>
+
+        <h2>三、一次请求的控制面时间线</h2>
+        <p>
+          先把整条链画出来。本篇只走到橙色框里的「打包 meta」；紫色的 TE read 下一篇才展开。
+        </p>
+
+        <figure class="diagram-figure diagram-figure--wide">
+          <svg viewBox="0 0 920 430" role="img" aria-label="Prefill 交棒到 Decode 三连的控制面时序">
+            <defs>
+              <marker id="arr-b2" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+                <polygon points="0 0, 8 3, 0 6" class="d-accent-blue" />
+              </marker>
+              <marker id="arr-o2" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+                <polygon points="0 0, 8 3, 0 6" class="d-accent-orange" />
+              </marker>
+            </defs>
+
+            <rect x="24" y="20" width="872" height="150" rx="14" class="d-zone-blue" />
+            <text x="44" y="48" class="d-tag-blue">PREFILL SCHEDULER</text>
+            <rect x="48" y="68" width="200" height="70" rx="10" class="d-box-blue" />
+            <text x="148" y="96" text-anchor="middle" class="d-label">prompt 算完</text>
+            <text x="148" y="116" text-anchor="middle" class="d-muted">FINISHED_LENGTH_CAPPED</text>
+            <line x1="248" y1="103" x2="292" y2="103" class="d-arrow-blue" marker-end="url(#arr-b2)" />
+            <rect x="296" y="68" width="250" height="70" rx="10" class="d-box-blue" />
+            <text x="421" y="96" text-anchor="middle" class="d-label">request_finished</text>
+            <text x="421" y="116" text-anchor="middle" class="d-muted">delay_free = True</text>
+            <line x1="546" y1="103" x2="590" y2="103" class="d-arrow-blue" marker-end="url(#arr-b2)" />
+            <rect x="594" y="68" width="278" height="70" rx="10" class="d-box-accent" />
+            <text x="733" y="90" text-anchor="middle" class="d-label">kv_transfer_params</text>
+            <text x="733" y="110" text-anchor="middle" class="d-muted">do_remote_prefill=True</text>
+            <text x="733" y="126" text-anchor="middle" class="d-muted">host / port / block_ids</text>
+
+            <rect x="24" y="190" width="872" height="210" rx="14" class="d-zone-orange" />
+            <text x="44" y="218" class="d-tag-orange">DECODE SCHEDULER</text>
+            <rect x="48" y="238" width="200" height="80" rx="10" class="d-box-orange" />
+            <text x="148" y="266" text-anchor="middle" class="d-label">① matched tokens</text>
+            <text x="148" y="286" text-anchor="middle" class="d-muted">拉多少 · 异步 True</text>
+            <line x1="248" y1="278" x2="292" y2="278" class="d-arrow-orange" marker-end="url(#arr-o2)" />
+            <rect x="296" y="238" width="250" height="80" rx="10" class="d-box-orange" />
+            <text x="421" y="266" text-anchor="middle" class="d-label">② after_alloc</text>
+            <text x="421" y="286" text-anchor="middle" class="d-muted">写入 _reqs_need_recv</text>
+            <line x1="546" y1="278" x2="590" y2="278" class="d-arrow-orange" marker-end="url(#arr-o2)" />
+            <rect x="594" y="238" width="278" height="80" rx="10" class="d-box-accent" />
+            <text x="733" y="266" text-anchor="middle" class="d-label">③ build_connector_meta</text>
+            <text x="733" y="286" text-anchor="middle" class="d-muted">ReqMeta → Worker</text>
+            <text x="460" y="360" text-anchor="middle" class="d-muted">上游把 Prefill 返回的 dict 挂到 Decode 侧 request.kv_transfer_params</text>
+            <text x="460" y="382" text-anchor="middle" class="d-muted">Worker.start_load_kv 读的就是这份 meta · 本篇到此停</text>
+          </svg>
+          <figcaption>
+            控制面是「纸面交接」：Prefill 写出地址与 block 列表，Decode 调度器把它翻译成本地待拉任务。真正的 DMA/RDMA 还没开始。
+          </figcaption>
+        </figure>
+
+        <h2>四、Prefill：<code>request_finished</code> 为什么要 delay_free</h2>
+        <p>
+          Prefill 实例上，请求带着 <code>do_remote_decode=True</code>：意思是「我只负责把 prompt 算完，生成交给别人」。
+          引擎把状态推到 <code>FINISHED_LENGTH_CAPPED</code> 时，会回调 Connector。
+        </p>
+
+        <pre><code class="language-python">if (
+    params is None
+    or not params.get("do_remote_decode")
+    or request.status != RequestStatus.FINISHED_LENGTH_CAPPED
+):
+    return False, None
+
+...
+delay_free_blocks = sum(computed_block_lens) > 0
+if delay_free_blocks:
+    self._reqs_need_send[request.request_id] = time.time()
+
+return delay_free_blocks, dict(
+    do_remote_prefill=True,
+    do_remote_decode=False,
+    remote_block_ids=computed_block_ids,
+    remote_engine_id=self.engine_id,
+    remote_request_id=request.request_id,
+    remote_host=self.side_channel_host,
+    remote_port=self.side_channel_port,
+    ...
+)</code></pre>
+        <p class="code-source">来源：vllm-ascend · <code>MooncakeConnectorScheduler.request_finished</code>（约 1848 行）</p>
+
+        <p>
+          返回值是一个二元组：<code>(要不要推迟释放 block, 传给对端的 dict)</code>。
+          两个字段要一起读：
+        </p>
+
+        <ol class="algo-steps">
+          <li class="algo-step algo-step--core">
+            <span class="algo-step-num">1</span>
+            <div class="algo-step-body">
+              <strong>delay_free = True</strong>
+              <p>
+                Prefill 的 KV 还在本地 HBM 里。Decode 还没拉。
+                若此刻按普通请求回收 block，对端读到的就是脏数据或未映射地址。
+                所以把 request_id 放进 <code>_reqs_need_send</code>，等 Worker 侧收到 <code>DONE_RECVING</code> 再放——那是第二篇的 TaskTracker。
+              </p>
+            </div>
+          </li>
+          <li class="algo-step">
+            <span class="algo-step-num">2</span>
+            <div class="algo-step-body">
+              <strong>dict 是 Decode 的寻宝图</strong>
+              <p>
+                注意标志位翻转：Prefill 侧的 <code>do_remote_decode</code> 变成 Decode 侧的 <code>do_remote_prefill=True</code>。
+                同一份物理 KV，在两边用两个相反的动词描述「你该拉我」。
+              </p>
+            </div>
+          </li>
+        </ol>
+
+        <table class="decision-table">
+          <thead>
+            <tr>
+              <th>字段</th>
+              <th>Decode 拿它做什么</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>remote_block_ids</code></td>
+              <td>远端哪些 page 有数据。可能已经按 SWA / compress / Mamba 裁过。</td>
+            </tr>
+            <tr>
+              <td><code>remote_host</code> / <code>remote_port</code></td>
+              <td>ZMQ 握手基址。真实 per-rank 端口 = 基址 + device_index。</td>
+            </tr>
+            <tr>
+              <td><code>remote_engine_id</code> / <code>remote_request_id</code></td>
+              <td>对上是哪台引擎、哪条请求，避免串单。</td>
+            </tr>
+            <tr>
+              <td><code>remote_ptp_size</code></td>
+              <td>Prefill 的 TP。Decode 用来算 GQA 要拉几份 head。</td>
+            </tr>
+            <tr>
+              <td><code>remote_multi_nodes_meta_mapping</code></td>
+              <td>跨机时，port offset → 真实 host / engine_id。</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="callout muted">
+          本篇刻意不展开 <code>_get_transfer_block_ids</code> 和 sliding-window 裁剪。
+          它们改变的是「寻宝图里有哪些 block」，不改变交接协议本身。第三篇讲数据面时再对着这些函数读。
+        </div>
+
+        <h2>五、Decode 三连：从「有一张图」到「本步要拉」</h2>
+        <p>
+          上游（网关 / proxy / disagg 调度）把上面那个 dict 挂到 Decode 侧的 <code>request.kv_transfer_params</code>。
+          Decode Scheduler 每个 step 按固定顺序问 Connector 三件事。
+        </p>
+
+        <h3>① <code>get_num_new_matched_tokens</code>：拉多少，而且是异步</h3>
+        <pre><code class="language-python">if params is not None and params.get("do_remote_prefill"):
+    token_ids = request.prompt_token_ids or []
+    actual = self._state_prefill_token_count(len(token_ids))
+    params["num_computed_tokens"] = num_computed_tokens
+    count = max(actual - num_computed_tokens, 0)
+    if count > 0:
+        return count, True   # True = 异步加载
+
+return 0, False</code></pre>
+        <p class="code-source">来源：<code>MooncakeConnectorScheduler.get_num_new_matched_tokens</code>（约 1752 行）</p>
+
+        <p>
+          返回的第二个布尔值是协议的关键：<strong>True 表示这些 token 的 KV 会在调度 step 之间异步灌进本地 cache</strong>，
+          引擎可以先分配 block，不必卡在传输完成。
+          若这里返回 <code>(0, False)</code>，后续两步根本不会把请求放进待拉队列。
+        </p>
+
+        <h3>② <code>update_state_after_alloc</code>：记下本地坑位</h3>
+        <p>
+          引擎已经为「外部即将填入的 token」分配了 page。
+          Connector 把「本地未哈希的 block」和远端寻宝图绑在一起，丢进 <code>_reqs_need_recv</code>。
+        </p>
+
+        <pre><code class="language-python">if params is not None and params.get("do_remote_prefill"):
+    if params.get("remote_block_ids"):
+        local_block_ids = blocks.get_unhashed_block_ids_all_groups() if num_external_tokens > 0 else []
+        local_full_block_ids = blocks.get_block_ids() if num_external_tokens > 0 else tuple()
+        self._reqs_need_recv[request.request_id] = (
+            request, local_block_ids, local_full_block_ids, num_external_tokens,
+        )
+    params["do_remote_prefill"] = False  # 每个请求只触发一次传输</code></pre>
+        <p class="code-source">来源：<code>MooncakeConnectorScheduler.update_state_after_alloc</code>（约 1790 行）</p>
+
+        <p>
+          最后一行把 <code>do_remote_prefill</code> 关掉，防止 preempt / 重调度时重复拉。
+          本地 <code>local_block_ids</code> 才是 TransferEngine 写入的 dst；远端 <code>remote_block_ids</code> 是 src。
+        </p>
+
+        <h3>③ <code>build_connector_meta</code>：本步唯一交给 Worker 的包裹</h3>
+        <p>
+          Scheduler 与 Worker 不共享 Python 对象。跨进程传递的是 <code>MooncakeConnectorMetadata</code>：
+        </p>
+
+        <pre><code class="language-python">class MooncakeConnectorMetadata(KVConnectorMetadata):
+    def __init__(self):
+        self.requests: dict[str, ReqMeta] = {}
+        self.requests_to_send: dict[str, float] = {}
+        self.reqs_in_batch: set[str] = set()</code></pre>
+        <p class="code-source">来源：<code>MooncakeConnectorMetadata</code>（约 1420 行）</p>
+
+        <p>
+          <code>build_connector_meta</code> 把 <code>_reqs_need_recv</code> 转成 <code>ReqMeta</code>，再清空队列。
+          Prefill 侧同一函数还会带上 <code>requests_to_send</code>（那些 delay_free 的时间戳），
+          让 Worker 知道「这些 block 还在等对端 ACK」。
+        </p>
+
+        <p>
+          <code>ReqMeta</code> 是控制面的终点。读它等于读「Decode Worker 开始拉之前手里已经有什么」：
+        </p>
+
+        <table class="decision-table">
+          <thead>
+            <tr>
+              <th>ReqMeta 字段</th>
+              <th>来自哪里</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>local_block_ids</code></td>
+              <td>本步 alloc 的未哈希 page（dst）</td>
+            </tr>
+            <tr>
+              <td><code>remote_block_ids</code> 及 host/port/engine</td>
+              <td>Prefill <code>request_finished</code> 写下的寻宝图（src）</td>
+            </tr>
+            <tr>
+              <td><code>num_external_tokens</code></td>
+              <td>① 算出来、引擎据此 alloc 的外部 token 数</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="callout">
+          <strong>读码检查点（本篇过关题）：</strong>
+          Prefill 为什么必须 delay_free？
+          <code>do_remote_decode</code> 和 <code>do_remote_prefill</code> 分别出现在哪一侧？
+          Scheduler 和 Worker 之间靠什么结构传递「拉谁、拉哪些 block」？
+        </div>
+
+        <h2>六、本篇故意没讲什么</h2>
+        <p>
+          控制面走通之后，下一跳是 Worker：把 KV tensor 的 <code>data_ptr</code> 注册进 TransferEngine，
+          再按 <code>ReqMeta</code> 向 Prefill 的 handshake 端口要元数据，最后 <code>batch_transfer_sync_read</code>。
+          那已经是数据面。把它们塞进第一篇，时序会糊成一团。
+        </p>
+
+        <ul class="note-list">
+          <li><strong>第二篇</strong> · <code>register_kv_caches</code>、SendingThread 的 ZMQ <code>GET_META</code> / <code>DONE_RECVING</code>、<code>start_load_kv</code> 如何拆成多次 pull。</li>
+          <li><strong>第三篇</strong> · 连续 block 合并、GQA head 切片、PP layer 范围、传完后的 cat / NZ reformat。</li>
+          <li><strong>第四篇</strong> · Hybrid 是精简 Pull；Layerwise 把方向反过来，变成每层 <code>save_kv_layer</code> 推送。</li>
+          <li><strong>第五篇</strong> · 配置里的 <code>use_ascend_direct</code> 在 vllm-ascend 中没有分支；真正生效的是 Mooncake 编译选项与 <code>protocol=ascend</code>。</li>
+        </ul>
+
+        <div class="essay-ending">
+          浅层说法是「用 Mooncake 传 KV」；深层说法是：vLLM 先在纸上完成一次延迟释放的交接，Mooncake 只负责按这张纸搬运。
+        </div>
+
+        <section class="references-section" aria-label="参考与扩展阅读">
+          <h2>参考与扩展阅读</h2>
+          <ol class="reference-list">
+            <li>
+              <a href="https://github.com/vllm-project/vllm-ascend/blob/main/vllm_ascend/distributed/kv_transfer/kv_p2p/mooncake_connector.py" target="_blank" rel="noopener noreferrer">
+                vllm-ascend · mooncake_connector.py
+              </a>
+              <span>本篇原码出处。建议从 <code>MooncakeConnector</code>、<code>request_finished</code>、Decode 三连按行号对照。</span>
+            </li>
+            <li>
+              <a href="https://github.com/kvcache-ai/Mooncake" target="_blank" rel="noopener noreferrer">
+                kvcache-ai/Mooncake
+              </a>
+              <span>Transfer Engine 与 Store 本体。不在 vLLM / vllm-ascend 源码树内。</span>
+            </li>
+            <li>
+              <a href="https://kvcache-ai.github.io/Mooncake/" target="_blank" rel="noopener noreferrer">
+                Mooncake 文档 · KVCache-centric Disaggregated Architecture
+              </a>
+              <span>架构原说明：P/D 分离与以 KV 为中心的调度。用来对照「本体解决什么、Connector 解决什么」。</span>
+            </li>
+            <li>
+              <a href="https://docs.vllm.ai/projects/ascend/en/latest/tutorials/features/pd_disaggregation_mooncake_multi_node.html" target="_blank" rel="noopener noreferrer">
+                vLLM-Ascend · PD disaggregation with Mooncake
+              </a>
+              <span>部署原说明：<code>-DUSE_ASCEND_DIRECT=ON</code>、kv_port 与 AscendDirect 端口区间。第五篇会回到这里。</span>
+            </li>
+          </ol>
+        </section>
+      </section>
+
+      <section class="comments-section" id="comments" aria-label="Discussion">
+        <div class="comments-header">
+          <h2>Discussion</h2>
+        </div>
+        <div id="utterances-container" class="utterances-container"></div>
+        <noscript>请启用 JavaScript 后查看评论区。</noscript>
+      </section>
+    </article>
+  </main>
+
+  <footer class="site-footer">
+    <span class="footer-credit">
+      <span class="footer-prefix">© 2026 by</span>
+      <a href="../../index.html" class="footer-brand">
+        <span class="brand-mascot-frame brand-mascot-frame--inline" aria-hidden="true">
+          <picture>
+            <source srcset="../../assets/avatar-mascot.webp" type="image/webp" />
+            <img src="../../assets/avatar-mascot.png" alt="" class="brand-mascot" width="27" height="27" decoding="async" />
+          </picture>
+        </span>
+        <span>MOFANG</span>
+      </a>
+    </span>
+  </footer>
+
+  <script src="../../app.js?v=42"></script>
+</body>
+</html>

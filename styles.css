@@ -1130,6 +1130,14 @@ body {
   opacity: 0.7;
 }
 
+.diagram-figure .d-zone-purple {
+  fill: color-mix(in srgb, var(--hue-purple) 6%, transparent);
+  stroke: var(--hue-purple);
+  stroke-width: 1.5;
+  stroke-dasharray: 6 4;
+  opacity: 0.7;
+}
+
 .diagram-figure .d-tag-blue {
   fill: var(--hue-blue);
   font-size: 11px;
@@ -1160,6 +1168,10 @@ body {
 
 .diagram-figure .d-accent-orange {
   fill: var(--hue-orange);
+}
+
+.diagram-figure .d-accent-purple {
+  fill: var(--hue-purple);
 }
 
 .diagram-figure .d-arrow-blue {
@@ -1510,6 +1522,95 @@ body {
   line-height: 1.65;
   color: var(--text);
 }
+
+.series-nav {
+  margin: 22px 0 28px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-muted);
+  padding: 16px 18px 18px;
+}
+
+.series-nav-kicker {
+  margin: 0 0 6px;
+  color: var(--accent);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.series-nav h3 {
+  margin: 0 0 12px;
+  color: var(--text);
+  font-family: var(--font-serif);
+  font-size: 1.05rem;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.series-nav ol {
+  margin: 0;
+  padding-left: 1.2em;
+  color: var(--text-soft);
+  font-size: 0.88rem;
+  line-height: 1.7;
+}
+
+.series-nav li + li {
+  margin-top: 4px;
+}
+
+.series-nav .series-current {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.series-nav .series-current::after {
+  content: " · 本篇";
+  color: var(--accent);
+  font-weight: 500;
+}
+
+.series-nav .series-soon {
+  color: var(--text-faint);
+}
+
+.code-source {
+  margin: -8px 0 22px;
+  color: var(--text-faint);
+  font-size: 0.78rem;
+  letter-spacing: 0.01em;
+}
+
+.palette-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  margin: 8px 0 22px;
+  padding: 0;
+  list-style: none;
+}
+
+.palette-legend li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-soft);
+  font-size: 0.82rem;
+}
+
+.palette-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  flex: 0 0 auto;
+}
+
+.palette-swatch--green { background: var(--accent); }
+.palette-swatch--blue { background: var(--hue-blue); }
+.palette-swatch--orange { background: var(--hue-orange); }
+.palette-swatch--purple { background: var(--hue-purple); }
 
 .comments-section {
   margin-top: 42px;
