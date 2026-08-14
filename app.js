@@ -10,6 +10,7 @@
     attention: "Attention 加速",
     "inference-systems": "推理框架",
     "pd-disagg": "PD 分离",
+    mooncake: "Mooncake",
     training: "训练",
     "llm-gateway": "LLM Gateway",
     determinism: "确定性",
