@@ -19,7 +19,7 @@
     html[data-theme="night"], html[data-theme="night"] body { background: #0c0c0c; color: #ededed; color-scheme: dark; }
     html[data-theme="day"], html[data-theme="day"] body { background: #ffffff; color: #1a1a1a; color-scheme: light; }
   </style>
-  <link rel="stylesheet" href="../../styles.css?v=57" />
+  <link rel="stylesheet" href="../../styles.css?v=58" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous" />
   <title>交叉熵是什么：从信息量、凸优化到 LM Loss</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
@@ -62,7 +62,7 @@
         <div class="post-page-keywords" aria-label="Keywords">
           <a class="post-keyword-chip" href="../../index.html?keyword=training">训练</a>
         </div>
-        <p class="post-page-meta" data-date="2026-08-11" data-author="MOFANG" data-minutes="35">2026年8月11日 · MOFANG</p>
+        <p class="post-page-meta" data-date="2026-08-11" data-author="MOFANG" data-minutes="40">2026年8月11日 · MOFANG</p>
       </header>
 
       <section class="post-page-content">
@@ -260,25 +260,39 @@
           \]
         </div>
         <p>
-          右边每一项都是「真词那一格的 \(-\log q(y)\)」——也就是把完整 CE 里的 \(p\) 换成
-          「只有真词为 1、其余为 0」的尖峰后再求和，只剩一项。
-          所以：<strong>最大化似然 = 最小化这种「只盯真词」的交叉熵</strong>。
-          （第三节会正式叫它<strong>硬标签</strong>；若标签是教师吐出的整份 \(p\)，则叫软蒸馏——同一条 CE，标签不同。）
+          右边每一项都是「真词那一格的 \(-\log q(y)\)」。
+          这看起来像只盯一个词，但有两层含义要分开：
+        </p>
+        <ul>
+          <li>
+            <strong>单条样本内</strong>：模型仍然先对<strong>整个词表</strong>产出一份 \(q\)（和为 1）；公式只把真词 \(y\) 那一格拿出来算 \(-\log q(y)\)。
+            其它词不出现在这一项的书写里，却通过 Softmax 分母影响着 \(q(y)\)。
+          </li>
+          <li>
+            <strong>多条样本间</strong>：训练最小化的是平均值
+            \(L_{\mathrm{train}}=\frac1N\sum_n-\log q_\theta(y_n\mid x_n)\)。
+            语料里会出现鸡、鸭、cats、to… 各种真词；平均是对<strong>整个训练集上的许多位置</strong>，不是「只优化某一个单词到局部最优」。
+            一条样本的 \(L_n\) 只是总目标里的一项贡献。
+          </li>
+        </ul>
+        <p>
+          所以：<strong>最大化似然 = 最小化这种「只盯真词那一格」的交叉熵（再对数据平均）</strong>。
+          （第三节正式叫<strong>硬标签</strong>；若标签是教师整份 \(p\)，叫软蒸馏——同一条 CE，标签不同。）
         </p>
         <p>
           若把 \(N\) 次「真词」看成对未知 \(p\) 的经验分布 \(\hat p\)（哪个词出现几次就占几分），
-          上面的平均正好是 \(\mathrm{CE}(\hat p,q)\)。
+          上面的平均正好是 \(\mathrm{CE}(\hat p,q)\)。真 \(p\) 通常不可得，训练用的就是这份经验代理。
         </p>
         <p>
           还有一块没交代：公式里的 \(q(y)\) 从哪来？
-          网络不会直接吐出合法概率。语言模型最后一层（LM head）对词表每个词先打一个分 \(z_i\)，叫 <strong>logit</strong>。
-          这个分是<strong>无界</strong>的：\(z_i\in\mathbb{R}\)，可正可负、可很大可很小——
+          网络不会直接吐出合法概率。语言模型最后一层（LM head）对词表每个词先打一个分 \(z_i\)，叫 <strong>logit</strong>
+          （这里就是「分数」的意思：未归一化的实数分）。
+          这个分是<strong>无界</strong>的：\(z_i\in\mathbb{R}\)，可正可负——
           <strong>不必</strong>落在 \([0,1]\)，也<strong>不必</strong>加起来等于 1。
-          它只表示「模型觉得这个词有多强」的相对高低，还不是概率。
         </p>
         <p>
           交叉熵 / 似然要的却是概率 \(q\)：\(q_i&gt;0\) 且 \(\sum_i q_i=1\)。
-          所以要把无界的 \(z\) 压成合法分布，最常用的就是 Softmax（指数族 / Gibbs 分布）：
+          所以要把无界的 \(z\) 压成合法分布，最常用的就是 Softmax：
         </p>
         <div class="math-block" aria-label="softmax">
           \[
@@ -286,26 +300,8 @@
           \]
         </div>
         <p>
-          指数 \(e^{z_i}\) 先把任意实数变成正数，再除以总和做归一化——于是 \(q_i&gt;0\) 且 \(\sum q_i=1\)。
-          \(z_i\) 越大，对应词的概率越高；\(z\) 整体加减同一个常数，\(q\) 不变（只比相对高低）。
-        </p>
-        <p>
-          这里先埋一个后文（§4.2）会用到的好处，读到可以回头对照。
-          先定记号：真词下标是 \(y\)，<strong>\(e_y\)</strong> 是 one-hot 向量——第 \(y\) 维为 1，其余为 0
-         （例如词表 5 个词、真词是第 0 个，则 \(e_y=(1,0,0,0,0)\)）。
-          训练反传时真正更新的是 logits \(z\)（无界分数）。损失 \(L=-\log q_y\)，\(q=\mathrm{softmax}(z)\)。
-          链式法则之后有干净结果：
-        </p>
-        <div class="math-block" aria-label="grad-preview">
-          \[
-            \nabla_z L = q-e_y
-          \]
-        </div>
-        <p>
-          推导骨架（细节见 §4.2）：Softmax 的雅可比是 \(\partial q_i/\partial z_j=q_i(\delta_{ij}-q_j)\)；
-          再对 \(L=-\log q_y\) 求 \(\partial L/\partial z_j\)，交叉项消掉后只剩 \(q_j-[j=y]\)，写成向量就是 \(q-e_y\)。
-          人话：真词维 \(q_y-1\)（负 → 更新后抬高 \(z_y\)），其它维 \(q_i\)（正 → 压低错词）。
-          反过来说：若事先要求「损失对 \(z\) 的梯度必须是 \(q-e_y\)」，能配上的激活几乎只能是 Softmax。
+          指数先把任意实数变正，再除以总和归一化。\(z_i\) 越大，对应词概率越高。
+          Softmax + 硬标签 CE 还有一个后文（§4.2）会展开的好处：对 \(z\) 的梯度恰好是 \(q-e_y\)（预测概率减 one-hot），更新方向特别干净。
         </p>
 
         <h2>三、手算一遍</h2>
@@ -440,6 +436,17 @@
         <p>
           所以：<strong>单条 = 一个 one-hot → 一项 \(-\log q_y\)；多条 = 多次这样算，再平均</strong>。
           平均得多了，就在用采样逼近「若把所有可能下一词的真实频率摊开」时的完整 \(\mathrm{CE}(p,q)\)。
+          这不是「每个词各自找局部最优」：优化器最小化的是<strong>训练集上的平均损失</strong>；单条只是总目标的一项。
+          （SGD 每次只用一个 batch，所以路径有噪声，但目标仍是整体经验风险，不是单独某个词。）
+        </p>
+        <p>
+          <strong>训练 vs 测试，别搞混两份 \(q\)。</strong>
+          评测时<strong>不是</strong> \(\mathrm{CE}(q_{\mathrm{train}},q_{\mathrm{test}})\)，也不是「训练 \(q\) 去 log 测试 \(q\)」。
+          正确做法是：参数 \(\theta\) 固定后，在测试集样本 \((x_m,y_m)\) 上再算
+          \(L_{\mathrm{test}}=\frac1M\sum_m-\log q_\theta(y_m\mid x_m)\)。
+          标签仍是测试集真词；\(q_\theta\) 仍是<strong>同一个模型</strong>的预测。
+          \(L_{\mathrm{test}}\) 越小越好；常和 \(L_{\mathrm{train}}\) 对比看是否过拟合。
+          一般<strong>不</strong>拿去和未知的真 \(H(p)\) 比大小——真熵算不出，也没有「差多少算合格」的通用阈值。
         </p>
 
         <h3>3.3 软蒸馏：一次对齐整座山</h3>
@@ -514,23 +521,51 @@
 
         <h3>4.2 凸优化：在 logits 上看，CE 是「干净的碗」</h3>
         <p>
-          网络最后一层给出 \(z\in\mathbb{R}^{|V|}\)，再 Softmax 成 \(q\)。我们真正拿去给 Adam 的，是 \(L\) 对 \(z\) 的梯度。
-          记真类下标为 \(y\)，\(e_y\) 为对应 one-hot。Softmax + 硬标签 CE 有著名结论：
+          回顾链路：隐藏状态经 LM head（一组可学习权重，例如 \(z=Wh+b\)）得到 logits \(z\)，
+          Softmax 成 \(q\)，再算损失 \(L\)。
+          <strong>logit</strong> 就是前面说的无界分数；<strong>权重</strong>是网络参数（矩阵 \(W\)、偏置 \(b\) 等），不是 \(z\) 本身。
+          反传时：先得到 \(L\) 对 \(z\) 的梯度（「这一层输出该怎么拧」），再传到 \(W,b\) 以及更前面的层去改参数。
         </p>
-        <div class="math-block" aria-label="grad">
+        <p>
+          一条硬标签样本的损失是 \(L=-\log q_y\)（batch 训练时再对多条平均；下面先看单条，梯度同形）。
+          记真类下标为 \(y\)，\(e_y\) 为对应 one-hot。把 Softmax 代入并化简：
+        </p>
+        <div class="math-block" aria-label="nll-lse">
           \[
-            \nabla_z\bigl(-\log q_y\bigr)=q-e_y
+            L=-\log q_y=-z_y+\log\sum_k e^{z_k}
           \]
         </div>
         <p>
-          简要推导：令 \(s=\sum_k e^{z_k}\)，则 \(q_i=e^{z_i}/s\)。
-          \(\partial q_i/\partial z_j = q_i(\delta_{ij}-q_j)\)。
-          \(L=-\log q_y=-\,z_y+\log s\)，于是
-          \(\partial L/\partial z_j = -\delta_{jy}+q_j\)，即向量形式 \(q-e_y\)。
+          只有第一项 \(-z_y\) <strong>显式</strong>写出了真类那个 logit；第二项 LogSumExp 里每个 \(z_k\) 都进求和。
+          \(z_j\) 表示任意第 \(j\) 维分数；当 \(j=y\) 时就是 \(z_y\)。
         </p>
         <p>
-          含义直白：把真类概率往上抬，把其它类往下压；偏差多大，梯度就多大。只有 \(q=e_y\) 时梯度为零。
-          这就是第二节预告的「干净梯度」：不用再乘一堆奇怪系数，误差本身就是更新方向。
+          对 \(z_j\) 求导时用到 Kronecker \(\delta_{jy}\)（克罗内克符号）：\(j=y\) 时为 1，否则为 0——就是「是不是真类」的开关。
+          Softmax + 硬标签 CE 的结论是：
+        </p>
+        <div class="math-block" aria-label="grad">
+          \[
+            \frac{\partial L}{\partial z_j}=q_j-\delta_{jy}
+            \quad\Longleftrightarrow\quad
+            \nabla_z L=q-e_y
+          \]
+        </div>
+        <p>
+          简要推导：令 \(s=\sum_k e^{z_k}\)，则 \(q_i=e^{z_i}/s\)，且 \(L=-z_y+\log s\)。
+          \(\partial L/\partial z_j=-\delta_{jy}+e^{z_j}/s=-\delta_{jy}+q_j\)。
+        </p>
+        <p>
+          <strong>梯度更新在说什么？</strong>
+          示意一步（学习率 \(\eta&gt;0\)）：
+          \(z_j\leftarrow z_j-\eta\,\partial L/\partial z_j\)。
+          真类：\(q_y-1&lt;0\)，减去负数 → \(z_y\) <strong>增大</strong> → Softmax 后真词概率升高；
+          错类：\(q_j&gt;0\) → \(z_j\) <strong>减小</strong> → 错词被压低。
+          实际实现里很少直接改 \(z\)，而是用 \(\nabla_z L\) 继续反传，更新产生 \(z\) 的权重 \(W,b\) 等。
+          只有 \(q=e_y\) 时梯度为零。
+        </p>
+        <p>
+          这就是「干净梯度」：误差本身就是更新方向。
+          反过来说：若事先要求损失对 \(z\) 的梯度必须长成 \(q-e_y\)，能配上的激活几乎只能是 Softmax——所以 Softmax 与 CE 常成对出现。
         </p>
         <p>
           再看 Hessian。Softmax 的雅可比是 \(\mathrm{diag}(q)-qq^\top\)（半正定），CE 对 \(z\) 的二阶导就是它。
