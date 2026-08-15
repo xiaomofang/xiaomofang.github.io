@@ -19,7 +19,7 @@
     html[data-theme="night"], html[data-theme="night"] body { background: #0c0c0c; color: #ededed; color-scheme: dark; }
     html[data-theme="day"], html[data-theme="day"] body { background: #ffffff; color: #1a1a1a; color-scheme: light; }
   </style>
-  <link rel="stylesheet" href="../../styles.css?v=61" />
+  <link rel="stylesheet" href="../../styles.css?v=62" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous" />
   <title>交叉熵是什么：从信息量、凸优化到 LM Loss</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
@@ -771,6 +771,12 @@ soft = -(p * F.log_softmax(logits, dim=-1)).sum(-1).mean()  # 软 CE(p, q)
                 《除了交叉熵，LM Loss还有什么选择？》（科学空间，2026-08-09）
               </a>
               <span>本文第四节的底本：恰当评分、凸性、Fenchel–Young 与对偶激活。</span>
+            </li>
+            <li>
+              <a href="https://zhuanlan.zhihu.com/p/1950257135775642370" target="_blank" rel="noopener noreferrer">
+                知乎 · KL 散度详解
+              </a>
+              <span>相对熵 / KL 的展开说明与图示，可作本节旁注的延伸阅读。</span>
             </li>
             <li>
               <a href="https://www.vectorexplore.com/tech/loss-functions/cross-entropy/" target="_blank" rel="noopener noreferrer">
