@@ -19,7 +19,7 @@
     html[data-theme="night"], html[data-theme="night"] body { background: #0c0c0c; color: #ededed; color-scheme: dark; }
     html[data-theme="day"], html[data-theme="day"] body { background: #ffffff; color: #1a1a1a; color-scheme: light; }
   </style>
-  <link rel="stylesheet" href="../../styles.css?v=64" />
+  <link rel="stylesheet" href="../../styles.css?v=65" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous" />
   <title>交叉熵是什么：从信息量、凸优化到 LM Loss</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
@@ -536,15 +536,24 @@
         </p>
         <p>
           一条硬标签样本的损失是 \(L=-\log q_y\)（batch 训练时再对多条平均；下面先看单条，梯度同形）。
-          记真类下标为 \(y\)，\(e_y\) 为对应 one-hot。把 Softmax 代入并化简：
+          记真类下标为 \(y\)，\(e_y\) 为对应 one-hot。由 Softmax
+          \(q_y=e^{z_y}/\sum_k e^{z_k}\)，代入并化简：
         </p>
         <div class="math-block" aria-label="nll-lse">
           \[
-            L=-\log q_y=-z_y+\log\sum_k e^{z_k}
+            \begin{aligned}
+            L
+            &= -\log q_y \\
+            &= -\log\left(\frac{e^{z_y}}{\sum_k e^{z_k}}\right) \\
+            &= -\bigl(\log e^{z_y}-\log\sum_k e^{z_k}\bigr) \\
+            &= -z_y+\log\sum_k e^{z_k}
+            \end{aligned}
           \]
         </div>
         <p>
-          只有第一项 \(-z_y\) <strong>显式</strong>写出了真类那个 logit；第二项 LogSumExp 里每个 \(z_k\) 都进求和。
+          中间用了 \(\log(a/b)=\log a-\log b\) 以及 \(\log e^{z_y}=z_y\)。
+          第二项常记作 \(\mathrm{LogSumExp}(z)\)。
+          只有第一项 \(-z_y\) <strong>显式</strong>写出了真类那个 logit；LogSumExp 里每个 \(z_k\) 都进求和。
           \(z_j\) 表示任意第 \(j\) 维分数；当 \(j=y\) 时就是 \(z_y\)。
         </p>
         <p>
