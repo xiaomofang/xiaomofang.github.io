@@ -753,8 +753,9 @@ soft = -(p * F.log_softmax(logits, dim=-1)).sum(-1).mean()  # 软 CE(p, q)
 
         <h2>六、再回到 EAGLE</h2>
         <p>
-          EAGLE-3 的 token 损失就是上面的 CE（硬或软看脚本）。TTT 模拟约 5 步，不是把 5 个位置拼成一条再算，
-          而是每步各自一份 \(q\)、各自一次 CE，再求和。接受率是推理指标，不是这个 sum。
+          EAGLE-3 的 token 损失就是上面的交叉熵（硬标签或软蒸馏，以训练脚本为准）。
+          TTT 模拟约 5 步：不是把 5 个位置拼成一条再算一次 CE，而是每步各自产出一份 \(q\)、各自计算一次 CE，再对这几步求和。
+          这个求和后的 CE（记作 \(L_{\mathrm{token}}\)）就是 TTT 的<strong>训练目标 / 监督信号</strong>——优化器通过最小化它，让草稿在「混入自身特征 \(a\)」的多步设定下，词表分布仍尽量贴近标签。
         </p>
         <figure class="diagram-figure diagram-figure--wide">
           <svg viewBox="0 0 840 230" role="img" aria-label="TTT 多份 CE 相加">
