@@ -19,7 +19,7 @@
     html[data-theme="night"], html[data-theme="night"] body { background: #0c0c0c; color: #ededed; color-scheme: dark; }
     html[data-theme="day"], html[data-theme="day"] body { background: #ffffff; color: #1a1a1a; color-scheme: light; }
   </style>
-  <link rel="stylesheet" href="../../styles.css?v=63" />
+  <link rel="stylesheet" href="../../styles.css?v=64" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous" />
   <title>交叉熵是什么：从信息量、凸优化到 LM Loss</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
@@ -474,11 +474,11 @@
 
         <h3>4.1 恰当评分：损失必须能对「一次采样」打分</h3>
         <p>
-          图像分类常是一对一；语言是一对多——「白切」后面可以是鸡、鸭、狗、羊。要学的是整份条件分布。
+          图像分类常是一对一；语言是一对多——「白切」后面可以是鸡、鸭、狗、羊。要学的是整份条件分布 \(p\)。
           可训练时语料是零散送来的：这次「白切鸡」，下次「白切鸭」，事先没有完整频率表。
         </p>
         <p>
-          因此损失必须对目标分布 \(p\) <strong>线性</strong>，才能写成「只看见一个采样 token \(i\)，打一个分 \(S(q,i)\)，再求期望」：
+          因此希望损失能写成对 \(p\) 的<strong>期望</strong>——这样「完整 \(p\) 下的总损失」才等于「单次采样分数」的平均：
         </p>
         <div class="math-block" aria-label="proper">
           \[
@@ -486,6 +486,22 @@
             \quad p=\arg\min_q L(p,q)
           \]
         </div>
+        <p>
+          左边 \(\sum_i p_i S(q,i)\) 是线性组合；右边是期望。两者等价，当且仅当 \(L(\,\cdot\,,q)\) 对 \(p\) <strong>线性</strong>
+          （固定 \(q\) 时，\(L(ap^{(1)}+(1-a)p^{(2)},q)=a\,L(p^{(1)},q)+(1-a)\,L(p^{(2)},q)\)）。
+          线性一旦成立，大数定律就接管：从语料里抽出真词 \(i_1,\ldots,i_N\)，用
+          \(\frac1N\sum_n S(q,i_n)\) 去估 \(L(p,q)\)，<strong>不必先构造完整 \(p\)</strong>。
+          硬标签交叉熵正是 \(S(q,i)=-\log q_i\) 的情形。
+        </p>
+        <aside class="aside-card" aria-label="为何非线性格局不够">
+          <p>
+            若损失对 \(p\) 非线性，单条样本通常估不出 \(L(p,q)\)。
+            例如某写法里显式出现 \(p_i/q_i\)，或必须同时拿齐所有 \(p_i\) 才能算——而训练时你手里往往只有一个 \(i\)。
+            所以「必须线性」不是审美，是为了让
+            \(L(p,q)=\mathbb{E}_{i\sim p}[S(q,i)]\)
+            成立，从而能用「一次采样 → 打分 → 再平均」。
+          </p>
+        </aside>
         <p>
           这就是<strong>恰当评分规则（Proper Scoring Rules）</strong>：诚实报出真分布时，期望分数最好。
           Total Variation \(\sum|p_i-q_i|\) 虽然直观，改写成采样形式时会出现 \(q_i/p_i\)，而 \(p_i\) 你并不知道——所以它当不了 LM Loss。
