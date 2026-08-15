@@ -127,7 +127,8 @@
           loss 用哪种对数，数值会差这个倍数，但<strong>谁大谁小、梯度方向不变</strong>——只是尺子刻度不同。
         </p>
         <p>
-          世界按 \(p\) 出牌，平均意外程度是<strong>熵</strong>：
+          世界按 \(p\) 出牌，平均意外程度是
+          <a href="https://zh.wikipedia.org/wiki/%E7%86%B5_(%E4%BF%A1%E6%81%AF%E8%AE%BA)" target="_blank" rel="noopener noreferrer">熵</a>：
         </p>
         <div class="math-block" aria-label="entropy">
           \[
@@ -146,7 +147,8 @@
         </p>
         <p>
           模型给不出真 \(p\)，只能猜一份 \(q\)。真实世界仍按 \(p\) 出现各个 \(x\)，你却用 \(-\log q(x)\) 去计量「花了多少」。
-          平均花销就是<strong>交叉熵</strong>：
+          平均花销就是
+          <a href="https://zh.wikipedia.org/wiki/%E4%BA%A4%E5%8F%89%E7%86%B5" target="_blank" rel="noopener noreferrer">交叉熵</a>：
         </p>
         <div class="math-block" aria-label="ce-def">
           \[
@@ -182,12 +184,12 @@
           <p>
             <strong>KL 散度</strong>（Kullback–Leibler / 相对熵）：衡量用 \(q\) 近似 \(p\) 多浪费的那截。
             分数是 \(\log(p/q)\)，方向不能反——\(D_{\mathrm{KL}}(p\|q)\neq D_{\mathrm{KL}}(q\|p)\)。
-            拓展：
-            <a href="https://baike.baidu.com/item/%E7%9B%B8%E5%AF%B9%E7%86%B5/4233536" target="_blank" rel="noopener noreferrer">百度百科 · 相对熵</a>。
+            索引：
+            <a href="https://zh.wikipedia.org/zh-cn/%E7%9B%B8%E5%AF%B9%E7%86%B5" target="_blank" rel="noopener noreferrer">维基百科 · 相对熵</a>。
           </p>
           <p>
             \(\ge 0\) 来自
-            <a href="https://baike.baidu.com/item/%E5%90%89%E5%B8%83%E6%96%AF%E4%B8%8D%E7%AD%89%E5%BC%8F" target="_blank" rel="noopener noreferrer">Gibbs 不等式</a>
+            <a href="https://zh.wikipedia.org/zh-cn/%E5%90%89%E5%B8%83%E6%96%AF%E4%B8%8D%E7%AD%89%E5%BC%8F" target="_blank" rel="noopener noreferrer">维基百科 · Gibbs 不等式</a>
             （等号当且仅当 \(p=q\)），也即 CE 下界是 \(H(p)\)。
           </p>
           <p class="aside-card__label">AI 里同一条 KL</p>
@@ -228,7 +230,9 @@
           上图蓝色块旁写的「最短平均码长」，是把熵换成<strong>压缩 / 通信</strong>语言来说同一件事。
           这里的<strong>码长</strong>：给每个可能出现的符号 \(x\) 编一串码（例如一串 0/1），这串有多长，就叫该符号的码长；
           平均码长 = 按真实频率 \(p(x)\) 对各个码长取期望——传一条消息平均要花多少比特（或 nat）。
-          常见的例子：Zip 压缩、哈夫曼编码——越常出现的符号，码应越短。
+          常见的例子：Zip 压缩、
+          <a href="https://zh.wikipedia.org/wiki/%E9%9C%8D%E5%A4%AB%E6%9B%BC%E7%BC%96%E7%A0%81" target="_blank" rel="noopener noreferrer">哈夫曼编码</a>
+          ——越常出现的符号，码应越短。
         </p>
         <p>
           香农定理说：若你<strong>事先知道真分布 \(p\)</strong>，并按 \(p\) 来设计码本（给 \(x\) 大约 \(-\log p(x)\) 那么长的码），
@@ -280,7 +284,8 @@
         </p>
         <p>
           交叉熵 / 似然要的却是概率 \(q\)：\(q_i&gt;0\) 且 \(\sum_i q_i=1\)。
-          所以要把无界的 \(z\) 压成合法分布，最常用的就是 Softmax：
+          所以要把无界的 \(z\) 压成合法分布，最常用的就是
+          <a href="https://zh.wikipedia.org/wiki/Softmax%E5%87%BD%E6%95%B0" target="_blank" rel="noopener noreferrer">Softmax</a>：
         </p>
         <div class="math-block" aria-label="softmax">
           \[
@@ -382,7 +387,8 @@
         <ul>
           <li>
             <strong>硬标签（hard label）</strong>：语料只告诉你「下一个词是哪个」——比如这次答案是 cats。
-            标签是尖峰：真词概率 = 1，其余 = 0。这就是 <strong>one-hot</strong>（独热编码）：一整行里只有一格是 1，其它全是 0。
+            标签是尖峰：真词概率 = 1，其余 = 0。这就是
+            <a href="https://zh.wikipedia.org/wiki/%E7%8B%AC%E7%83%AD%E7%BC%96%E7%A0%81" target="_blank" rel="noopener noreferrer">one-hot（独热编码）</a>：一整行里只有一格是 1，其它全是 0。
             注意：不是「整个训练只用一个样本」（那是 one-shot 学习，另一回事）；而是<strong>每一条样本各自一个 one-hot</strong>。
           </li>
           <li>
@@ -535,7 +541,8 @@
         </div>
         <aside class="aside-card" aria-label="Kronecker delta 符号">
           <p>
-            \(\delta_{jy}\) 读「delta j y」，全称 Kronecker delta / 克罗内克 δ：
+            \(\delta_{jy}\) 即
+            <a href="https://zh.wikipedia.org/wiki/%E5%85%8B%E7%BD%97%E5%86%85%E5%85%8B%CE%B4%E5%87%BD%E6%95%B0" target="_blank" rel="noopener noreferrer">Kronecker delta（克罗内克 δ）</a>：
             \(j=y\) 时为 1，否则为 0（与 one-hot \(e_y\) 的第 \(j\) 维相同），
             用来把「真类减 1、其它类减 0」写成一个式子。
           </p>
