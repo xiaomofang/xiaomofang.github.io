@@ -19,7 +19,7 @@
     html[data-theme="night"], html[data-theme="night"] body { background: #0c0c0c; color: #ededed; color-scheme: dark; }
     html[data-theme="day"], html[data-theme="day"] body { background: #ffffff; color: #1a1a1a; color-scheme: light; }
   </style>
-  <link rel="stylesheet" href="../../styles.css?v=66" />
+  <link rel="stylesheet" href="../../styles.css?v=67" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous" />
   <title>交叉熵是什么：从信息量、凸优化到 LM Loss</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
@@ -672,10 +672,10 @@
           <figcaption>这就是「干净」：梯度等于概率误差本身，落在 [−1, 1]，幅度自适应。</figcaption>
         </figure>
 
-        <h3>4.3 信息几何直觉：单纯形上的对偶，不是玄学</h3>
+        <h3>4.3 信息几何直觉：单纯形上的对偶</h3>
         <p>
-          不必先去读信息几何教材。需要的画面只有一张：所有词表分布住在<strong>概率单纯形</strong>
-          \(\Delta=\{q:q_i\ge 0,\sum q_i=1\}\) 上——三维时就是一个三角形，顶点是各个 one-hot。
+          不必先具备信息几何背景。只需记住：词表上所有合法分布落在<strong>概率单纯形</strong>
+          \(\Delta=\{q:q_i\ge 0,\sum q_i=1\}\) 上——三维情形是一个三角形，顶点对应各个 one-hot。
         </p>
         <p>
           KL 不是欧氏距离：它不对称，\(D_{\mathrm{KL}}(p\|q)\neq D_{\mathrm{KL}}(q\|p)\)。
@@ -688,23 +688,24 @@
           \]
         </div>
         <p>
-          几何直觉：用 \(q\) 处的切平面去近似凹/凸函数 \(\psi\)，点和切面的竖直差距就是「散度」。
-          交叉熵里多出来的 KL，正是这份差距。欧氏平方距离是 \(\psi(x)=\frac12\|x\|^2\) 生成的 Bregman——所以 Brier 是另一套几何，不是同一把尺子。
+          几何上：在 \(q\) 处用切平面逼近 \(\psi\)，点到切面的竖直差距即该散度。
+          交叉熵中多出的 KL，正是这份差距。欧氏平方距离对应 \(\psi(x)=\frac12\|x\|^2\) 的 Bregman，
+          因此 Brier 与 CE 不属于同一套几何。
         </p>
         <p>
-          后半部分用
+          进一步，
           <a href="https://en.wikipedia.org/wiki/Fenchel%27s_duality_theorem" target="_blank" rel="noopener noreferrer">Fenchel–Young</a>
-          把「评分」和「激活」锁定为一对对偶（相关：
-          <a href="https://zh.wikipedia.org/wiki/%E5%87%B8%E5%85%B1%E8%BD%AD" target="_blank" rel="noopener noreferrer">凸共轭</a>）。人话版：
+          将对 logits 的评分与激活函数结成凸对偶（参见
+          <a href="https://zh.wikipedia.org/wiki/%E5%87%B8%E5%85%B1%E8%BD%AD" target="_blank" rel="noopener noreferrer">凸共轭</a>）。推导要点如下：
         </p>
         <ul class="note-list">
-          <li>你希望 \(\nabla_z S(q,i)=q-e_i\)（梯度干净）。</li>
-          <li>这迫使存在一个凸函数 \(\Phi(z)\)，使得 \(q=\nabla\Phi(z)\)，且 \(\Phi\) 是 \(-H\) 的凸共轭：\(\Phi(z)=\max_p\,p\cdot z+H(p)\)。</li>
-          <li>取香农熵时，这个 \(\max\) 的解就是 Softmax，\(\Phi(z)=\mathrm{LogSumExp}(z)\)。</li>
-          <li>换一套 \(H\)（Tsallis 等），对偶激活就变成 Sparsemax / Entmax-\(\alpha\)：可以输出精确的零，分布更稀疏。</li>
+          <li>若要求 \(\nabla_z S(q,i)=q-e_i\)（对 \(z\) 的梯度等于概率误差），则存在凸函数 \(\Phi\)，使预测分布满足 \(q=\nabla\Phi(z)\)。</li>
+          <li>\(\Phi\) 取为 \(-H\) 的凸共轭：\(\Phi(z)=\max_p\,p\cdot z+H(p)\)。</li>
+          <li>当 \(H\) 为香农熵时，上述最大值问题的解为 Softmax，且 \(\Phi(z)=\mathrm{LogSumExp}(z)\)。</li>
+          <li>若改用其它凹熵（如 Tsallis），对偶激活变为 Sparsemax / Entmax-\(\alpha\) 等，可产生精确为零的分量，分布更稀疏。</li>
         </ul>
         <p>
-          所以 Softmax 和 CE 几乎总成对出现：<strong>一个是另一个的凸对偶</strong>。换损失往往还得换激活，预训练默认不动，原因在这里。
+          因此 Softmax 与交叉熵几乎总是成对出现：二者互为凸对偶。更换损失通常还须更换激活；预训练默认沿用 Softmax + CE，结构上缘由于此。
         </p>
 
         <figure class="diagram-figure diagram-figure--wide">
