@@ -19,7 +19,7 @@
     html[data-theme="night"], html[data-theme="night"] body { background: #0c0c0c; color: #ededed; color-scheme: dark; }
     html[data-theme="day"], html[data-theme="day"] body { background: #ffffff; color: #1a1a1a; color-scheme: light; }
   </style>
-  <link rel="stylesheet" href="../../styles.css?v=60" />
+  <link rel="stylesheet" href="../../styles.css?v=61" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous" />
   <title>交叉熵是什么：从信息量、凸优化到 LM Loss</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
@@ -652,7 +652,8 @@
         </p>
         <p>
           KL 不是欧氏距离：它不对称，\(D_{\mathrm{KL}}(p\|q)\neq D_{\mathrm{KL}}(q\|p)\)。
-          它是负熵 \(\psi(q)=\sum q_i\log q_i\) 生成的 <strong>Bregman 散度</strong>：
+          它是负熵 \(\psi(q)=\sum q_i\log q_i\) 生成的
+          <a href="https://en.wikipedia.org/wiki/Bregman_divergence" target="_blank" rel="noopener noreferrer">Bregman 散度</a>：
         </p>
         <div class="math-block" aria-label="bregman">
           \[
@@ -664,7 +665,10 @@
           交叉熵里多出来的 KL，正是这份差距。欧氏平方距离是 \(\psi(x)=\frac12\|x\|^2\) 生成的 Bregman——所以 Brier 是另一套几何，不是同一把尺子。
         </p>
         <p>
-          后半部分用 <strong>Fenchel–Young</strong> 把「评分」和「激活」锁定为一对对偶。人话版：
+          后半部分用
+          <a href="https://en.wikipedia.org/wiki/Fenchel%27s_duality_theorem" target="_blank" rel="noopener noreferrer">Fenchel–Young</a>
+          把「评分」和「激活」锁定为一对对偶（相关：
+          <a href="https://zh.wikipedia.org/wiki/%E5%87%B8%E5%85%B1%E8%BD%AD" target="_blank" rel="noopener noreferrer">凸共轭</a>）。人话版：
         </p>
         <ul class="note-list">
           <li>你希望 \(\nabla_z S(q,i)=q-e_i\)（梯度干净）。</li>
