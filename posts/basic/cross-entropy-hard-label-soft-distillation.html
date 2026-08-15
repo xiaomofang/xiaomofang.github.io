@@ -19,7 +19,7 @@
     html[data-theme="night"], html[data-theme="night"] body { background: #0c0c0c; color: #ededed; color-scheme: dark; }
     html[data-theme="day"], html[data-theme="day"] body { background: #ffffff; color: #1a1a1a; color-scheme: light; }
   </style>
-  <link rel="stylesheet" href="../../styles.css?v=56" />
+  <link rel="stylesheet" href="../../styles.css?v=57" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous" />
   <title>交叉熵是什么：从信息量、凸优化到 LM Loss</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
@@ -179,7 +179,32 @@
           \]
         </div>
         <p>
-          KL \(\ge 0\)（Gibbs 不等式），等号当且仅当 \(p=q\)。
+          \(D_{\mathrm{KL}}(p\|q)\) 就是 <strong>KL 散度</strong>（Kullback–Leibler divergence）：衡量「用 \(q\) 去近似 \(p\)」多浪费。
+          注意分数是 \(\log(p/q)\)，不是 \(\log(q/p)\)；方向不能反——KL <strong>不对称</strong>，\(D_{\mathrm{KL}}(p\|q)\neq D_{\mathrm{KL}}(q\|p)\)。
+        </p>
+        <p>
+          <strong>为什么 \(p=q\) 时 KL 一定是 0，不是 1？</strong>
+          每一项里 \(\log\frac{p(x)}{q(x)}=\log 1=0\)，整行加起来当然是 0。
+          若你手算得到 1，多半算成了别的量：例如公平抛硬币 \(p=q=(1/2,1/2)\) 时，
+          <strong>交叉熵 / 熵</strong>是 \(1\,\mathrm{bit}\)（或 \(\ln 2\approx 0.693\,\mathrm{nat}\)），但那是 \(H(p)\)，橙色 KL 仍是 0。
+          另一个常见笔误：把 \(\sum_x p(x)=1\) 当成了 KL。
+        </p>
+        <p>
+          <strong>Gibbs 不等式</strong>说的就是：对任意两个概率分布，\(D_{\mathrm{KL}}(p\|q)\ge 0\)，等号当且仅当 \(p=q\)（几乎处处）。
+          直觉来自 \(\log\) 的凹性（Jensen）：\(-\sum p\log q \ge -\sum p\log p\)，移项即 CE ≥ 熵，多出来的非负部分叫 KL。
+          这也是「交叉熵下界是熵」的严格来源。
+        </p>
+        <p>
+          <strong>AI 里常见用法（同一条 KL）：</strong>
+        </p>
+        <ul>
+          <li><strong>分类 / 语言模型</strong>：最小化 CE ≡ 固定数据时最小化 \(D_{\mathrm{KL}}(p\|q)\)，让预测分布贴标签分布。</li>
+          <li><strong>知识蒸馏</strong>：学生 \(q\) 去贴教师软标签 \(p\)，损失常是 \(\mathrm{CE}(p,q)\) 或温度缩放后的 KL。</li>
+          <li><strong>VAE</strong>：ELBO 里有 \(D_{\mathrm{KL}}(q_\phi(z|x)\|p(z))\)，约束后验别离先验太远。</li>
+          <li><strong>RLHF / 策略学习</strong>：常加 \(D_{\mathrm{KL}}(\pi\|\pi_{\mathrm{ref}})\)，防止新策略跑飞。</li>
+          <li><strong>Label smoothing</strong>：把硬 one-hot 弄软，等价于朝均匀分布掺一点，可从 CE/KL 视角理解。</li>
+        </ul>
+        <p>
           因此 \(H(p)\) 对固定数据是常数：最小化 CE ≡ 最小化 KL ≡ 让 \(q\) 去贴 \(p\)。
           \(q=p\) 时橙色为零，CE 降到下界 \(H(p)\)。
         </p>
@@ -265,13 +290,22 @@
           \(z_i\) 越大，对应词的概率越高；\(z\) 整体加减同一个常数，\(q\) 不变（只比相对高低）。
         </p>
         <p>
-          这里先埋一个后文（§4.2）会用到的好处，读到可以回头对照：
-          训练反传时，真正更新的是 logits \(z\)。若损失是硬标签交叉熵 \(-\log q_y\)，再配上 Softmax，
-          对 \(z\) 的梯度会<strong>恰好等于</strong>「预测概率 − 真标签」：
-          \(\nabla_z(-\log q_y)=q-e_y\)。
-          人话：真词那一维梯度是 \(q_y-1\)（负的，所以往上抬真词），其它维是 \(q_i\)（正的，往下压错词）。
-          反过来说：如果你<strong>事先要求</strong>「损失对 \(z\) 的梯度必须长成 \(q-e_y\) 这么干净」，
-          能配得上的激活函数几乎就只能是 Softmax——所以 Softmax 和 CE 经常成对出现，不是随便凑的。
+          这里先埋一个后文（§4.2）会用到的好处，读到可以回头对照。
+          先定记号：真词下标是 \(y\)，<strong>\(e_y\)</strong> 是 one-hot 向量——第 \(y\) 维为 1，其余为 0
+         （例如词表 5 个词、真词是第 0 个，则 \(e_y=(1,0,0,0,0)\)）。
+          训练反传时真正更新的是 logits \(z\)（无界分数）。损失 \(L=-\log q_y\)，\(q=\mathrm{softmax}(z)\)。
+          链式法则之后有干净结果：
+        </p>
+        <div class="math-block" aria-label="grad-preview">
+          \[
+            \nabla_z L = q-e_y
+          \]
+        </div>
+        <p>
+          推导骨架（细节见 §4.2）：Softmax 的雅可比是 \(\partial q_i/\partial z_j=q_i(\delta_{ij}-q_j)\)；
+          再对 \(L=-\log q_y\) 求 \(\partial L/\partial z_j\)，交叉项消掉后只剩 \(q_j-[j=y]\)，写成向量就是 \(q-e_y\)。
+          人话：真词维 \(q_y-1\)（负 → 更新后抬高 \(z_y\)），其它维 \(q_i\)（正 → 压低错词）。
+          反过来说：若事先要求「损失对 \(z\) 的梯度必须是 \(q-e_y\)」，能配上的激活几乎只能是 Softmax。
         </p>
 
         <h2>三、手算一遍</h2>
@@ -481,13 +515,19 @@
         <h3>4.2 凸优化：在 logits 上看，CE 是「干净的碗」</h3>
         <p>
           网络最后一层给出 \(z\in\mathbb{R}^{|V|}\)，再 Softmax 成 \(q\)。我们真正拿去给 Adam 的，是 \(L\) 对 \(z\) 的梯度。
-          Softmax + 硬标签 CE 有著名结论：
+          记真类下标为 \(y\)，\(e_y\) 为对应 one-hot。Softmax + 硬标签 CE 有著名结论：
         </p>
         <div class="math-block" aria-label="grad">
           \[
             \nabla_z\bigl(-\log q_y\bigr)=q-e_y
           \]
         </div>
+        <p>
+          简要推导：令 \(s=\sum_k e^{z_k}\)，则 \(q_i=e^{z_i}/s\)。
+          \(\partial q_i/\partial z_j = q_i(\delta_{ij}-q_j)\)。
+          \(L=-\log q_y=-\,z_y+\log s\)，于是
+          \(\partial L/\partial z_j = -\delta_{jy}+q_j\)，即向量形式 \(q-e_y\)。
+        </p>
         <p>
           含义直白：把真类概率往上抬，把其它类往下压；偏差多大，梯度就多大。只有 \(q=e_y\) 时梯度为零。
           这就是第二节预告的「干净梯度」：不用再乘一堆奇怪系数，误差本身就是更新方向。
