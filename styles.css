@@ -1421,14 +1421,54 @@ body {
   color: var(--text-soft);
 }
 
-.symbol-note {
-  margin: -4px 0 18px;
-  padding: 0;
-  border: none;
-  background: transparent;
-  font-size: 0.82em;
-  line-height: 1.55;
+.symbol-note,
+.aside-card {
+  margin: 12px 0 22px;
+  padding: 12px 14px 12px 16px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  border-left: 3px solid color-mix(in srgb, var(--text-faint) 55%, transparent);
+  background: color-mix(in srgb, var(--surface-muted) 88%, transparent);
+  font-size: 0.84em;
+  line-height: 1.58;
+  color: var(--text-soft);
+}
+
+.aside-card p {
+  margin: 0 0 0.55em;
+}
+
+.aside-card p:last-child {
+  margin-bottom: 0;
+}
+
+.aside-card__label {
+  margin-top: 0.7em !important;
+  margin-bottom: 0.35em !important;
+  font-size: 0.92em;
+  font-weight: 600;
+  letter-spacing: 0.02em;
   color: var(--text-faint);
+  text-transform: none;
+}
+
+.aside-card ul {
+  margin: 0.15em 0 0;
+  padding-left: 1.15em;
+}
+
+.aside-card li {
+  margin: 0.2em 0;
+}
+
+.aside-card a {
+  color: var(--text-soft);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.aside-card a:hover {
+  color: var(--accent);
 }
 
 .note-list {
