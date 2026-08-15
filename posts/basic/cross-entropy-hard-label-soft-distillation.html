@@ -19,7 +19,7 @@
     html[data-theme="night"], html[data-theme="night"] body { background: #0c0c0c; color: #ededed; color-scheme: dark; }
     html[data-theme="day"], html[data-theme="day"] body { background: #ffffff; color: #1a1a1a; color-scheme: light; }
   </style>
-  <link rel="stylesheet" href="../../styles.css?v=62" />
+  <link rel="stylesheet" href="../../styles.css?v=63" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous" />
   <title>交叉熵是什么：从信息量、凸优化到 LM Loss</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
@@ -430,7 +430,7 @@
           <li>一个 batch / 整个 epoch 里把这些数<strong>平均</strong>（或求和再除以 \(N\)），得到这一步的 loss，再反传</li>
         </ol>
         <p>
-          所以：<strong>单条 = 一项 \(-\log q_y\)；多条再平均</strong>，用采样逼近完整 \(\mathrm{CE}(p,q)\)。
+          样本多了，这种「每次只看见一个真词」的平均，就在逼近完整的 \(\mathrm{CE}(p,q)\)。
         </p>
         <aside class="aside-card" aria-label="测试损失">
           <p>
