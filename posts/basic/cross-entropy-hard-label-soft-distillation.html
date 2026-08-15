@@ -540,8 +540,7 @@
           \(z_j\) 表示任意第 \(j\) 维分数；当 \(j=y\) 时就是 \(z_y\)。
         </p>
         <p>
-          对 \(z_j\) 求导时用到 Kronecker \(\delta_{jy}\)（克罗内克符号）：\(j=y\) 时为 1，否则为 0——就是「是不是真类」的开关。
-          Softmax + 硬标签 CE 的结论是：
+          对任意维 \(z_j\) 求导，Softmax + 硬标签 CE 的结论是：
         </p>
         <div class="math-block" aria-label="grad">
           \[
@@ -550,6 +549,11 @@
             \nabla_z L=q-e_y
           \]
         </div>
+        <p class="symbol-note">
+          小注：\(\delta_{jy}\) 读作「delta j y」，全称 Kronecker delta / 克罗内克 δ。
+          定义极简单：\(j=y\)（这一维正好是真类）时为 1，否则为 0——和 one-hot \(e_y\) 的第 \(j\) 个分量相同。
+          用来把「真类减 1、其它类减 0」写成一个式子。
+        </p>
         <p>
           简要推导：令 \(s=\sum_k e^{z_k}\)，则 \(q_i=e^{z_i}/s\)，且 \(L=-z_y+\log s\)。
           \(\partial L/\partial z_j=-\delta_{jy}+e^{z_j}/s=-\delta_{jy}+q_j\)。
