@@ -432,12 +432,12 @@
         <p>
           所以：<strong>单条 = 一项 \(-\log q_y\)；多条再平均</strong>，用采样逼近完整 \(\mathrm{CE}(p,q)\)。
         </p>
-        <aside class="aside-card" aria-label="训练与测试">
+        <aside class="aside-card" aria-label="测试损失">
           <p>
-            测试<strong>不是</strong> \(\mathrm{CE}(q_{\mathrm{train}},q_{\mathrm{test}})\)。
-            参数固定后，在测试真词上再算
-            \(L_{\mathrm{test}}=\frac1M\sum_m-\log q_\theta(y_m\mid x_m)\)：同一个模型 \(q_\theta\)，换一份未参与训练的标签。
-            \(L_{\mathrm{test}}\) 越小越好；可与 \(L_{\mathrm{train}}\) 比过拟合。一般不拿未知的真 \(H(p)\) 当及格线。
+            参数 \(\theta\) 固定后，在测试集上再算同一形式的平均损失：
+            \(L_{\mathrm{test}}=\dfrac{1}{M}\sum_{m=1}^{M}-\log q_\theta(y_m\mid x_m)\)。
+            其中 \(m\) 枚举测试集里的各个 next-token 位置，\((x_m,y_m)\) 是该位置的上下文与真词，
+            \(M\) 是测试位置总数；\(q_\theta(\cdot\mid x_m)\) 仍是<strong>同一个训练好的模型</strong>给出的词表分布。
           </p>
         </aside>
 
