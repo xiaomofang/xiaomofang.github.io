@@ -114,6 +114,80 @@
           EAGLE 家族的每一步升级，本质上都在抬 \(\alpha\)，或在同样 \(\alpha\) 下把验证预算花得更聪明。
         </p>
 
+        <h3>1.1 Target verify 不是「一次 decode 一个 token」</h3>
+        <p>
+          面试里最容易卡住的问题是：草稿器一次给出 \(\gamma\) 个 draft token，target model 平时不是只能 decode
+          一个 token 吗，为什么它能和整块 draft 逐位对比？关键在于区分<strong>自回归生成语义</strong>和<strong>Transformer
+          前向计算形态</strong>。目标模型作为语言模型，确实定义的是「给定前缀预测下一个 token」；但一次前向可以同时放入
+          多个位置。只要 attention mask 是因果的，第 \(i\) 个位置的 logits 就只依赖它左边的 token，天然给出该位置的
+          next-token 分布。
+        </p>
+        <p>
+          设当前上下文是 \(x_{1:t}\)，草稿链是 \(d_1,d_2,\ldots,d_\gamma\)。验证时 target 不是从空中「并行生成」
+          \(\gamma\) 个最终 token，而是把下面这段序列作为一次 extend / prefill-like 前向喂进去：
+        </p>
+        <div class="math-block" aria-label="target verify 输入序列">
+          \[
+            [\,x_{1:t},\ d_1,\ d_2,\ldots,d_\gamma\,]
+          \]
+        </div>
+        <p>
+          由于因果掩码，目标模型在上下文最后一行给出 \(p_t(\cdot\mid x_{1:t})\)，用于验证 \(d_1\)；在 draft
+          token \(d_1\) 那一行给出 \(p_{t+1}(\cdot\mid x_{1:t},d_1)\)，用于验证 \(d_2\)；以此类推。
+          这就是「一次前向，拿到窗口内每个位置的 next-token 分布」。它没有违反自回归定义，只是把多个已知输入位置的
+          next-token logits 合并在一次矩阵计算里取出来。
+        </p>
+
+        <figure class="diagram-figure">
+          <svg viewBox="0 0 840 260" role="img" aria-label="target verify 行对齐示意">
+            <defs>
+              <marker id="arr-tv-eagle" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+                <polygon points="0 0, 8 3, 0 6" class="d-accent-blue" />
+              </marker>
+            </defs>
+            <text x="420" y="28" text-anchor="middle" class="d-title">Target verify：输入 token 行与被验证 draft token 错一位对齐</text>
+            <rect x="30" y="58" width="150" height="56" rx="10" class="d-box" />
+            <text x="105" y="91" text-anchor="middle" class="d-label">context x₁:t</text>
+            <rect x="205" y="58" width="90" height="56" rx="10" class="d-box-blue" />
+            <text x="250" y="91" text-anchor="middle" class="d-label">d₁</text>
+            <rect x="315" y="58" width="90" height="56" rx="10" class="d-box-blue" />
+            <text x="360" y="91" text-anchor="middle" class="d-label">d₂</text>
+            <rect x="425" y="58" width="90" height="56" rx="10" class="d-box-blue" />
+            <text x="470" y="91" text-anchor="middle" class="d-label">d₃</text>
+            <rect x="535" y="58" width="90" height="56" rx="10" class="d-box-blue" />
+            <text x="580" y="91" text-anchor="middle" class="d-label">d₄</text>
+
+            <path d="M105 114 L105 150 L250 150" class="d-arrow-blue" marker-end="url(#arr-tv-eagle)" />
+            <path d="M250 114 L250 170 L360 170" class="d-arrow-blue" marker-end="url(#arr-tv-eagle)" />
+            <path d="M360 114 L360 190 L470 190" class="d-arrow-blue" marker-end="url(#arr-tv-eagle)" />
+            <path d="M470 114 L470 210 L580 210" class="d-arrow-blue" marker-end="url(#arr-tv-eagle)" />
+
+            <text x="250" y="150" text-anchor="middle" class="d-muted">argmax / sample logits → 验 d₁</text>
+            <text x="360" y="170" text-anchor="middle" class="d-muted">基于 context+d₁ → 验 d₂</text>
+            <text x="470" y="190" text-anchor="middle" class="d-muted">基于 context+d₁:d₂ → 验 d₃</text>
+            <text x="580" y="210" text-anchor="middle" class="d-muted">基于 context+d₁:d₃ → 验 d₄</text>
+          </svg>
+          <figcaption>
+            验证阶段不是让 target 一次「自由生成」多个 token，而是把草稿 token 当作已知输入位置，取每一行的 next-token logits 来逐位检查。
+          </figcaption>
+        </figure>
+
+        <p>
+          在 greedy / temperature=0 下，规则最简单：若 \(\arg\max p_t = d_1\)，接受 \(d_1\)；若
+          \(\arg\max p_{t+1}=d_2\)，继续接受 \(d_2\)。遇到第一个不一致的位置就截断，并输出 target 在该位置给出的候选；若
+          所有 draft 都通过，则追加 target 在最后一行给出的 bonus token。采样模式下，经典 speculative sampling 还需要草稿分布
+          \(q_i\)，按 \(\min(1,p_i(d_i)/q_i(d_i))\) 做拒绝采样；这也是论文里「无损」证明真正依赖的对象。
+        </p>
+        <div class="callout muted">
+          <strong>工程 caveat。</strong>
+          SGLang 上游实现里，<code>TARGET_VERIFY</code> 被当成 fixed-length extend / prefill-like forward；verify 模式下
+          logits processor 会保留窗口内所有 hidden states，而不是像普通 decode 那样只取最后一行。DFlash 的 greedy 路径按
+          target argmax 逐位比较；DFlash 的 non-greedy 路径是 target-only verifier，代码里把 <code>draft_probs</code> 置零，
+          因而它不是经典「带真实 draft proposal 概率的拒绝采样」形式。DSpark 的 non-greedy 路径则会从 corrected logits
+          softmax 得到 draft probabilities 再做接受采样。写博客或面试回答时，最好把「论文的无损拒绝采样」和「具体引擎的
+          greedy / target-only / rejection-sampling 工程路径」分开说。
+        </div>
+
         <div class="callout">
           <strong>玩具例子（全文共用）。</strong>
           词表精简为

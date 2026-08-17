@@ -98,6 +98,23 @@
 
     <section id="blog" class="section">
       <div class="post-list" id="post-list">
+        <article class="post-card" data-category="inference" data-keywords="speculative training" data-date="2026-08-18" data-title="DFlash 详解：Block Diffusion 如何把并行草稿做到可用">
+          <a href="posts/inference/dflash-block-diffusion-speculative-decoding.html" class="post-card-link">
+            <div class="post-meta-row">
+              <span class="post-tag">Inference</span>
+            </div>
+            <h3 class="post-title">DFlash 详解：Block Diffusion 如何把并行草稿做到可用</h3>
+            <p class="post-excerpt">
+              从 block diffusion 并行起草、target hidden feature 的 KV injection，到随机 anchor 训练与 target verify 对齐逻辑，讲清 DFlash 为什么能成为 DSpark 的并行 backbone。
+            </p>
+            <p class="post-card-stats">2026年8月18日 · 30 分钟 · 3093 字 · MOFANG</p>
+          </a>
+          <div class="post-card-keywords">
+            <button class="post-keyword-chip" data-keyword="speculative" type="button">投机推理</button>
+            <button class="post-keyword-chip" data-keyword="training" type="button">训练</button>
+          </div>
+        </article>
+
         <article class="post-card" data-category="inference" data-keywords="pd-disagg mooncake inference-systems" data-date="2026-08-14" data-title="Mooncake Connector 读码（一）：PD 分离里，vLLM 到底在编排什么">
           <a href="posts/inference/mooncake-connector-pd-control-plane.html" class="post-card-link">
             <div class="post-meta-row">
@@ -158,7 +175,7 @@
             <p class="post-excerpt">
               从特征级自回归与 shifted-token，到置信度驱动的动态草稿树，再到 Training-Time Test 与多层特征融合：把 EAGLE / EAGLE-2 / EAGLE-3 每一跳「为什么这么改」讲透，并尽量使用论文原图。
             </p>
-            <p class="post-card-stats">2026年8月4日 · 22 分钟 · 4858 字 · MOFANG</p>
+            <p class="post-card-stats">2026年8月4日 · 20 分钟 · 5974 字 · MOFANG</p>
           </a>
           <div class="post-card-keywords">
             <button class="post-keyword-chip" data-keyword="speculative" type="button">投机推理</button>
@@ -192,7 +209,7 @@
             <p class="post-excerpt">
               并行 drafter 快但会「烂尾」，固定验证长度在高并发下浪费 batch 容量。DeepSeek 与北大提出的 DSpark 用半自回归生成 + 硬件感知置信度调度双管齐下，在 DeepSeek-V4 真实流量上实现 60%–85% 提速。
             </p>
-            <p class="post-card-stats">2026年7月28日 · 24 分钟 · 7051 字 · MOFANG</p>
+            <p class="post-card-stats">2026年7月28日 · 28 分钟 · 8326 字 · MOFANG</p>
           </a>
           <div class="post-card-keywords">
             <button class="post-keyword-chip" data-keyword="speculative" type="button">投机推理</button>

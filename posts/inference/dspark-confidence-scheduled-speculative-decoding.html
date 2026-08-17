@@ -255,6 +255,68 @@
           两者共同构成了一轮完整的解码周期：生成 → 打分 → 调度 → 验证 → 修正。
         </p>
 
+        <h3>4.1 验证逻辑：target 为什么能验证一整块 draft</h3>
+        <p>
+          这里补上一个很容易被问倒、但对理解 DSpark 和 DFlash 都至关重要的细节：<strong>target verify
+          不是让目标模型在一次 decode 调用里「凭空生成」block_size 个最终 token</strong>。目标模型仍然是标准自回归 LM；
+          只是 Transformer 的一次前向可以同时计算多个输入位置的 next-token logits。验证阶段把当前上下文与被调度保留的草稿前缀
+          拼成一段固定长度 extend：
+        </p>
+        <div class="math-block" aria-label="DSpark target verify 输入">
+          \[
+            [\,x_{1:t},\ d_1,\ldots,d_\ell\,], \qquad \ell \leqslant \gamma
+          \]
+        </div>
+        <p>
+          因果 mask 保证第 \(i\) 个验证判断只看见 \(x_{1:t},d_1,\ldots,d_{i-1}\)，看不见未来的
+          \(d_i,d_{i+1}\)。于是目标模型一次前向返回的多行 logits 可以按「错一位」对齐：上下文最后一行验证
+          \(d_1\)，\(d_1\) 这一行验证 \(d_2\)，依次类推；最后一行还可给出 bonus token。工程上这通常被实现成
+          target-verify forward mode，本质接近固定长度 prefill / extend，而不是普通 decode 只取最后一行 logits。
+        </p>
+        <table class="decision-table">
+          <thead>
+            <tr>
+              <th>模式</th>
+              <th>需要什么分布</th>
+              <th>接受规则</th>
+              <th>无损含义</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Greedy / temperature=0</td>
+              <td>只需要 target logits 的 argmax</td>
+              <td>逐位比较 \(d_i\) 是否等于 target 在前一行的 argmax，首个不等处截断并用 target 候选修正</td>
+              <td>等价于目标模型 greedy 解码，前提是 logit processor、grammar、tie-breaking 等与普通解码一致</td>
+            </tr>
+            <tr>
+              <td>经典 speculative sampling</td>
+              <td>target 分布 \(p_i\) 与草稿分布 \(q_i\)</td>
+              <td>以 \(\min(1,p_i(d_i)/q_i(d_i))\) 接受，拒绝时从 \(\mathrm{norm}(\max(p_i-q_i,0))\) 重采样</td>
+              <td>严格保持目标采样分布 \(p\)，这是 Leviathan / Chen 体系里的标准无损证明</td>
+            </tr>
+            <tr>
+              <td>SGLang DFlash non-greedy</td>
+              <td>target 概率；代码路径中 <code>draft_probs</code> 置零</td>
+              <td>使用 target-only verifier，而非经典带真实 proposal probability 的拒绝采样</td>
+              <td>不能把它简单表述成「DFlash non-greedy 也按 \(p/q\) 无损拒绝采样」</td>
+            </tr>
+            <tr>
+              <td>SGLang DSpark non-greedy</td>
+              <td>target 概率 + DSpark corrected logits softmax 得到的 draft probabilities</td>
+              <td>走接受采样路径；greedy 与 non-greedy batch 混合时分别计算后按 mask 选择</td>
+              <td>更接近经典需要 proposal 分布的采样验证设定</td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="callout">
+          <strong>一句面试版回答。</strong>
+          target model 的「只能 decode 一个 token」说的是生成过程的语义依赖，不是一次前向只能返回一行 logits。
+          verify 阶段把 <code>context + draft_prefix</code> 当作已知输入做一次 prefill-like 前向，因果 mask 让每一行恰好对应一个
+          next-token 判断，所以可以并行拿到 \(d_1\ldots d_\ell\) 的验证结果；通过的最长前缀被接受，首个失败处由 target
+          修正，若全通过再追加 bonus token。
+        </div>
+
         <h2>五、核心机制一：半自回归生成（Semi-Autoregressive Generation）</h2>
         <p>
           既然并行 drafter 的问题是「各位置互相看不见」，最直接的修复思路就是加回一点点依赖关系——

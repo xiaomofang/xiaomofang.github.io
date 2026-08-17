@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="night">
+<head>
+  <meta charset="UTF-8" />
+  <script>
+    (function () {
+      try {
+        var saved = localStorage.getItem("yichuan-theme");
+        var theme = saved || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "night" : "day");
+        document.documentElement.setAttribute("data-theme", theme);
+      } catch (e) {}
+    })();
+  </script>
+  <style>
+    html { font-size: 16px; }
+    @media (min-width: 1024px) { html { font-size: 26px; } }
+    @media (min-width: 1200px) { html { font-size: 34px; } }
+    html, body { margin: 0; min-height: 100%; }
+    html[data-theme="night"], html[data-theme="night"] body { background: #0c0c0c; color: #ededed; color-scheme: dark; }
+    html[data-theme="day"], html[data-theme="day"] body { background: #ffffff; color: #1a1a1a; color-scheme: light; }
+  </style>
+  <link rel="stylesheet" href="../../styles.css?v=70" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous" />
+  <title>DFlash 详解：Block Diffusion 如何把并行草稿做到可用</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="description" content="系统拆解 DFlash: Block Diffusion for Flash Speculative Decoding。解释为什么 diffusion drafter 适合投机解码、KV injection 如何把目标模型隐藏状态注入每层草稿器、训练时随机 masked blocks 如何对齐推理，以及 target verify 为什么能一次验证整块 draft。" />
+</head>
+<body>
+  <div class="ambient" aria-hidden="true"><span class="orb orb-a"></span><span class="orb orb-b"></span></div>
+  <canvas id="star-canvas"></canvas>
+
+  <header class="site-header">
+    <div class="header-inner">
+      <a href="../../index.html" class="logo">
+        <span class="logo-dot"></span>
+        <span class="logo-text">MOFANG</span>
+      </a>
+      <div class="header-actions">
+        <nav class="site-nav">
+          <a href="../../index.html">← Back</a>
+        </nav>
+        <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle theme">
+          <span class="icon-sun">☀️</span>
+          <span class="icon-moon">🌙</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="site-main">
+    <article class="post-page">
+      <header class="post-page-header">
+        <p class="post-page-category">Inference</p>
+        <h1 class="post-page-title">DFlash 详解：Block Diffusion 如何把并行草稿做到可用</h1>
+        <p class="post-lead">
+          DFlash 的核心判断很直接：不要再让 drafter 像小 LLM 一样串行写草稿，而是让它像 block diffusion 一样
+          一次补全一整段 mask token；但 diffusion 小模型单独猜不准，所以必须把 target model 的隐藏状态以 KV injection
+          的形式注入每一层。本文按论文与 SGLang 实现，把 DFlash 的推理、训练、验证和工程 caveat 拆开讲清。
+        </p>
+        <div class="post-page-keywords" aria-label="Keywords">
+          <a class="post-keyword-chip" href="../../index.html?keyword=speculative">投机推理</a>
+          <a class="post-keyword-chip" href="../../index.html?keyword=training">训练</a>
+        </div>
+        <p class="post-page-meta" data-date="2026-08-18" data-author="MOFANG" data-minutes="30">2026年8月18日 · MOFANG</p>
+      </header>
+
+      <section class="post-page-content">
+        <p>
+          这篇文章补上投机推理系列里缺的一块：<a href="speculative-decoding-evolution-mtp-eagle-dflash-dspark.html">演变篇</a>
+          已经把 DFlash 放在 Medusa / MTP 之后、DSpark 之前的位置；<a href="eagle-1-2-3-feature-extrapolation-evolution.html">EAGLE 篇</a>
+          讲的是自回归草稿支线；<a href="dspark-confidence-scheduled-speculative-decoding.html">DSpark 篇</a>
+          讲的是在 DFlash backbone 上加半自回归头与置信度调度。本文只盯住 DFlash 本身：
+          <strong>为什么 block diffusion 可以做 drafter、为什么 target feature 必须深度注入、为什么训练要随机采 anchor、以及 verify 阶段到底在验什么。</strong>
+        </p>
+
+        <div class="logic-map" aria-label="文章逻辑地图">
+          <div class="map-node map-node--start">
+            <span>1</span>
+            <strong>问题</strong>
+            <p>AR drafter 准但串行；普通 diffusion 并行但质量弱。</p>
+          </div>
+          <div class="map-arrow">→</div>
+          <div class="map-node map-node--ar">
+            <span>2</span>
+            <strong>推理</strong>
+            <p>target hidden features 融合后作为 KV 注入每层 draft model。</p>
+          </div>
+          <div class="map-arrow">→</div>
+          <div class="map-node map-node--par">
+            <span>3</span>
+            <strong>训练</strong>
+            <p>随机 anchor + masked block，严格对齐推理时的 block draft。</p>
+          </div>
+          <div class="map-arrow">→</div>
+          <div class="map-node map-node--conv">
+            <span>4</span>
+            <strong>验证</strong>
+            <p>target verify 是 prefill-like forward，不是一次自由生成多 token。</p>
+          </div>
+        </div>
+
+        <h2>一、DFlash 要解决的不是「验证」，而是「起草太串行」</h2>
+        <p>
+          投机解码的基本公式是：
+        </p>
+        <div class="math-block" aria-label="投机解码平均延迟">
+          \[
+            L = \frac{T_{\text{draft}} + T_{\text{verify}}}{\tau}
+          \]
+        </div>
+        <p>
+          其中 \(T_{\text{draft}}\) 是草稿耗时，\(T_{\text{verify}}\) 是目标模型验证耗时，\(\tau\) 是每轮平均接受 token 数。
+          EAGLE 系列主要在提高 \(\tau\) 上做文章，但它的 drafter 仍然是链式自回归：要起草 \(\gamma\) 个 token，至少要跑
+          多步轻量 forward 或展开一棵树。DFlash 反过来问：如果草稿阶段本身可以一次前向预测整块 token，
+          \(T_{\text{draft}}\) 能不能几乎不随 \(\gamma\) 增长？
+        </p>
+        <table class="decision-table">
+          <thead>
+            <tr>
+              <th>草稿器类型</th>
+              <th>生成方式</th>
+              <th>草稿耗时</th>
+              <th>主要风险</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>自回归 drafter</td>
+              <td>逐 token 或逐层展开</td>
+              <td>近似 \(T_{\text{draft}}=\gamma\cdot t_{\text{step}}\)</td>
+              <td>越长越慢，只能用很浅的 draft head</td>
+            </tr>
+            <tr>
+              <td>并行 / diffusion drafter</td>
+              <td>一次前向填充一整个 masked block</td>
+              <td>近似 \(T_{\text{draft}}=t_{\text{parallel}}\)</td>
+              <td>block 内 token 依赖弱，后段容易 suffix decay</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          DFlash 的答案是使用轻量 block diffusion model 做 drafter。这里的 diffusion 不是为了最终独立生成高质量文本，
+          而是只承担「给 target model 提 proposal」的角色。即使草稿并不完美，只要 target verify 严格执行，最终输出仍由目标模型决定；
+          草稿质量只影响接受长度和速度。这正是 speculative decoding 对 diffusion drafter 友好的地方。
+        </p>
+
+        <figure class="diagram-figure diagram-figure--wide">
+          <img src="../../assets/dflash/x1.svg" alt="DFlash 与 EAGLE-3 在 Qwen3-8B 上的加速比对比" loading="lazy" width="858" height="306" />
+          <figcaption>
+            <strong>DFlash Figure 1（论文原图）：</strong>
+            在 Qwen3-8B Transformers backend 上，DFlash 相比 EAGLE-3 获得更高 speedup。原文报告 DFlash 最高约 6.1×，
+            多数 benchmark 上约为 EAGLE-3 的 2.5×。
+            <span class="fig-source">Chen, Liang &amp; Liu, ICML 2026</span>
+          </figcaption>
+        </figure>
+
+        <h2>二、推理结构：target knows best</h2>
+        <p>
+          直接训练一个小 diffusion model 从 token context 猜未来 block，效果并不好。论文附录里专门做了「without target feature」对照，
+          速度提升通常只有 2× 到 3× 左右。原因不难理解：小模型既要理解长上下文，又要并行猜多步未来，相当于从零复刻 target model
+          的推理能力，容量明显不够。
+        </p>
+        <p>
+          DFlash 的核心洞察是：目标模型的 hidden states 已经包含了大量未来 token 信息。给定上下文，target model 做一次标准 prefill / decode
+          时，从若干层抽取隐藏状态 \(H^{(l_1)},\ldots,H^{(l_m)}\)，拼接后通过轻量投影压回草稿维度：
+        </p>
+        <div class="math-block" aria-label="DFlash target context feature">
+          \[
+            H_{\text{ctx}} = \mathrm{RMSNorm}\bigl(W_c[H^{(l_1)};\ldots;H^{(l_m)}]\bigr)
+          \]
+        </div>
+        <p>
+          这个 \(H_{\text{ctx}}\) 不是只在输入层和 token embedding 拼一次，而是被投影成每一层 draft transformer 的 Key / Value，
+          放进 draft KV cache。于是 draft model 的每一层、每个 masked position 都能持续 attend 到来自 target 的深层上下文。
+        </p>
+
+        <figure class="diagram-figure diagram-figure--wide">
+          <img src="../../assets/dflash/x2.svg" alt="DFlash 推理结构：目标隐藏状态作为 KV 注入草稿模型每层" loading="lazy" width="858" height="386" />
+          <figcaption>
+            <strong>DFlash Figure 2（论文原图）：</strong>
+            target model 抽取并融合 hidden context features，DFlash 将其注入每个 draft layer 的 KV cache，条件化整块草稿预测。
+            <span class="fig-source">Chen, Liang &amp; Liu, ICML 2026</span>
+          </figcaption>
+        </figure>
+
+        <h3>2.1 为什么是 KV injection，不是 input fusion</h3>
+        <p>
+          EAGLE-3 一类方法把 target feature 和 token embedding 融合后作为 drafter 输入。这在浅层 drafter 中很自然，
+          但 draft model 变深后，target feature 的信息会在层间变换中被稀释。DFlash 选择 KV injection，相当于在每层都给
+          drafter 一条稳定的 target-context 旁路。
+        </p>
+        <p>
+          论文的 ablation 结论也支持这一点：无论在 autoregressive drafting 还是 block-diffusion drafting 下，KV injection
+          都比 input fusion 得到更高接受长度。更重要的是，DFlash 能因为并行起草而使用 3 层、5 层甚至 8 层 draft model，
+          这时「每层都能看见 target feature」比「只在入口融合一次」更关键。
+        </p>
+
+        <h3>2.2 Block diffusion 在这里到底 diffusion 了什么</h3>
+        <p>
+          DFlash 的 block diffusion 可以理解为「给定 anchor token 和 target context，一次预测后续 masked block」。推理时，输入通常是
+          一个干净 anchor token 加上一组 mask token，草稿模型在这些 mask 位置并行输出 logits，采样或取 argmax 后得到候选块
+          \(d_1,\ldots,d_\gamma\)。和完整 dLLM 不同，DFlash 不追求多轮 denoising 到最终文本质量，而是把 denoising 步数压到极少，
+          用 target verify 接管质量保证。
+        </p>
+        <div class="callout">
+          <strong>一个直觉。</strong>
+          如果 diffusion LLM 要独立写答案，它必须保证每个 token 都对；DFlash 只需要让 proposal 有足够长的前缀能被 target 接受。
+          这降低了 diffusion drafter 的任务难度，也解释了为什么「小 diffusion adapter + 大 target verifier」比「小 diffusion LM
+          单独生成」更现实。
+        </div>
+
+        <h2>三、训练：随机 anchor，让训练形状对齐推理形状</h2>
+        <p>
+          DFlash 训练时冻结目标模型、冻结共享 embedding 与 LM head，只训练 draft transformer 层以及特征投影。训练数据不是直接使用原始回复，
+          而是用 target model 生成 responses，以提升 draft 分布和目标模型的对齐程度。论文主实验使用约 800K 样本，来自 NVIDIA Nemotron
+          Post-Training Dataset V2 与 CodeAlpaca 的混合，并用目标模型生成回复。
+        </p>
+        <p>
+          标准 block diffusion 训练会把 response 均匀切块，再随机 mask 块内位置。DFlash 修改为更贴近 speculative decoding 的形态：
+          在 response 中随机采样若干 anchor token，把每个 anchor 作为 block 第一个干净位置，其后位置置为 mask，训练模型预测
+          <code>block_size - 1</code> 个未来 token。这样做有两个好处：
+        </p>
+        <ul class="note-list">
+          <li><strong>对齐推理。</strong>推理时 anchor 通常来自上一轮 target verify 产生或确认的 token，训练也从干净 anchor 出发。</li>
+          <li><strong>控制长上下文成本。</strong>每条长序列只采固定数量 anchor block，训练成本不随完整 context 长度线性爆炸。</li>
+          <li><strong>增加覆盖。</strong>每个 epoch 可重新随机采 anchor，让同一条 response 暴露出更多局部预测窗口。</li>
+        </ul>
+        <p>
+          注意力 mask 也不是普通下三角。一个 batch 内会拼接多个 masked blocks：同一 block 内 token 可以双向注意，
+          block 可以看对应 target context features，但不同 block 之间不能泄漏信息。论文使用 Flex Attention 高效实现这种稀疏模式。
+        </p>
+        <p>
+          损失函数是按位置加权的 token cross entropy。因为投机验证一旦前面 token 拒绝，后续 token 再准也会被丢弃，靠前位置对
+          \(\tau\) 的边际价值更高。DFlash 用指数衰减权重强调前缀：
+        </p>
+        <div class="math-block" aria-label="DFlash loss decay">
+          \[
+            w_k = \exp\!\left(-\frac{k-1}{\gamma}\right),
+            \qquad
+            \mathcal L = -\sum_{k=1}^{\gamma} w_k \log p_k^d(x_k^*)
+          \]
+        </div>
+
+        <figure class="diagram-figure">
+          <svg viewBox="0 0 840 310" role="img" aria-label="DFlash 训练 masked block 示意">
+            <defs>
+              <marker id="arr-dflash-train" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+                <polygon points="0 0, 8 3, 0 6" class="d-accent-orange" />
+              </marker>
+            </defs>
+            <text x="420" y="28" text-anchor="middle" class="d-title">随机 anchor + masked block：训练形状贴近推理形状</text>
+            <rect x="30" y="62" width="170" height="58" rx="10" class="d-box" />
+            <text x="115" y="88" text-anchor="middle" class="d-label">clean prompt</text>
+            <text x="115" y="107" text-anchor="middle" class="d-muted">可被所有 block 依赖</text>
+            <path d="M200 91 L245 91" class="d-arrow-orange" marker-end="url(#arr-dflash-train)" />
+            <rect x="250" y="52" width="80" height="78" rx="10" class="d-box-orange" />
+            <text x="290" y="84" text-anchor="middle" class="d-label">anchor</text>
+            <text x="290" y="105" text-anchor="middle" class="d-muted">clean</text>
+            <rect x="345" y="52" width="80" height="78" rx="10" class="d-box-blue" />
+            <text x="385" y="83" text-anchor="middle" class="d-label">mask</text>
+            <text x="385" y="105" text-anchor="middle" class="d-muted">预测 y₁</text>
+            <rect x="440" y="52" width="80" height="78" rx="10" class="d-box-blue" />
+            <text x="480" y="83" text-anchor="middle" class="d-label">mask</text>
+            <text x="480" y="105" text-anchor="middle" class="d-muted">预测 y₂</text>
+            <rect x="535" y="52" width="80" height="78" rx="10" class="d-box-blue" />
+            <text x="575" y="83" text-anchor="middle" class="d-label">mask</text>
+            <text x="575" y="105" text-anchor="middle" class="d-muted">预测 y₃</text>
+            <rect x="630" y="52" width="80" height="78" rx="10" class="d-box-blue" />
+            <text x="670" y="83" text-anchor="middle" class="d-label">mask</text>
+            <text x="670" y="105" text-anchor="middle" class="d-muted">预测 y₄</text>
+
+            <rect x="250" y="180" width="460" height="78" rx="12" class="d-zone-blue" />
+            <text x="480" y="210" text-anchor="middle" class="d-tag-blue">同一 block 内双向注意</text>
+            <text x="480" y="238" text-anchor="middle" class="d-muted">不同 block 之间不可见，避免训练时偷看其他 anchor 的答案</text>
+            <path d="M480 130 L480 180" class="d-arrow-orange" marker-end="url(#arr-dflash-train)" />
+          </svg>
+          <figcaption>
+            彩色示意：DFlash 训练不是随便 mask，而是随机选择 anchor，把 anchor 后的一段 masked block 作为并行草稿预测目标。
+          </figcaption>
+        </figure>
+
+        <h2>四、验证：target verify 为什么能一次对比整块 draft</h2>
+        <p>
+          这是投机解码面试里最常见的误区：target model 不是只能 decode 一个 token 吗，怎么拿它和 draft block 逐位比较？
+          答案是：target 的生成语义确实是自回归的，但一次 Transformer forward 可以对多个<strong>已知输入位置</strong>同时计算 next-token logits。
+        </p>
+        <p>
+          当前上下文为 \(x_{1:t}\)，DFlash 草稿为 \(d_1,\ldots,d_\gamma\)。验证时把
+          <code>context + draft</code> 一次喂给 target：
+        </p>
+        <div class="math-block" aria-label="DFlash verify sequence">
+          \[
+            [\,x_{1:t},\ d_1,d_2,\ldots,d_\gamma\,]
+          \]
+        </div>
+        <p>
+          因果 mask 使得 context 最后一行的 logits 只基于 \(x_{1:t}\)，用于判断 \(d_1\)；\(d_1\) 那一行的 logits
+          基于 \(x_{1:t},d_1\)，用于判断 \(d_2\)；\(d_{i-1}\) 那一行用于判断 \(d_i\)。如果所有 draft token
+          都通过，最后一行还会给出 bonus token。工程上，这就是 fixed-length prefill / extend-like target verify，而不是普通 decode
+          只保留最后一行 logits。
+        </p>
+        <figure class="diagram-figure">
+          <svg viewBox="0 0 840 270" role="img" aria-label="DFlash target verify 对齐">
+            <defs>
+              <marker id="arr-dflash-verify" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+                <polygon points="0 0, 8 3, 0 6" class="d-accent-blue" />
+              </marker>
+            </defs>
+            <text x="420" y="28" text-anchor="middle" class="d-title">verify logits 错位对齐：上一行预测下一枚 draft token</text>
+            <rect x="44" y="62" width="150" height="58" rx="10" class="d-box" />
+            <text x="119" y="96" text-anchor="middle" class="d-label">context</text>
+            <rect x="230" y="62" width="90" height="58" rx="10" class="d-box-blue" />
+            <text x="275" y="96" text-anchor="middle" class="d-label">d₁</text>
+            <rect x="356" y="62" width="90" height="58" rx="10" class="d-box-blue" />
+            <text x="401" y="96" text-anchor="middle" class="d-label">d₂</text>
+            <rect x="482" y="62" width="90" height="58" rx="10" class="d-box-blue" />
+            <text x="527" y="96" text-anchor="middle" class="d-label">d₃</text>
+            <rect x="608" y="62" width="90" height="58" rx="10" class="d-box-blue" />
+            <text x="653" y="96" text-anchor="middle" class="d-label">d₄</text>
+            <path d="M119 120 L119 160 L275 160" class="d-arrow-blue" marker-end="url(#arr-dflash-verify)" />
+            <path d="M275 120 L275 184 L401 184" class="d-arrow-blue" marker-end="url(#arr-dflash-verify)" />
+            <path d="M401 120 L401 208 L527 208" class="d-arrow-blue" marker-end="url(#arr-dflash-verify)" />
+            <path d="M527 120 L527 232 L653 232" class="d-arrow-blue" marker-end="url(#arr-dflash-verify)" />
+            <text x="275" y="160" text-anchor="middle" class="d-muted">验 d₁</text>
+            <text x="401" y="184" text-anchor="middle" class="d-muted">验 d₂</text>
+            <text x="527" y="208" text-anchor="middle" class="d-muted">验 d₃</text>
+            <text x="653" y="232" text-anchor="middle" class="d-muted">验 d₄ / bonus</text>
+          </svg>
+          <figcaption>
+            Target verify 的并行来自矩阵计算并行，不来自打破因果依赖。每一行 logits 的语义仍然是「给定左侧前缀预测下一个 token」。
+          </figcaption>
+        </figure>
+        <p>
+          Greedy 下，DFlash 逐位比较 target argmax 与 draft token：连续相等的最长前缀被接受，第一个不等处用 target token 修正；
+          全部相等则追加 bonus。采样下要更谨慎。经典 speculative sampling 需要草稿分布 \(q_i\) 和目标分布 \(p_i\)，按
+          \(\min(1,p_i(d_i)/q_i(d_i))\) 接受，拒绝后从 \(\mathrm{norm}(\max(p_i-q_i,0))\) 重采样。
+        </p>
+        <div class="callout muted">
+          <strong>SGLang 实现 caveat。</strong>
+          上游 SGLang 把 DFlash / DSpark 的 target verify 标成 <code>TARGET_VERIFY</code>，并把它视作固定长度 prefill / extend。
+          DFlash greedy 路径使用 target argmax 对齐比较；DFlash non-greedy 路径是 target-only verifier，代码里会构造
+          <code>draft_probs = zeros_like(target_probs)</code>，所以不能把它说成「带真实 draft probability 的经典拒绝采样」。
+          DSpark non-greedy 则会从 corrected logits softmax 得到 draft probabilities，走接受采样路径。这个差异不影响理解
+          DFlash 的核心结构，但写「无损」二字时必须说明对应的是 greedy 等价，还是经典 rejection sampling 条件。
+        </div>
+
+        <h2>五、结果与消融：DFlash 强在哪，也弱在哪</h2>
+        <p>
+          论文主结果显示，DFlash 在 Qwen3-4B/8B、LLaMA-3.1-8B-Instruct、Qwen3-Coder-30B-A3B 等模型上均能带来显著加速。
+          在 Qwen3-8B、temperature=0 的 Transformers backend 上，DFlash block size 16 的平均 speedup 约 4.86×，平均接受长度约 6.49；
+          对比 EAGLE-3 tree size 16 的 1.76× / 2.96，以及 EAGLE-3 tree size 60 的 2.02× / 3.40，优势主要来自
+          「更低草稿成本 + 更长接受长度」同时成立。
+        </p>
+        <table class="decision-table">
+          <thead>
+            <tr>
+              <th>消融问题</th>
+              <th>论文结论</th>
+              <th>解释</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>draft layers 越多越好吗</td>
+              <td>接受长度通常上升，但 5 层常是 speedup 最优点</td>
+              <td>8 层更准但 draft latency 更高，端到端速度不一定更好</td>
+            </tr>
+            <tr>
+              <td>target hidden features 取几层</td>
+              <td>5 层优于 3 层</td>
+              <td>浅中深层表示互补，但训练缓存成本随层数线性增加</td>
+            </tr>
+            <tr>
+              <td>block size 能否训练推理不一致</td>
+              <td>大 block 训练可较好泛化到小 block，反过来不行</td>
+              <td>训练过长块的模型见过更远位置依赖，裁短容易；短块模型没学过长后缀</td>
+            </tr>
+            <tr>
+              <td>KV injection vs input fusion</td>
+              <td>KV injection 在 AR 与 block diffusion 两种 drafting 下都更好</td>
+              <td>target feature 不会只在入口被稀释，而是在每层持续提供条件信息</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          但 DFlash 也有结构性弱点。第一，block 内 token 是并行预测的，缺少强自回归依赖，后段容易 suffix decay。
+          这正是 DSpark 后来加 Markov / RNN 轻量串行头的原因。第二，大 block 在高并发 serving 中会增加 verify token 数，
+          若系统已经 compute-bound，盲目验证整块会吃掉吞吐。DSpark 的 confidence-scheduled verification 正是对这一点的工程补丁。
+        </p>
+
+        <h2>六、和 EAGLE、DSpark 放在一张图里</h2>
+        <figure class="diagram-figure">
+          <svg viewBox="0 0 840 260" role="img" aria-label="EAGLE DFlash DSpark 对照">
+            <text x="420" y="30" text-anchor="middle" class="d-title">三条路线的核心取舍</text>
+            <rect x="34" y="64" width="230" height="140" rx="14" class="d-zone-blue" />
+            <text x="149" y="96" text-anchor="middle" class="d-tag-blue">EAGLE</text>
+            <text x="149" y="128" text-anchor="middle" class="d-label">自回归特征外推</text>
+            <text x="149" y="155" text-anchor="middle" class="d-muted">依赖强，draft 成本随步数涨</text>
+            <text x="149" y="180" text-anchor="middle" class="d-muted">适合追求高精度草稿树</text>
+
+            <rect x="305" y="64" width="230" height="140" rx="14" class="d-zone-orange" />
+            <text x="420" y="96" text-anchor="middle" class="d-tag-orange">DFlash</text>
+            <text x="420" y="128" text-anchor="middle" class="d-label">block diffusion 并行草稿</text>
+            <text x="420" y="155" text-anchor="middle" class="d-muted">一次前向出整块</text>
+            <text x="420" y="180" text-anchor="middle" class="d-muted">后缀依赖建模较弱</text>
+
+            <rect x="576" y="64" width="230" height="140" rx="14" class="d-zone" />
+            <text x="691" y="96" text-anchor="middle" class="d-tag-purple">DSpark</text>
+            <text x="691" y="128" text-anchor="middle" class="d-label">DFlash backbone + 串行头</text>
+            <text x="691" y="155" text-anchor="middle" class="d-muted">补 block 内依赖</text>
+            <text x="691" y="180" text-anchor="middle" class="d-muted">再按置信度调度验证长度</text>
+          </svg>
+          <figcaption>
+            DFlash 是并行支线的关键跃迁：它把「并行草稿」从多个独立头推进到可训练、可扩层、可接入 serving 框架的 block diffusion drafter。
+          </figcaption>
+        </figure>
+
+        <div class="essay-ending">
+          DFlash 的价值不在于让 diffusion model 取代自回归 LLM，而在于重新定义 diffusion model 的职责：它只负责快速提出一整块高质量候选，
+          最终质量仍由 target verify 兜底。这个定位让 block diffusion 的并行性真正变成投机解码里的速度红利。
+        </div>
+
+        <section class="references-section" aria-label="参考与扩展阅读">
+          <h2>参考与扩展阅读</h2>
+          <ol class="reference-list">
+            <li>
+              <a href="https://arxiv.org/abs/2602.06036" target="_blank" rel="noopener noreferrer">
+                DFlash: Block Diffusion for Flash Speculative Decoding (Chen, Liang &amp; Liu, ICML 2026)
+              </a>
+              <span>本文核心依据，包含 DFlash 推理结构、训练策略、SGLang serving 结果与消融实验。</span>
+            </li>
+            <li>
+              <a href="https://github.com/z-lab/dflash" target="_blank" rel="noopener noreferrer">
+                z-lab/dflash（官方代码）
+              </a>
+              <span>DFlash 训练、模型与部署入口。</span>
+            </li>
+            <li>
+              <a href="https://github.com/sgl-project/sglang" target="_blank" rel="noopener noreferrer">
+                SGLang speculative decoding implementation
+              </a>
+              <span>DFlash / DSpark 的工程验证路径、TARGET_VERIFY forward 与 serving 集成可在上游实现中核对。</span>
+            </li>
+            <li>
+              <a href="https://arxiv.org/abs/2607.05147" target="_blank" rel="noopener noreferrer">
+                DSpark: Confidence-Scheduled Speculative Decoding with Semi-Autoregressive Generation
+              </a>
+              <span>在 DFlash backbone 上进一步加入半自回归依赖建模与负载感知验证调度。</span>
+            </li>
+            <li>
+              <a href="eagle-1-2-3-feature-extrapolation-evolution.html">
+                EAGLE 三代演进：从特征外推到 Training-Time Test
+              </a>
+              <span>自回归草稿支线的对照阅读。</span>
+            </li>
+          </ol>
+        </section>
+      </section>
+
+      <section class="comments-section" id="comments" aria-label="Discussion">
+        <div class="comments-header">
+          <h2>Discussion</h2>
+        </div>
+        <div id="utterances-container" class="utterances-container"></div>
+        <noscript>请启用 JavaScript 后查看评论区。</noscript>
+      </section>
+    </article>
+  </main>
+
+  <footer class="site-footer">
+    <span class="footer-credit">
+      <span class="footer-prefix">© 2026 by</span>
+      <a href="../../index.html" class="footer-brand">
+        <span class="brand-mascot-frame brand-mascot-frame--inline" aria-hidden="true">
+          <picture>
+            <source srcset="../../assets/avatar-mascot.webp" type="image/webp" />
+            <img src="../../assets/avatar-mascot.png" alt="" class="brand-mascot" width="27" height="27" decoding="async" />
+          </picture>
+        </span>
+        <span>MOFANG</span>
+      </a>
+    </span>
+  </footer>
+
+  <script src="../../app.js?v=40"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" crossorigin="anonymous"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js" crossorigin="anonymous"
+    onload="renderMathInElement(document.body, {
+      delimiters: [
+        {left: '\\[', right: '\\]', display: true},
+        {left: '\\(', right: '\\)', display: false}
+      ],
+      ignoredTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code', 'option', 'svg'],
+      throwOnError: false
+    });"></script>
+</body>
+</html>
