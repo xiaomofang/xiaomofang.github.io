@@ -19,6 +19,12 @@ if ($LASTEXITCODE -ne 0) {
 
 Set-Location $PSScriptRoot
 
+if (Get-Command node -ErrorAction SilentlyContinue) {
+    node .\tools\sync-post-stats.js
+} else {
+    Write-Host "Node.js not found; skip homepage stats sync" -ForegroundColor Yellow
+}
+
 if (-not (Test-Path ".git")) {
     git init
     git config user.name "xiaomofang"
