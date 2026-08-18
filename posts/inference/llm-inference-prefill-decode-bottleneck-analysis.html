@@ -63,7 +63,7 @@
           <a class="post-keyword-chip" href="../../index.html?keyword=inference-systems">推理框架</a>
           <a class="post-keyword-chip" href="../../index.html?keyword=hardware">硬件与 Kernel</a>
         </div>
-        <p class="post-page-meta" data-date="2026-08-18" data-author="MOFANG" data-minutes="10">2026年8月18日 · MOFANG</p>
+        <p class="post-page-meta" data-date="2026-08-18" data-author="MOFANG" data-minutes="18">2026年8月18日 · MOFANG</p>
       </header>
 
       <section class="post-page-content">
@@ -395,6 +395,16 @@
           这就是 P/D 配比必须跟 workload 绑定的原因。
         </p>
 
+        <figure class="diagram-figure diagram-figure--wide">
+          <img src="https://arxiv.org/html/2401.09670v3/teaser.svg" alt="DistServe 图 1：同池服务、只做 prefill 和只做 decode 时的 P90 TTFT 与 TPOT 对比" loading="lazy" width="880" height="747" />
+          <figcaption>
+            <strong>DistServe Figure 1（论文原图）：</strong>
+            同一模型、同一 A100 上，混合 serving 的 TTFT 和 TPOT 会同时受到另一阶段干扰；只跑单阶段时，曲线显著不同。
+            这不是「分开一定更快」的宣传图，而是 PD 分离的出发点：两个阶段有不同的 SLO 和资源曲线。
+            <span class="fig-source"><a href="https://arxiv.org/html/2401.09670v3#S1.F1" target="_blank" rel="noopener noreferrer">Zhong et al., DistServe, Figure 1, CC BY-SA 4.0</a></span>
+          </figcaption>
+        </figure>
+
         <table class="decision-table">
           <thead>
             <tr>
@@ -436,6 +446,104 @@
           例如同样 64 卡，<code>4p(tp=8,dp=1), 1d(dp=16,tp=2)</code> 与 <code>4p(tp=8,dp=1), 2d(dp=8,tp=2)</code>
           的 decode 总卡数一样，但后者把 decode pool 分成两个故障域和调度域。理论峰值未必更高，尾延迟和长短请求隔离却可能更稳。
         </p>
+
+        <h3>5.1 不做 PD 分离时，为什么 chunked prefill 是合理的第二选择</h3>
+        <p>
+          PD 分离并不是唯一正确答案。单个 GPU pool 中混合 prefill 与 decode 的最大问题，是一个长 prompt 的 prefill iteration
+          会把正在流式输出的所有请求一起拖住。若调度器优先塞入新 prefill，吞吐可能不错，但旧请求看到的 token 间隔会突然拉长；
+          若调度器严格优先 decode，TPOT 更平滑，新请求又会在入口排队，TTFT 变差。
+        </p>
+        <p>
+          <a href="https://arxiv.org/abs/2403.02310" target="_blank" rel="noopener noreferrer">Sarathi-Serve</a>
+          的回答是 chunked prefill：不要把一个 32k prompt 当成一段不可打断的工作，而是切成固定 token budget 的多个小块。
+          每个 iteration 用「已有 decode token + 一块 prefill token」组成近似等成本的 batch。它不能消除共享 GPU 的竞争，
+          但把一次最坏的阻塞时间，从“整段 prompt 的执行时间”压到“一个 chunk 的执行时间”。
+        </p>
+        <table class="decision-table">
+          <thead>
+            <tr>
+              <th>路线</th>
+              <th>消除的矛盾</th>
+              <th>仍保留的矛盾</th>
+              <th>适用前提</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>同池 continuous batching</td>
+              <td>减少空洞 batch，提高整体 token 吞吐</td>
+              <td>prefill 会干扰 decode，TTFT/TPOT 需二选一</td>
+              <td>小规模部署，SLO 不紧</td>
+            </tr>
+            <tr>
+              <td>chunked prefill</td>
+              <td>限制单次 prefill 对 decode 的最大阻塞</td>
+              <td>两阶段依旧竞争同一份权重、HBM 与 GPU 时间</td>
+              <td>不能或不值得传 KV，且长 prompt 混部明显</td>
+            </tr>
+            <tr>
+              <td>PD disaggregation</td>
+              <td>资源、并行策略与排队队列解耦</td>
+              <td>需要 KV transfer、跨池路由和容量预测</td>
+              <td>多机、多卡，TTFT 与 TPOT 都有明确 SLO</td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="callout">
+          <strong>这里的因果要分清：</strong>
+          chunked prefill 解决的是「同池里一次 prefill 太长」；PD 分离解决的是「两个阶段本来就不该被迫共用同一资源比例和并行方案」。
+          前者是调度颗粒度优化，后者是资源架构优化，二者可以同时存在。
+        </div>
+
+        <h3>5.2 P/D 配比不是卡数比，而是两个服务站的稳定性问题</h3>
+        <p>
+          最容易误用的一条经验是「输入输出 token 比例是多少，P/D 卡数就按相同比例配」。它只在两个阶段的每 token 成本相同、
+          没有 batching、没有 KV transfer 时才接近成立，现实中这三个假设都不成立。正确做法是把 P 和 D 看成串联的两个服务站。
+        </p>
+        <div class="math-block" aria-label="P D capacity planning">
+          \[
+            \lambda \cdot E[N_{in}] &lt; C_P(n_P, TP_P, DP_P),
+            \qquad
+            \lambda \cdot E[N_{out}] &lt; C_D(n_D, TP_D, DP_D, E[S])
+          \]
+        </div>
+        <p>
+          \(\lambda\) 是请求到达率，\(E[N_{in}]\) 和 \(E[N_{out}]\) 是输入、输出 token 的均值；
+          \(C_P\) 是 prefill token capacity，\(C_D\) 是 decode token capacity。Decode 的容量还显式依赖上下文长度 \(S\)，
+          因为它要读 KV cache。实际容量规划不能只让不等式勉强成立，还要留出 burst、P95/P99 长度和负载不均的余量；
+          否则均值吞吐看似够用，队列一抖，TTFT 或 TPOT 的尾部立刻失守。
+        </p>
+        <p>
+          DistServe 把目标称为 <em>goodput</em>：不是所有完成的请求数，而是同时满足 TTFT、TPOT SLO 的有效请求率。
+          这个口径很重要。若为了 token/s 把 decode batch 无限加大，吞吐可能上升，TPOT 却超 SLO；从用户体验和商业容量看，
+          那部分吞吐不该算作可用容量。
+        </p>
+
+        <h3>5.3 KV transfer 何时不再是“小开销”</h3>
+        <p>
+          PD 分离把 prefill 已经算出的 KV 从 P 交给 D。传输数据量和 KV cache 占用同阶，因此长 prompt、更多层、更多 KV heads、
+          更高精度都会放大 transfer。粗略地说，若 P 到 D 的可用带宽为 \(BW_{PD}\)，则不可隐藏的下界为：
+        </p>
+        <div class="math-block" aria-label="KV transfer lower bound">
+          \[
+            T_{transfer} \gtrsim \frac{2 \times L \times N_{in} \times H_{kv} \times D_{head} \times \text{bytes}}{BW_{PD}}
+          \]
+        </div>
+        <p>
+          因此不能只问「网络是 IB 还是 RoCE」，还要问 P/D 是否拓扑邻近、NIC 是否和 GPU 同 NUMA、是否多 NIC 聚合、
+          传输是否能与后续工作重叠。Mooncake 的重点正是把 KV 看成一等公民：除了 P 到 D 的一次交接，还需要考虑 prefix reuse、
+          远端 cache 命中、热 block 副本和 decode 侧可接收容量。长上下文系统里，路由对象不再只是一个“空闲实例”，而是
+          「哪个实例最少搬 KV、又能按时接住这个请求」。
+        </p>
+        <figure class="diagram-figure diagram-figure--wide">
+          <img src="https://raw.githubusercontent.com/kvcache-ai/Mooncake/main/image/components.png" alt="Mooncake 项目架构图：Transfer Engine、Store、KV cache 与推理框架的关系" loading="lazy" width="1100" height="620" />
+          <figcaption>
+            <strong>Mooncake 项目架构图（原图）：</strong>
+            生产级 PD 分离不只是一条 P 到 D 的 RPC，而是数据搬运层、分布式 KV 存储层、调度和推理引擎的组合。
+            图像由 Mooncake 项目以 Apache-2.0 许可证发布；本文只借图说明组件边界，不把它当作任意部署的性能承诺。
+            <span class="fig-source"><a href="https://github.com/kvcache-ai/Mooncake/blob/main/image/components.png" target="_blank" rel="noopener noreferrer">kvcache-ai/Mooncake, Apache-2.0</a></span>
+          </figcaption>
+        </figure>
 
         <h2>六、用同一套框架分析 64 卡配置</h2>
         <p>
@@ -481,6 +589,58 @@
         <p>
           这张表不是固定答案，而是按前面的分析链路推出来的。你需要先确认：<code>decode tp=2</code> 是否放得下模型和目标上下文？
           TP group 是否跨节点？KV transfer 是否走高带宽链路？router 是否能让两个 decode pool 负载均衡？如果这些条件改变，排序也会改变。
+        </p>
+
+        <h3>6.1 先区分「单副本变快」和「集群服务变好」</h3>
+        <p>
+          在上述四个方案中，最容易出现的误判是：把单副本 benchmark 的最佳 TP，当成在线服务的最佳 TP。
+          对固定 batch、固定上下文测一次 decode forward，<code>tp=4</code> 可能因为每张卡承担更少权重或能容纳更大 batch 而表现不错；
+          但线上服务还要支付排队、group 内同步、长短请求混合、KV block 碎片和请求迁移代价。最终要比较的是 SLO 内的集群 goodput，
+          而不是某个 kernel 的 tokens/s。
+        </p>
+        <table class="calc-table">
+          <thead>
+            <tr>
+              <th>观察到的现象</th>
+              <th>不能直接推出</th>
+              <th>下一步应验证</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>tp=4</code> 单请求比 <code>tp=2</code> 快</td>
+              <td>线上 TPOT 一定更低</td>
+              <td>固定相同 active sequences 后，比较 P50/P95 TPOT 与 collective timeline</td>
+            </tr>
+            <tr>
+              <td>decode GPU utilization 很低</td>
+              <td>应该直接增加 TP</td>
+              <td>先看 HBM bandwidth、active batch、KV length 和通信等待时间</td>
+            </tr>
+            <tr>
+              <td>prefill tokens/s 很高</td>
+              <td>TTFT 一定低</td>
+              <td>检查 P 队列、最长 prompt、chunk size 和 D 接收背压</td>
+            </tr>
+            <tr>
+              <td>P/D 总卡数各 32</td>
+              <td>配比已经均衡</td>
+              <td>分别测 \(C_P\)、\(C_D\)，按真实输入输出长度分布估算利用率</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>6.2 TP group 的物理位置往往比 TP 数字更重要</h3>
+        <p>
+          <code>tp=8</code> 并不是一个完整描述。8 张卡若在同一 NVLink/NVSwitch 域内，all-reduce 的带宽和延迟通常可接受；
+          若 TP group 跨节点，collective 会经过 NIC 与网络，尤其在 decode 的逐层同步热路径中，TPOT 会被明显放大。
+          因此一个常见的部署原则是：优先把一个 TP group 放进高带宽域，把 DP 扩展到节点之间；若模型确实必须跨节点 TP，
+          要把这件事当成网络架构问题，而不是只改一个 <code>tensor_parallel_size</code> 参数。
+        </p>
+        <p>
+          对 MoE 模型还要追加一层：TP 通信之外有 expert dispatch / combine。此时 decode 的瓶颈可能从 KV 带宽变成 all-to-all，
+          P 和 D 的最优 TP、EP 配置未必沿用 dense 模型结论。文章中的「decode 小 TP、多 DP」是 dense LLM 的默认启发式，
+          不能跳过 MoE routing、expert load skew 和 EP 拓扑直接套用。
         </p>
 
         <div class="callout">
@@ -540,6 +700,69 @@
           每组都看 TTFT、TPOT、E2E latency、GPU 利用率、HBM 带宽、KV cache 使用率、队列时间和 P/D transfer 时间。
           只测一个平均 QPS，很容易把真正的瓶颈藏掉。
         </p>
+
+        <h3>7.1 一组足以推翻错误直觉的实验矩阵</h3>
+        <p>
+          测试时不要只固定一个平均长度。真实流量中长度分布通常长尾，恰恰是少量长 prompt 和长 output 决定了 P95/P99。
+          下面的矩阵不要求使用某个特定框架；vLLM、SGLang、TensorRT-LLM 或内部引擎都适用。关键是每次只改变一个变量，
+          并把开放循环到达率逐渐推到 SLO 开始失守的位置。
+        </p>
+        <table class="decision-table">
+          <thead>
+            <tr>
+              <th>组</th>
+              <th>输入 / 输出</th>
+              <th>用于验证</th>
+              <th>最关键指标</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>A</td>
+              <td>128 / 128</td>
+              <td>短请求的调度和基础开销</td>
+              <td>P50/P95 TTFT、首 token 额外延迟</td>
+            </tr>
+            <tr>
+              <td>B</td>
+              <td>128 / 2048</td>
+              <td>decode TP、DP 与 active batch 容量</td>
+              <td>P95 TPOT、decode queue、HBM bandwidth</td>
+            </tr>
+            <tr>
+              <td>C</td>
+              <td>8192 / 128</td>
+              <td>prefill 吞吐、长 prompt 队头阻塞、KV transfer</td>
+              <td>P95 TTFT、P transfer time、P queue</td>
+            </tr>
+            <tr>
+              <td>D</td>
+              <td>8192 / 2048</td>
+              <td>端到端容量、KV 容量和 P/D 背压</td>
+              <td>SLO goodput、OOM、KV utilization、P99</td>
+            </tr>
+            <tr>
+              <td>E</td>
+              <td>共享 system prompt / prefix</td>
+              <td>prefix cache 与 KV-aware routing 的真实收益</td>
+              <td>cache hit rate、节省的 prefill tokens、TTFT</td>
+            </tr>
+          </tbody>
+        </table>
+        <p>
+          每一个方案都应先在相同模型精度、相同 max context、相同 sampling 参数、相同请求 trace 下跑；否则所谓的配置差异，
+          可能只是 batch policy 或 cache budget 的差异。记录时至少保留每请求时间线：进入 P 队列、P 开始/结束、KV 开始/结束传输、
+          进入 D 队列、first token、last token。没有时间线，就很难区分「P 慢」「D 慢」和「D 没有空位接收」。
+        </p>
+
+        <aside class="aside-card">
+          <h3>建议的判定顺序</h3>
+          <p>
+            先以低到达率跑单阶段，得到 P 与 D 的基线；再逐步提高并发，找到先触发的是 TTFT 还是 TPOT SLO；
+            然后才调整 P/D 卡数；最后才在显存、安全 batch 和网络拓扑允许的范围内调整 TP。这样做能避免拿 TP 去修一个本该由队列、
+            路由或 KV transfer 解决的问题。
+          </p>
+        </aside>
 
         <section class="essay-ending">
           <h2>结语：从配置记忆，到结构推理</h2>
