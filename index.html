@@ -98,6 +98,24 @@
 
     <section id="blog" class="section">
       <div class="post-list" id="post-list">
+        <article class="post-card" data-category="inference" data-keywords="pd-disagg inference-systems hardware" data-date="2026-08-18" data-title="LLM 推理性能怎么分析：从 Prefill、Decode 到 PD 分离与并行策略">
+          <a href="posts/inference/llm-inference-prefill-decode-bottleneck-analysis.html" class="post-card-link">
+            <div class="post-meta-row">
+              <span class="post-tag">Inference</span>
+            </div>
+            <h3 class="post-title">LLM 推理性能怎么分析：从 Prefill、Decode 到 PD 分离与并行策略</h3>
+            <p class="post-excerpt">
+              从算子形状、Roofline、KV cache、TP 通信和 serving 指标出发，建立独立分析 LLM 推理部署方案的框架：为什么 prefill 偏 compute-bound，decode 偏 memory / latency-bound。
+            </p>
+            <p class="post-card-stats">2026年8月18日 · 11 分钟 · 3049 字 · MOFANG</p>
+          </a>
+          <div class="post-card-keywords">
+            <button class="post-keyword-chip" data-keyword="pd-disagg" type="button">PD 分离</button>
+            <button class="post-keyword-chip" data-keyword="inference-systems" type="button">推理框架</button>
+            <button class="post-keyword-chip" data-keyword="hardware" type="button">硬件与 Kernel</button>
+          </div>
+        </article>
+
         <article class="post-card" data-category="inference" data-keywords="speculative training" data-date="2026-08-18" data-title="DFlash 详解：Block Diffusion 如何把并行草稿做到可用">
           <a href="posts/inference/dflash-block-diffusion-speculative-decoding.html" class="post-card-link">
             <div class="post-meta-row">

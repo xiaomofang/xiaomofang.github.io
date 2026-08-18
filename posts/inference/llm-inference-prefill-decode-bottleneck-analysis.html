@@ -1,0 +1,648 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="night">
+<head>
+  <meta charset="UTF-8" />
+  <script>
+    (function () {
+      try {
+        var saved = localStorage.getItem("yichuan-theme");
+        var theme = saved || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "night" : "day");
+        document.documentElement.setAttribute("data-theme", theme);
+      } catch (e) {}
+    })();
+  </script>
+  <style>
+    html { font-size: 16px; }
+    @media (min-width: 1024px) { html { font-size: 26px; } }
+    @media (min-width: 1200px) { html { font-size: 34px; } }
+    html, body { margin: 0; min-height: 100%; }
+    html[data-theme="night"], html[data-theme="night"] body { background: #0c0c0c; color: #ededed; color-scheme: dark; }
+    html[data-theme="day"], html[data-theme="day"] body { background: #ffffff; color: #1a1a1a; color-scheme: light; }
+  </style>
+  <link rel="stylesheet" href="../../styles.css?v=70" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous" />
+  <title>LLM 推理性能怎么分析：从 Prefill、Decode 到 PD 分离与并行策略</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="description" content="从算子形状、Roofline、KV cache、TP 通信和 serving 指标出发，建立独立分析 LLM 推理部署方案的框架：为什么 prefill 偏 compute-bound、decode 偏 memory/latency-bound，以及如何判断 PD 配比与 TP/DP 策略。" />
+</head>
+<body>
+  <div class="ambient" aria-hidden="true"><span class="orb orb-a"></span><span class="orb orb-b"></span></div>
+  <canvas id="star-canvas"></canvas>
+
+  <header class="site-header">
+    <div class="header-inner">
+      <a href="../../index.html" class="logo">
+        <span class="logo-dot"></span>
+        <span class="logo-text">MOFANG</span>
+      </a>
+      <div class="header-actions">
+        <nav class="site-nav">
+          <a href="../../index.html">← Back</a>
+        </nav>
+        <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle theme">
+          <span class="icon-sun">☀️</span>
+          <span class="icon-moon">🌙</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="site-main">
+    <article class="post-page">
+      <header class="post-page-header">
+        <p class="post-page-category">Inference</p>
+        <h1 class="post-page-title">LLM 推理性能怎么分析：从 Prefill、Decode 到 PD 分离与并行策略</h1>
+        <p class="post-lead">
+          LLM 推理部署不是先背「TP 多少、DP 多少」的经验，而是先把请求拆成计算形状、访存、通信和调度。
+          一旦看清 <a href="https://arxiv.org/abs/2309.06180" target="_blank" rel="noopener noreferrer">vLLM / PagedAttention</a>、
+          <a href="https://arxiv.org/abs/2401.09670" target="_blank" rel="noopener noreferrer">DistServe</a>
+          这些系统背后的共同结构，就能独立判断为什么 prefill 偏 compute-bound、decode 偏 memory / latency-bound，以及 PD 分离该怎么配。
+        </p>
+        <div class="post-page-keywords" aria-label="Keywords">
+          <a class="post-keyword-chip" href="../../index.html?keyword=pd-disagg">PD 分离</a>
+          <a class="post-keyword-chip" href="../../index.html?keyword=inference-systems">推理框架</a>
+          <a class="post-keyword-chip" href="../../index.html?keyword=hardware">硬件与 Kernel</a>
+        </div>
+        <p class="post-page-meta" data-date="2026-08-18" data-author="MOFANG" data-minutes="11">2026年8月18日 · MOFANG</p>
+      </header>
+
+      <section class="post-page-content">
+        <p>
+          这篇文章写给一个很具体的问题：看到类似 <code>4p(tp=8,dp=1), 2d(dp=8,tp=2)</code> 的配置时，为什么有人能快速判断
+          「decode 侧 TP=2 通常更稳」「长 prompt 要看 prefill 队列」「长上下文要看 KV cache」？这不是玄学，也不是只靠经验。
+          它背后有一条可复用的分析链路：
+        </p>
+
+        <div class="math-block" aria-label="LLM 推理性能分析链路">
+          \[
+            \text{请求长度分布}
+            \rightarrow \text{算子形状}
+            \rightarrow \text{计算 / 访存 / 通信瓶颈}
+            \rightarrow \text{并行策略}
+            \rightarrow \text{TTFT / TPOT / 吞吐 / 尾延迟}
+          \]
+        </div>
+
+        <div class="logic-map" aria-label="文章逻辑地图">
+          <div class="map-node map-node--start">
+            <span>1</span>
+            <strong>先拆阶段</strong>
+            <p>prefill 是大步；decode 是逐 token 小步循环。</p>
+          </div>
+          <div class="map-arrow">→</div>
+          <div class="map-node map-node--ar">
+            <span>2</span>
+            <strong>再判瓶颈</strong>
+            <p>Roofline 把 compute-bound 和 memory-bound 分开。</p>
+          </div>
+          <div class="map-arrow">→</div>
+          <div class="map-node map-node--par">
+            <span>3</span>
+            <strong>落到并行</strong>
+            <p>TP 降显存但增通信；DP 增副本但分散 cache。</p>
+          </div>
+          <div class="map-arrow">→</div>
+          <div class="map-node map-node--conv">
+            <span>4</span>
+            <strong>映射指标</strong>
+            <p>TTFT 看 prefill 与交接；TPOT 看 decode 每步。</p>
+          </div>
+        </div>
+
+        <h2>一、第一性问题：同一个模型，为什么 Prefill 和 Decode 瓶颈不同</h2>
+        <p>
+          Decoder-only Transformer 的一层可以粗略拆成 QKV projection、attention、O projection、MLP、norm 和 residual。
+          训练时我们习惯把它看成一个整体，但推理时必须拆成两个阶段：prefill 处理已有 prompt，decode 逐 token 生成新内容。
+        </p>
+        <table class="decision-table">
+          <thead>
+            <tr>
+              <th>阶段</th>
+              <th>输入形状</th>
+              <th>主要动作</th>
+              <th>常见瓶颈</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Prefill</td>
+              <td><code>[B, S, H]</code></td>
+              <td>一次性处理 prompt，写出整段 KV cache</td>
+              <td>大 GEMM、attention 计算，通常更偏 compute-bound</td>
+            </tr>
+            <tr>
+              <td>Decode</td>
+              <td><code>[B, 1, H]</code></td>
+              <td>每步生成 1 个 token，读取历史 KV，再写入新 KV</td>
+              <td>KV 读取、通信同步、调度开销，通常更偏 memory / latency-bound</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <p>
+          这里的关键不是「prefill token 多、decode token 少」这么简单，而是矩阵形状变了。设 batch size 为 \(B\)，prompt 长度为 \(S\)，hidden size 为 \(H\)。
+          prefill 里 MLP 的大矩阵乘接近：
+        </p>
+        <div class="math-block" aria-label="prefill GEMM shape">
+          \[
+            [B\cdot S, H] \times [H, 4H]
+          \]
+        </div>
+        <p>
+          decode 每步则接近：
+        </p>
+        <div class="math-block" aria-label="decode GEMM shape">
+          \[
+            [B, H] \times [H, 4H]
+          \]
+        </div>
+        <p>
+          当 \(S\) 很大时，prefill 的矩阵乘有足够多 token 维度去摊薄 kernel launch、访存和通信开销；decode 每次只有一步，除非 batch 非常大，否则 GPU 很容易吃不满。
+        </p>
+
+        <figure class="diagram-figure diagram-figure--wide">
+          <svg viewBox="0 0 840 330" role="img" aria-label="Prefill 与 Decode 的计算形状对比">
+            <rect x="32" y="36" width="354" height="238" rx="16" class="d-zone-blue" />
+            <text x="56" y="68" class="d-tag-blue">PREFILL · 大步</text>
+            <rect x="70" y="98" width="110" height="128" rx="10" class="d-box-blue" />
+            <text x="125" y="152" text-anchor="middle" class="d-label">B·S</text>
+            <text x="125" y="174" text-anchor="middle" class="d-muted">很多 token</text>
+            <text x="206" y="168" text-anchor="middle" class="d-title">×</text>
+            <rect x="236" y="112" width="112" height="100" rx="10" class="d-box" />
+            <text x="292" y="154" text-anchor="middle" class="d-label">H → 4H</text>
+            <text x="209" y="252" text-anchor="middle" class="d-muted">大 GEMM，算力更容易吃满</text>
+
+            <rect x="454" y="36" width="354" height="238" rx="16" class="d-zone-orange" />
+            <text x="478" y="68" class="d-tag-orange">DECODE · 小步循环</text>
+            <rect x="492" y="132" width="110" height="58" rx="10" class="d-box-orange" />
+            <text x="547" y="156" text-anchor="middle" class="d-label">B</text>
+            <text x="547" y="174" text-anchor="middle" class="d-muted">每步 1 token</text>
+            <text x="628" y="168" text-anchor="middle" class="d-title">×</text>
+            <rect x="658" y="112" width="112" height="100" rx="10" class="d-box" />
+            <text x="714" y="154" text-anchor="middle" class="d-label">H → 4H</text>
+            <text x="631" y="252" text-anchor="middle" class="d-muted">小 GEMM + KV 读取 + 同步</text>
+          </svg>
+          <figcaption>
+            Prefill 和 decode 跑的是同一个模型层，但矩阵乘的 token 维度完全不同。性能分析先从形状开始，而不是从卡数开始。
+          </figcaption>
+        </figure>
+
+        <div class="callout">
+          <strong>第一条结论：</strong>
+          prefill 的大 GEMM 计算密度高，通常更能吃 Tensor Core；decode 的每步计算小，还要读历史 KV、做通信和调度，所以更容易被显存带宽、通信延迟和调度开销限制。
+        </div>
+
+        <h2>二、用 Roofline 判断：到底是算不动，还是喂不饱</h2>
+        <p>
+          性能分析里最有用的入门模型是 Roofline。它不告诉你全部细节，但能逼你先问一个问题：一个算子慢，是因为算力不够，还是因为数据搬运不够快？
+        </p>
+        <div class="math-block" aria-label="roofline runtime model">
+          \[
+            T \approx \max\left(\frac{\text{FLOPs}}{\text{Peak FLOPS}},\frac{\text{Bytes}}{\text{Memory Bandwidth}}\right)
+          \]
+        </div>
+        <p>
+          另一个等价视角是 arithmetic intensity：
+        </p>
+        <div class="math-block" aria-label="arithmetic intensity">
+          \[
+            \text{Arithmetic Intensity} = \frac{\text{FLOPs}}{\text{Bytes}}
+          \]
+        </div>
+        <p>
+          如果一个算子每读 1 byte 能做很多计算，它更可能 compute-bound；如果读写很多、计算很少，它更可能 memory-bound。
+          大 GEMM 往往计算密度高，KV cache 读取、LayerNorm、sampling、小 batch decode 往往计算密度低。
+        </p>
+
+        <table class="calc-table">
+          <thead>
+            <tr>
+              <th>模块</th>
+              <th>读写特征</th>
+              <th>计算特征</th>
+              <th>直觉判断</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Prefill MLP / QKV GEMM</td>
+              <td>权重和激活可在 tile 内复用</td>
+              <td>矩阵大，FLOPs 多</td>
+              <td>更偏 compute-bound</td>
+            </tr>
+            <tr>
+              <td>Decode KV attention</td>
+              <td>每步读取历史 K/V，长度随上下文增长</td>
+              <td>当前 query 很少</td>
+              <td>更偏 memory-bandwidth-bound</td>
+            </tr>
+            <tr>
+              <td>TP collective</td>
+              <td>跨 GPU 交换 partial result</td>
+              <td>不产生模型计算</td>
+              <td>更偏 communication-bound</td>
+            </tr>
+            <tr>
+              <td>Scheduler / batching</td>
+              <td>元数据、队列、block 管理</td>
+              <td>模型计算外开销</td>
+              <td>更偏 latency-bound</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <p>
+          这解释了为什么「GPU 利用率低」不能直接等价于「卡不够」。decode GPU 利用率低，可能是 batch 不够大，也可能是 HBM 带宽、KV cache、TP 同步或调度器把它卡住了。
+        </p>
+
+        <aside class="aside-card">
+          <h3>一个手算例子：为什么 decode 会被 KV 拖慢</h3>
+          <p>
+            假设模型有 80 层，GQA 后每层 KV 大约需要读取 16 个 KV head，每个 head 维度 128，bf16 为 2 bytes。
+            单个请求、上下文长度 8192 时，每步只读 KV 的量近似是：
+          </p>
+          <div class="math-block" aria-label="KV bytes example">
+            \[
+              2 \times 80 \times 8192 \times 16 \times 128 \times 2 \approx 5.37\ \text{GB}
+            \]
+          </div>
+          <p>
+            这里的第一个 2 是 K 和 V。实际实现会有并行切分、cache layout、kernel 优化和重用，但这个数量级足够说明：长上下文 decode 每生成一个 token 都在持续扫描历史状态。
+          </p>
+        </aside>
+
+        <h2>三、KV Cache 是 Decode 的第二个模型</h2>
+        <p>
+          很多新手分析 decode 时只看权重大小，但线上 serving 里 KV cache 经常和权重一样重要。KV cache 的显存占用近似为：
+        </p>
+        <div class="math-block" aria-label="KV cache size formula">
+          \[
+            \text{KV} \approx 2 \times L \times S \times H_{kv} \times D_{head} \times \text{bytes} \times B
+          \]
+        </div>
+        <p>
+          其中 \(L\) 是层数，\(S\) 是上下文长度，\(H_{kv}\) 是 KV heads 数，\(D_{head}\) 是 head 维度，\(B\) 是并发 batch。
+          MQA / GQA 的价值，就在于让 \(H_{kv}\) 小于 attention heads，从源头减少 KV cache。
+        </p>
+
+        <p>
+          这条公式能解释两类部署现象。第一，长上下文不只是 prefill 慢，decode 每个 token 也会变慢，因为每步读的历史 KV 变长。
+          第二，decode 侧提高 TP，比如从 <code>tp=2</code> 到 <code>tp=4</code>，常常不是为了更低 TPOT，而是为了降低单卡权重和 KV 压力，让更长上下文或更大 batch 放得下。
+        </p>
+
+        <div class="callout">
+          <strong>第二条结论：</strong>
+          decode TP 变大通常是容量手段，不是延迟手段。它可能让显存更安全，但会引入更多 collective，同步延迟可能让 TPOT 变差。
+        </div>
+
+        <h2>四、TP/DP 的本质：一个换显存，一个换副本</h2>
+        <p>
+          Tensor Parallelism 把单层权重切到多张 GPU 上。它的好处是单卡显存压力下降、单层计算被拆分；代价是每层需要在 TP group 内通信。
+          Data Parallelism 则复制完整 replica；它不降低单 replica 内的显存压力，但能提供更多并发服务副本。
+        </p>
+        <table class="decision-table">
+          <thead>
+            <tr>
+              <th>并行方式</th>
+              <th>主要收益</th>
+              <th>主要代价</th>
+              <th>推理部署直觉</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>TP</td>
+              <td>降低单卡权重 / KV 压力，提高单 replica 容量</td>
+              <td>每层 collective，TP 越大通信越复杂</td>
+              <td>prefill 更能摊薄；decode 更敏感</td>
+            </tr>
+            <tr>
+              <td>DP</td>
+              <td>增加 replica 数，降低排队，提高并发</td>
+              <td>权重复制，占用更多总显存</td>
+              <td>decode 通常喜欢更多 DP</td>
+            </tr>
+            <tr>
+              <td>PP</td>
+              <td>跨层切分，适合超大模型跨节点</td>
+              <td>bubble、流水调度和首 token latency</td>
+              <td>在线 decode 要谨慎</td>
+            </tr>
+            <tr>
+              <td>EP</td>
+              <td>MoE expert 分布式放置</td>
+              <td>token routing 和 all-to-all</td>
+              <td>MoE 模型必须单独分析</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <p>
+          通信时间可以粗略写成：
+        </p>
+        <div class="math-block" aria-label="communication time model">
+          \[
+            T_{comm} \approx \text{latency} \times N_{collectives} + \frac{\text{Bytes}}{\text{Bandwidth}}
+          \]
+        </div>
+        <p>
+          decode 阶段每生成一个 token 都要跑所有层，且每层可能都有 collective。因为单步计算量小，通信 latency 很难被隐藏。
+          这就是为什么 <code>decode tp=2</code> 往往比 <code>decode tp=4</code> 更利于低 TPOT，前提是显存放得下。
+        </p>
+
+        <figure class="diagram-figure diagram-figure--wide">
+          <svg viewBox="0 0 840 360" role="img" aria-label="TP 与 DP 在 decode 侧的代价差异">
+            <rect x="34" y="44" width="350" height="240" rx="16" class="d-zone-blue" />
+            <text x="58" y="76" class="d-tag-blue">小 TP · 多 DP</text>
+            <rect x="62" y="108" width="128" height="54" rx="10" class="d-box-blue" />
+            <rect x="214" y="108" width="128" height="54" rx="10" class="d-box-blue" />
+            <rect x="62" y="184" width="128" height="54" rx="10" class="d-box-blue" />
+            <rect x="214" y="184" width="128" height="54" rx="10" class="d-box-blue" />
+            <text x="126" y="140" text-anchor="middle" class="d-label">TP2 replica</text>
+            <text x="278" y="140" text-anchor="middle" class="d-label">TP2 replica</text>
+            <text x="126" y="216" text-anchor="middle" class="d-label">TP2 replica</text>
+            <text x="278" y="216" text-anchor="middle" class="d-label">TP2 replica</text>
+            <text x="209" y="262" text-anchor="middle" class="d-muted">副本多，并发强，单步通信较低</text>
+
+            <rect x="456" y="44" width="350" height="240" rx="16" class="d-zone-orange" />
+            <text x="480" y="76" class="d-tag-orange">大 TP · 少 DP</text>
+            <rect x="492" y="118" width="278" height="54" rx="10" class="d-box-orange" />
+            <rect x="492" y="194" width="278" height="54" rx="10" class="d-box-orange" />
+            <text x="631" y="150" text-anchor="middle" class="d-label">TP4 replica</text>
+            <text x="631" y="226" text-anchor="middle" class="d-label">TP4 replica</text>
+            <text x="631" y="272" text-anchor="middle" class="d-muted">容量更大，但副本少、collective 更重</text>
+          </svg>
+          <figcaption>
+            同样 32 张 decode 卡，<code>dp=16,tp=2</code> 与 <code>dp=8,tp=4</code> 的总卡数相同，但延迟、并发和显存压力完全不同。
+          </figcaption>
+        </figure>
+
+        <h2>五、PD 分离：把 TTFT 和 TPOT 拆开优化</h2>
+        <p>
+          PD 分离的核心不是多起几个进程，而是承认 prefill 与 decode 的资源曲线不同。prefill 影响首 token 前的计算和排队；decode 影响后续每个 token 的速度。
+          因此两个关键指标可以拆成：
+        </p>
+        <div class="math-block" aria-label="TTFT and TPOT decomposition">
+          \[
+            \text{TTFT} \approx T_{queue}^{P} + T_{prefill} + T_{kv\ transfer} + T_{first\ decode}
+          \]
+          \[
+            \text{E2E} \approx \text{TTFT} + N_{out} \times \text{TPOT}
+          \]
+        </div>
+        <p>
+          如果请求是长 prompt、短 output，TTFT 往往主导体验；如果是短 prompt、长 output，TPOT 往往主导体验。
+          这就是 P/D 配比必须跟 workload 绑定的原因。
+        </p>
+
+        <table class="decision-table">
+          <thead>
+            <tr>
+              <th>流量形态</th>
+              <th>压力位置</th>
+              <th>更该优化</th>
+              <th>配置倾向</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>短 prompt、长 output</td>
+              <td>decode 长时间占用</td>
+              <td>TPOT、decode 并发</td>
+              <td>decode 小 TP、多 DP</td>
+            </tr>
+            <tr>
+              <td>长 prompt、短 output</td>
+              <td>prefill 大请求排队</td>
+              <td>TTFT、prefill 吞吐</td>
+              <td>更多 prefill 副本，长短请求隔离</td>
+            </tr>
+            <tr>
+              <td>长 prompt、长 output</td>
+              <td>两侧都重，KV cache 大</td>
+              <td>TTFT、TPOT、显存容量</td>
+              <td>PD 分流 + decode 容量校验</td>
+            </tr>
+            <tr>
+              <td>共享 prefix 多</td>
+              <td>重复 prefill 浪费</td>
+              <td>prefix cache 命中</td>
+              <td>KV-aware routing、RadixAttention 类机制</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <p>
+          例如同样 64 卡，<code>4p(tp=8,dp=1), 1d(dp=16,tp=2)</code> 与 <code>4p(tp=8,dp=1), 2d(dp=8,tp=2)</code>
+          的 decode 总卡数一样，但后者把 decode pool 分成两个故障域和调度域。理论峰值未必更高，尾延迟和长短请求隔离却可能更稳。
+        </p>
+
+        <h2>六、用同一套框架分析 64 卡配置</h2>
+        <p>
+          现在回到一个具体例子。四个方案都大致把 32 卡给 prefill，32 卡给 decode：
+        </p>
+        <table class="decision-table">
+          <thead>
+            <tr>
+              <th>方案</th>
+              <th>会变好</th>
+              <th>会变差</th>
+              <th>更适合</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>4p(tp=8,dp=1), 1d(dp=16,tp=2)</code></td>
+              <td>decode replica 多，TPOT 和并发通常好</td>
+              <td>单个 decode pool 较大，长短混合可能有队头阻塞</td>
+              <td>短 prompt、长输出、高并发</td>
+            </tr>
+            <tr>
+              <td><code>4p(tp=8,dp=1), 1d(dp=8,tp=4)</code></td>
+              <td>单 replica 显存更宽松，KV/batch 容量更大</td>
+              <td>TP 通信更重，decode 副本减半，TPOT 常变差</td>
+              <td>超长上下文或显存压力大</td>
+            </tr>
+            <tr>
+              <td><code>4p(tp=8,dp=1), 2d(dp=8,tp=2)</code></td>
+              <td>decode 隔离更好，长短请求可分流，尾延迟更稳</td>
+              <td>需要更好的路由，否则两个 d 可能负载不均</td>
+              <td>综合默认，长短混部</td>
+            </tr>
+            <tr>
+              <td><code>2p(tp=8,dp=2), 2d(dp=8,tp=2)</code></td>
+              <td>prefill engine 少，内部 batching 可能更集中</td>
+              <td>prefill 路由粒度变粗，TTFT 尾延迟可能不如 4p 稳</td>
+              <td>prefill DP 调度成熟的框架</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <p>
+          这张表不是固定答案，而是按前面的分析链路推出来的。你需要先确认：<code>decode tp=2</code> 是否放得下模型和目标上下文？
+          TP group 是否跨节点？KV transfer 是否走高带宽链路？router 是否能让两个 decode pool 负载均衡？如果这些条件改变，排序也会改变。
+        </p>
+
+        <div class="callout">
+          <strong>一个实用默认：</strong>
+          如果没有特殊显存约束，先试 <code>4p(tp=8,dp=1), 2d(dp=8,tp=2)</code>。它不是所有 workload 的理论最优，
+          但通常在 TTFT、TPOT、隔离性和工程风险之间最均衡。
+        </div>
+
+        <h2>七、训练独立分析能力：六步检查表</h2>
+        <p>
+          以后看到任何 LLM 推理配置，都可以按下面六步拆。不要先问「别人怎么配」，先问系统结构允许你推导出什么。
+        </p>
+        <table class="calc-table">
+          <thead>
+            <tr>
+              <th>步骤</th>
+              <th>问题</th>
+              <th>判断方向</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>1. 算资源</td>
+              <td><code>p_num * tp * dp</code> 和 <code>d_num * tp * dp</code> 各是多少？</td>
+              <td>先确认 P/D 总卡数，而不是被名字迷惑</td>
+            </tr>
+            <tr>
+              <td>2. 看 workload</td>
+              <td>输入长、输出长、并发高、SLO 卡 TTFT 还是 TPOT？</td>
+              <td>长输入偏 P，长输出偏 D</td>
+            </tr>
+            <tr>
+              <td>3. 看形状</td>
+              <td>主要是在跑 <code>[B*S,H]</code> 大 GEMM，还是 <code>[B,H]</code> 小步循环？</td>
+              <td>判断 compute-bound 还是 memory / latency-bound</td>
+            </tr>
+            <tr>
+              <td>4. 看 KV</td>
+              <td>上下文长度、GQA/MQA、block size、prefix cache 命中如何？</td>
+              <td>判断 decode 显存和带宽压力</td>
+            </tr>
+            <tr>
+              <td>5. 看通信</td>
+              <td>TP 是否跨机？collective 次数和带宽如何？KV transfer 是否拥塞？</td>
+              <td>decode 对通信 latency 更敏感</td>
+            </tr>
+            <tr>
+              <td>6. 映射指标</td>
+              <td>变化影响 TTFT、TPOT、goodput 还是 tail latency？</td>
+              <td>避免只看平均吞吐</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <p>
+          最后一定要用实验校验直觉。建议至少压四组 workload：短输入短输出、短输入长输出、长输入短输出、长输入长输出。
+          每组都看 TTFT、TPOT、E2E latency、GPU 利用率、HBM 带宽、KV cache 使用率、队列时间和 P/D transfer 时间。
+          只测一个平均 QPS，很容易把真正的瓶颈藏掉。
+        </p>
+
+        <section class="essay-ending">
+          <h2>结语：从配置记忆，到结构推理</h2>
+          <p>
+            LLM 推理配置没有脱离 workload 的最优解。<code>tp=8</code>、<code>dp=16</code>、<code>4p2d</code> 这些数字只是结果，
+            不是原因。真正可迁移的能力，是把请求拆成 prefill 和 decode，把每个阶段拆成计算、访存、通信和调度，再把它们映射到 TTFT、TPOT、吞吐和尾延迟。
+          </p>
+          <p>
+            记住这条主线就够了：prefill 是大矩阵，通常更能吃算力；decode 是逐 token 小步循环，通常更怕 KV、通信和调度。
+            PD 分离的价值，就是允许你不再用同一套并行策略同时迁就两个阶段。
+          </p>
+        </section>
+
+        <section class="references-section">
+          <h2>参考与延伸阅读</h2>
+          <ol>
+            <li>
+              <a href="https://arxiv.org/abs/2401.09670" target="_blank" rel="noopener noreferrer">
+                DistServe: Disaggregating Prefill and Decoding for Goodput-optimized Large Language Model Serving
+              </a>
+              <span>PD 分离、goodput、TTFT / TPOT 资源配比的核心论文。</span>
+            </li>
+            <li>
+              <a href="https://arxiv.org/abs/2311.18677" target="_blank" rel="noopener noreferrer">
+                Splitwise: Efficient Generative LLM Inference Using Phase Splitting
+              </a>
+              <span>从 phase splitting 角度解释为什么 prefill 与 decode 适合使用不同资源。</span>
+            </li>
+            <li>
+              <a href="https://arxiv.org/abs/2407.00079" target="_blank" rel="noopener noreferrer">
+                Mooncake: A KVCache-centric Disaggregated Architecture for LLM Serving
+              </a>
+              <span>从 KV cache 视角理解 PD 分离、KV transfer 与长上下文服务。</span>
+            </li>
+            <li>
+              <a href="https://arxiv.org/abs/2309.06180" target="_blank" rel="noopener noreferrer">
+                Efficient Memory Management for Large Language Model Serving with PagedAttention
+              </a>
+              <span>vLLM 的基础论文，理解 KV cache 分页、continuous batching 和显存管理必读。</span>
+            </li>
+            <li>
+              <a href="https://www.usenix.org/conference/osdi22/presentation/yu" target="_blank" rel="noopener noreferrer">
+                Orca: A Distributed Serving System for Transformer-Based Generative Models
+              </a>
+              <span>iteration-level scheduling 和 continuous batching 的经典系统论文。</span>
+            </li>
+            <li>
+              <a href="https://arxiv.org/abs/2403.02310" target="_blank" rel="noopener noreferrer">
+                Sarathi-Serve: Efficient LLM Inference by Piggybacking Decodes with Chunked Prefills
+              </a>
+              <span>理解 chunked prefill、prefill/decode 混合调度和尾延迟 tradeoff。</span>
+            </li>
+            <li>
+              <a href="https://arxiv.org/abs/1909.08053" target="_blank" rel="noopener noreferrer">
+                Megatron-LM: Training Multi-Billion Parameter Language Models Using Model Parallelism
+              </a>
+              <span>Tensor Parallelism 的基础来源之一，理解 TP 通信模式的入口。</span>
+            </li>
+            <li>
+              <a href="mooncake-connector-pd-control-plane.html">
+                Mooncake Connector 读码（一）：PD 分离里，vLLM 到底在编排什么
+              </a>
+              <span>本站对 vLLM-Ascend Mooncake Connector 控制面的读码笔记。</span>
+            </li>
+          </ol>
+        </section>
+      </section>
+
+      <section class="comments-section" id="comments" aria-label="Discussion">
+        <div class="comments-header">
+          <h2>Discussion</h2>
+        </div>
+        <div id="utterances-container" class="utterances-container"></div>
+        <noscript>请启用 JavaScript 后查看评论区。</noscript>
+      </section>
+    </article>
+  </main>
+
+  <footer class="site-footer">
+    <span class="footer-credit">
+      <span class="footer-prefix">© 2026 by</span>
+      <a href="../../index.html" class="footer-brand">
+        <span class="brand-mascot-frame brand-mascot-frame--inline" aria-hidden="true">
+          <picture>
+            <source srcset="../../assets/avatar-mascot.webp" type="image/webp" />
+            <img src="../../assets/avatar-mascot.png" alt="" class="brand-mascot" width="27" height="27" decoding="async" />
+          </picture>
+        </span>
+        <span>MOFANG</span>
+      </a>
+    </span>
+  </footer>
+
+  <script src="../../app.js?v=43"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" crossorigin="anonymous"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js" crossorigin="anonymous"
+    onload="renderMathInElement(document.body, {
+      delimiters: [
+        {left: '\\[', right: '\\]', display: true},
+        {left: '\\(', right: '\\)', display: false}
+      ],
+      ignoredTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code', 'option', 'svg'],
+      throwOnError: false
+    });"></script>
+</body>
+</html>
