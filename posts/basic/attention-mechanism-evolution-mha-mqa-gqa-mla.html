@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="night">
+<head>
+  <meta charset="UTF-8" />
+  <script>
+    (function () {
+      try {
+        var saved = localStorage.getItem("yichuan-theme");
+        var theme = saved || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "night" : "day");
+        document.documentElement.setAttribute("data-theme", theme);
+      } catch (e) {}
+    })();
+  </script>
+  <link rel="stylesheet" href="../../styles.css?v=60" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous" />
+  <title>注意力机制如何演变：从 MHA 到 MQA、GQA 与 MLA</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="description" content="从 Multi-Head Attention 到 Multi-Query、Grouped-Query 与 Multi-head Latent Attention，解释 KV cache、表达能力和推理带宽之间的结构性权衡。" />
+</head>
+<body>
+  <div class="ambient" aria-hidden="true"><span class="orb orb-a"></span><span class="orb orb-b"></span></div>
+  <canvas id="star-canvas"></canvas>
+  <header class="site-header">
+    <div class="header-inner">
+      <a href="../../index.html" class="logo"><span class="logo-dot"></span><span class="logo-text">MOFANG</span></a>
+      <div class="header-actions">
+        <nav class="site-nav"><a href="../../index.html">← Back</a></nav>
+        <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle theme"><span class="icon-sun">☀️</span><span class="icon-moon">🌙</span></button>
+      </div>
+    </div>
+  </header>
+
+  <main class="site-main">
+    <article class="post-page">
+      <header class="post-page-header">
+        <p class="post-page-category">Basic Knowledge</p>
+        <h1 class="post-page-title">注意力机制如何演变：从 MHA 到 MQA、GQA 与 MLA</h1>
+        <p class="post-lead">MHA、MQA、GQA、MLA 不是四个互不相干的缩写，而是同一个问题的四次重新参数化：在不让 query 的多头表达能力消失的前提下，怎样减少每个 token 必须携带、读取和通信的 Key/Value 状态。本文以原论文为主线，解释每一步为什么出现，以及它换来了什么、又牺牲了什么。</p>
+        <div class="post-page-keywords" aria-label="Keywords">
+          <a class="post-keyword-chip" href="../../index.html?keyword=attention">Attention 加速</a>
+          <a class="post-keyword-chip" href="../../index.html?keyword=hardware">硬件与 Kernel</a>
+        </div>
+        <p class="post-page-meta" data-date="2026-09-05" data-author="MOFANG" data-minutes="24">2026年9月5日 · 24 分钟 · 0 字 · MOFANG</p>
+      </header>
+
+      <section class="post-page-content">
+        <p>先把结论放在桌面上：<strong>训练时，Q/K/V 的计算量都重要；自回归推理时，历史 K/V 的存储和搬运往往更先成为瓶颈。</strong> 因而演变方向不是简单地“减少 head”，而是把共享发生在不同层次：MHA 不共享，MQA 全共享，GQA 分组共享，MLA 则进一步把历史状态压缩成低维 latent。</p>
+
+        <div class="logic-map" aria-label="注意力机制演变逻辑地图">
+          <div class="map-node"><span>1</span><strong>MHA</strong><p>每个 query head 都有独立 K/V，表达最完整。</p></div>
+          <div class="map-arrow">→</div>
+          <div class="map-node"><span>2</span><strong>MQA</strong><p>所有 query head 共享一组 K/V，KV cache 最小。</p></div>
+          <div class="map-arrow">→</div>
+          <div class="map-node"><span>3</span><strong>GQA</strong><p>把极端共享改成分组共享，恢复质量与带宽的平衡。</p></div>
+          <div class="map-arrow">→</div>
+          <div class="map-node"><span>4</span><strong>MLA</strong><p>不只共享 head，而是压缩历史 KV 的表示。</p></div>
+        </div>
+
+        <h2>一、统一坐标：注意力究竟在缓存什么</h2>
+        <h3>1.1 从 scaled dot-product attention 开始</h3>
+        <p>给定 query、key、value，单个 head 的注意力是：</p>
+        <div class="math-block" aria-label="Scaled dot product attention">
+          \[
+          \operatorname{Attention}(Q,K,V)=\operatorname{softmax}\left(\frac{QK^{\mathsf T}}{\sqrt{d_k}}\right)V
+          \]
+        </div>
+        <p>在 decoder 的第 \(t\) 步，当前 query 只对应一个新 token，但它要和位置 \(1\) 到 \(t\) 的所有 key 做匹配。因此历史 \(K_{1:t}\) 和 \(V_{1:t}\) 会被放入 KV cache。若 batch 为 \(B\)、层数为 \(L\)、KV head 数为 \(H_{kv}\)、每个 head 维度为 \(d\)，半精度 KV cache 的近似字节数是：</p>
+        <div class="math-block">
+          \[
+          \operatorname{KVBytes}\approx 2\times B\times L\times T\times H_{kv}\times d\times 2
+          \]
+        </div>
+        <p>第一个 2 是 K 与 V，第二个 2 是 FP16 每元素字节数。这个式子直接揭示了优化入口：在模型宽度和上下文长度不变时，把 \(H_{kv}\) 从 query head 数降下来，cache 和每步读取量就近似线性下降。</p>
+        <aside class="aside-card"><strong>不要混淆两个 head 数。</strong> Query head 数 \(H_q\) 决定当前 token 有多少种独立的匹配视角；KV head 数 \(H_{kv}\) 决定历史状态复制多少份。MHA 中二者相等，MQA 中 \(H_{kv}=1\)，GQA 位于二者之间。</aside>
+
+        <h3>1.2 一个可手算的 cache 例子</h3>
+        <p>假设单层、batch=1、上下文 \(T=4096\)、head 维度 \(d=128\)，比较 32 个 query heads 的三种布局。MHA 有 32 个 KV heads，MQA 有 1 个，GQA-8 有 8 个：</p>
+        <table class="decision-table">
+          <thead><tr><th>布局</th><th>KV heads</th><th>单层 KV 元素</th><th>相对 MHA</th></tr></thead>
+          <tbody>
+            <tr><td>MHA</td><td>32</td><td>2 × 4096 × 32 × 128 = 33,554,432</td><td>1×</td></tr>
+            <tr><td>GQA-8</td><td>8</td><td>2 × 4096 × 8 × 128 = 8,388,608</td><td>1/4</td></tr>
+            <tr><td>MQA</td><td>1</td><td>2 × 4096 × 1 × 128 = 1,048,576</td><td>1/32</td></tr>
+          </tbody>
+        </table>
+        <p>这只是一个 layer、一个 batch；乘上几十层和并发请求后，差距会直接进入显存容量、KV 传输和可容纳 batch 的计算。代价也同样清楚：共享越激进，所有 query head 能读取的历史内容越相似。</p>
+
+        <h2>二、MHA：表达能力的基准答案</h2>
+        <h3>2.1 Multi-Head Attention 的结构</h3>
+        <p>Transformer 论文将输入分别投影到多个子空间，每个 head 独立形成 \(Q_i,K_i,V_i\)，最后拼接并线性投影：</p>
+        <div class="math-block">
+          \[
+          \operatorname{MultiHead}(Q,K,V)=\operatorname{Concat}(head_1,\ldots,head_h)W^O,\quad
+          head_i=\operatorname{Attention}(QW_i^Q,KW_i^K,VW_i^V)
+          \]
+        </div>
+        <figure class="diagram-figure diagram-figure--wide">
+          <img src="https://arxiv.org/html/1706.03762/x3.png" alt="Attention Is All You Need 原论文 Figure 1：Transformer 编码器和解码器结构" loading="lazy" />
+          <figcaption>原论文 Figure 1：Transformer 的整体结构。MHA 位于 encoder/decoder block 的核心位置。</figcaption>
+          <span class="fig-source">原图：<a href="https://arxiv.org/abs/1706.03762" target="_blank" rel="noopener noreferrer">Vaswani et al., Attention Is All You Need</a></span>
+        </figure>
+        <p>MHA 的关键不是“有很多头”这件事本身，而是每个头拥有自己的 K/V 投影。某个头可以专注于局部位置、句法依赖或长距离指代，另一个头可以学习完全不同的相似度几何。训练阶段，这种独立性通常是最宽松的上限。</p>
+        <div class="callout"><strong>MHA 的隐性账单：</strong>在 decoder 推理中，独立的 K/V 会随序列长度累积。它并不只占显存，还会在每个 token 生成时被反复从 HBM 读出，成为典型的 memory-bandwidth 问题。</div>
+
+        <h2>三、MQA：保留多头 query，所有 head 共用历史</h2>
+        <h3>3.1 Shazeer 的极端共享</h3>
+        <p>MQA（Multi-Query Attention）的做法很直接：保留 \(H_q\) 个 query heads，但只使用一组 K/V。写成形状就是：</p>
+        <div class="math-block">
+          \[
+          Q\in\mathbb{R}^{T\times H_q\times d},\qquad K,V\in\mathbb{R}^{T\times 1\times d}
+          \]
+        </div>
+        <p>广播后的同一组 K/V 会被每个 query head 使用。于是不同 head 仍可通过不同的 \(W_i^Q\) 产生不同查询，却不能再通过独立的 key/value 表示保存不同历史视角。Shazeer 的论文报告了生成时的显著加速，根因正是把增量解码的内存带宽压力降了下来，而不是让矩阵乘法突然少了同样比例。</p>
+        <figure class="diagram-figure">
+          <p>MQA 原论文的完整结构图见参考链接。这里保留结构公式，避免把无法稳定直链的 PDF 图伪装成普通网页图片。</p>
+          <figcaption>MQA 的核心是多个 query head 共享单组 key/value；这是本文的自制文字说明，不是论文原图。</figcaption>
+          <span class="fig-source">论文来源：<a href="https://arxiv.org/abs/1911.02150" target="_blank" rel="noopener noreferrer">Shazeer, Fast Transformer Decoding: One Write-Head is All You Need</a></span>
+        </figure>
+        <h3>3.2 为什么 MQA 不是免费午餐</h3>
+        <p>如果一个 query head 学到“看句法”，另一个学到“看实体”，MHA 允许它们分别定义 key/value 空间；MQA 要求它们从同一份历史表示中取材。于是 MQA 的收益与风险是一一对应的：KV cache 从 \(H_q\) 份变成 1 份，但 head 之间的历史记忆容量也被压到一份。</p>
+        <p>工程上常见的做法是从 MHA checkpoint 迁移：把多个 K/V head 平均或复制成一组，再进行少量 uptraining。这个过程不是数学上等价的重参数化，而是用额外训练把性能损失补回来。</p>
+
+        <h2>四、GQA：把二元选择变成连续旋钮</h2>
+        <h3>4.1 分组共享</h3>
+        <p>GQA（Grouped-Query Attention）观察到 MHA 和 MQA 之间并非只有两个点。将 \(H_q\) 个 query heads 分成若干组，每组共享一个 K/V head：</p>
+        <div class="math-block">
+          \[
+          H_q = G\times r,\qquad H_{kv}=G,\qquad
+          K_i=K_{\lfloor i/r\rfloor},\;V_i=V_{\lfloor i/r\rfloor}
+          \]
+        </div>
+        <p>其中 \(1\le G=H_{kv}\le H_q\) 时，\(G=H_q\) 退化为 MHA，\(G=1\) 退化为 MQA。通常要求每组 query head 数 \(r=H_q/G\) 为整数。这样模型设计者有了一个可调旋钮：用更多 KV heads 买回表达能力，用更少 KV heads 换取 cache 和带宽。</p>
+        <figure class="diagram-figure diagram-figure--wide">
+          <img src="https://arxiv.org/html/2305.13245v3/images/gmq_architecture.png" alt="GQA 原论文中的 grouped-query attention architecture 图" loading="lazy" />
+          <figcaption>原论文 Figure 1：GQA 位于 MHA 与 MQA 之间，以 query group 共享 KV。</figcaption>
+          <span class="fig-source">原图：<a href="https://arxiv.org/abs/2305.13245" target="_blank" rel="noopener noreferrer">Ainslie et al., GQA: Training Generalized Multi-Query Transformer Models from Multi-Head Checkpoints</a></span>
+        </figure>
+        <h3>4.2 GQA 的迁移为何比 MQA 更稳</h3>
+        <p>从 MHA checkpoint 转成 GQA 时，只需把若干相邻或按规则选出的 K/V head 聚合成一组；每个 query head 仍保留自己的投影。分组数越大，丢掉的 K/V 子空间越少；分组数越小，解码读取越省。GQA 论文的贡献不只是提出结构，还给出从 MHA checkpoint 出发的 uptraining 路径，使实际模型不用从随机初始化重新学习。</p>
+        <table class="decision-table">
+          <thead><tr><th>机制</th><th>Q heads</th><th>KV heads</th><th>KV cache</th><th>主要风险</th></tr></thead>
+          <tbody>
+            <tr><td>MHA</td><td>H</td><td>H</td><td>最大</td><td>带宽与显存压力</td></tr>
+            <tr><td>GQA</td><td>H</td><td>G（1&lt;G&lt;H）</td><td>按 G/H 缩小</td><td>分组带来一定表达损失</td></tr>
+            <tr><td>MQA</td><td>H</td><td>1</td><td>最小</td><td>所有 head 争用同一历史表示</td></tr>
+          </tbody>
+        </table>
+        <aside class="aside-card"><strong>GQA 的本质：</strong>它没有改变 attention 的公式，也没有减少 query head 的数量；它改变的是 K/V 的“复用拓扑”。因此它通常是现有 MHA 模型走向高并发推理时最容易落地的折中。</aside>
+
+        <h2>五、MLA：从共享 head 到压缩历史状态</h2>
+        <h3>5.1 latent KV 的想法</h3>
+        <p>MLA（Multi-head Latent Attention）来自 DeepSeek-V2。它不满足于选择多少个 KV head，而是把 K/V 的历史信息压到一个低维 latent 向量 \(c_t^{KV}\)，推理时缓存 latent，而不是缓存每个 head 的完整 K/V：</p>
+        <div class="math-block">
+          \[
+          c_t^{KV}=W^{DKV}h_t,\qquad
+          k_t^C=W^{UK}c_t^{KV},\qquad v_t^C=W^{UV}c_t^{KV}
+          \]
+        </div>
+        <p>这里 \(W^{DKV}\) 是下投影，\(W^{UK},W^{UV}\) 是上投影。关键空间复杂度从“每个 token 存所有 KV head”变成“每个 token 存一个共享的低维 code”。在 RoPE 存在时，MLA 还需要仔细处理位置编码：论文将可吸收的内容部分与解耦的 RoPE 部分分开，使压缩后的表示仍能表达相对位置关系。</p>
+        <figure class="diagram-figure diagram-figure--wide">
+          <img src="https://arxiv.org/html/2405.04434/x2.png" alt="DeepSeek-V2 原论文 MLA 结构图" loading="lazy" />
+          <figcaption>原论文中的 MLA 结构：KV compression 与 decoupled RoPE 共同构成低缓存开销的注意力。</figcaption>
+          <span class="fig-source">原图：<a href="https://arxiv.org/abs/2405.04434" target="_blank" rel="noopener noreferrer">DeepSeek-V2: A Strong Mixture-of-Experts Language Model</a></span>
+        </figure>
+        <h3>5.2 MLA 与 GQA 的区别</h3>
+        <p>GQA 仍然在“完整 K/V head 的复制份数”上做文章：一组 head 共享一个 K/V。MLA 则改变缓存对象本身：历史不以展开后的 K/V 保存，而以 latent 保存，再通过投影参与注意力。前者是结构化共享，后者是低秩压缩；二者都减少通信，却不是同一个等价变换。</p>
+        <p>这也解释了 MLA 的实现复杂度：它需要选择 latent 维度、处理 Q/K 的吸收与重排、兼容 RoPE，并让 kernel 避免把压缩状态无谓地展开回完整 KV。换句话说，MLA 把一部分 KV cache 问题转换成了投影、布局和 kernel 融合问题。</p>
+
+        <h2>六、把演变放回推理系统</h2>
+        <h3>6.1 Prefill 与 decode 看到的不是同一个瓶颈</h3>
+        <p>Prefill 可以把一段序列组成大矩阵，矩阵乘法的算术强度较高；decode 每次通常只新增一个 query，却要扫描越来越长的历史 KV，因而更容易受带宽和 cache 读取限制。MHA → MQA/GQA/MLA 的收益主要发生在后者。它们不会神奇地让所有 attention FLOPs 消失，也不会自动解决通信、调度和 kernel launch。</p>
+        <h3>6.2 选择机制的实际准则</h3>
+        <table class="decision-table">
+          <thead><tr><th>场景</th><th>优先考虑</th><th>理由</th></tr></thead>
+          <tbody>
+            <tr><td>追求模型质量上限、训练新模型</td><td>MHA 或较大的 GQA</td><td>保留更多独立 K/V 子空间，风险最小。</td></tr>
+            <tr><td>已有 MHA checkpoint、希望快速降低 cache</td><td>GQA + uptraining</td><td>改动连续、工程生态成熟、质量与成本可调。</td></tr>
+            <tr><td>极端受限于 decode 带宽</td><td>MQA</td><td>KV 最小，但需要验证长上下文和多任务质量。</td></tr>
+            <tr><td>追求大模型长上下文和高并发</td><td>MLA</td><td>以 latent 形式存储历史，换取更低 cache 和通信开销。</td></tr>
+          </tbody>
+        </table>
+        <div class="callout"><strong>最后一个判断：</strong>不要只比较“参数量”或“head 数”。应同时测量 KV cache bytes/token、decode 阶段实际 HBM 读流量、batch 增大后的吞吐、长上下文质量，以及 kernel 是否真的利用了共享/压缩布局。</div>
+
+        <div class="essay-ending">MHA 先把表示能力拆成多个独立视角；MQA 发现推理时可以让这些视角共享历史；GQA 把全共享放松成可调分组；MLA 则进一步追问“为什么一定要缓存展开后的 K/V”。这条演变线的核心不是缩写越来越多，而是优化对象从 head 数、共享拓扑，推进到了历史状态的表示方式。理解这一点，才能在新模型出现时判断它究竟是在减少计算、减少存储，还是只把成本换到了另一个 kernel。</div>
+
+        <section class="references-section" aria-label="参考与扩展阅读">
+          <h2>参考与扩展阅读</h2>
+          <ol class="reference-list">
+            <li><a href="https://arxiv.org/abs/1706.03762" target="_blank" rel="noopener noreferrer">Attention Is All You Need, Vaswani et al. (NeurIPS 2017)</a><span>Multi-Head Attention 与 Transformer 的原始论文。</span></li>
+            <li><a href="https://arxiv.org/abs/1911.02150" target="_blank" rel="noopener noreferrer">Fast Transformer Decoding: One Write-Head is All You Need, Shazeer (2019)</a><span>MQA 原论文，直接讨论增量解码的内存带宽问题。</span></li>
+            <li><a href="https://arxiv.org/abs/2305.13245" target="_blank" rel="noopener noreferrer">GQA: Training Generalized Multi-Query Transformer Models from Multi-Head Checkpoints, Ainslie et al. (2023)</a><span>GQA 的分组定义与 MHA checkpoint 转换方法。</span></li>
+            <li><a href="https://arxiv.org/abs/2405.04434" target="_blank" rel="noopener noreferrer">DeepSeek-V2: A Strong Mixture-of-Experts Language Model (2024)</a><span>MLA、低秩 KV 压缩与解耦 RoPE 的来源。</span></li>
+            <li><a href="https://github.com/Dao-AILab/flash-attention" target="_blank" rel="noopener noreferrer">Dao-AILab/flash-attention</a><span>观察现代 attention kernel 如何处理不同 Q/KV head 布局的工程参考。</span></li>
+            <li><a href="../inference/flash-attention-deep-dive.html">FlashAttention 深度剖析：从存储层级到 IO-Aware Exact Attention</a><span>进一步理解 attention 的 HBM、SRAM 与 kernel IO。</span></li>
+          </ol>
+        </section>
+      </section>
+
+      <section class="comments-section" id="comments" aria-label="Discussion">
+        <div class="comments-header"><h2>Discussion</h2></div>
+        <div id="utterances-container" class="utterances-container"></div>
+        <noscript>请启用 JavaScript 后查看评论区。</noscript>
+      </section>
+    </article>
+  </main>
+  <script src="../../app.js?v=43"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" crossorigin="anonymous"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js" crossorigin="anonymous" onload="renderMathInElement(document.body,{delimiters:[{left:'\\[',right:'\\]',display:true},{left:'\\(',right:'\\)',display:false}]});"></script>
+</body>
+</html>
