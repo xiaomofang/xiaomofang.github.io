@@ -101,8 +101,6 @@
         </div>
         <figure class="diagram-figure diagram-figure--wide">
           <img src="https://pic4.zhimg.com/v2-e0b621aad859d28482f4c2e48a9ead0b_1440w.jpg" alt="科学空间文章中的 Multi-Head Attention 结构图" loading="lazy" />
-          <figcaption>Multi-Head Attention 的结构：输入经过多组独立的 Q/K/V 投影，在不同子空间中并行计算 attention，最后拼接并输出投影。</figcaption>
-          <span class="fig-source">图片来源：<a href="https://kexue.fm/archives/10091" target="_blank" rel="noopener noreferrer">科学空间：Attention 机制的底层剖析</a>；原始论文：<a href="https://arxiv.org/abs/1706.03762" target="_blank" rel="noopener noreferrer">Vaswani et al., Attention Is All You Need</a></span>
         </figure>
         <p>这张图比 Transformer 总体架构图更适合解释 MHA：每个 head 先从同一个 \(X\) 中取出自己的子空间，再独立计算注意力。多个 head 的差异来自 \(W_i^Q,W_i^K,W_i^V\)，而不是来自把同一个 attention 结果简单复制多次。最后的 Concat 恢复模型宽度，再由 \(W^O\) 混合不同 head 的信息。</p>
         <h3>2.2 为什么拆成多个 head，而不是一个大 head</h3>
