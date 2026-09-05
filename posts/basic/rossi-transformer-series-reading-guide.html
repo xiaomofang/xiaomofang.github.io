@@ -15,7 +15,7 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous" />
   <title>Transformer 系列文章导航：从注意力机制到大模型量化</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="description" content="整理博客园罗西的思考《探秘Transformer》系列 1 到 36 篇文章，按基础结构、推理优化、架构演进和量化主题建立完整阅读地图。" />
+  <meta name="description" content="整理博客园罗西的思考《探秘Transformer》系列 1 到 36 篇文章链接。" />
 </head>
 <body>
   <div class="ambient" aria-hidden="true"><span class="orb orb-a"></span><span class="orb orb-b"></span></div>
@@ -35,7 +35,7 @@
       <header class="post-page-header">
         <p class="post-page-category">Basic Knowledge</p>
         <h1 class="post-page-title">Transformer 系列文章导航：从注意力机制到大模型量化</h1>
-        <p class="post-lead">这不是对原文的重复转载，而是一张可直接点击的阅读地图：把博客园「罗西的思考」《探秘Transformer》系列 1 到 36 篇按知识依赖重新分组，并说明每一段适合解决什么问题。建议把它当作索引使用，具体论证、图片和代码以原作者文章为准。</p>
+        <p class="post-lead">整理博客园「罗西的思考」《探秘Transformer》系列 1 到 36 篇文章链接，方便集中查阅。具体内容以原作者文章为准。</p>
         <div class="post-page-keywords" aria-label="Keywords">
           <a class="post-keyword-chip" href="../../index.html?keyword=attention">Attention 加速</a>
           <a class="post-keyword-chip" href="../../index.html?keyword=hardware">硬件与 Kernel</a>
@@ -44,110 +44,27 @@
       </header>
 
       <section class="post-page-content">
-        <p>截至本文整理时，主系列可以确认有 <strong>36 篇</strong>，从注意力机制一路推进到大模型量化方案。它的顺序不是一条单纯的论文时间线，而是一条从 Transformer 基础组件、训练推理行为，到长上下文与 KV Cache，再到新型架构和推理加速的工程学习路径。</p>
+        <p>本文整理博客园「罗西的思考」《探秘Transformer》系列 1 到 36 篇，以下链接均指向原文。</p>
 
-        <div class="logic-map" aria-label="Transformer 系列阅读地图">
-          <div class="map-node"><span>1</span><strong>基础组件</strong><p>Token、Embedding、位置编码和 Attention。</p></div>
-          <div class="map-arrow">→</div>
-          <div class="map-node"><span>2</span><strong>模型运行</strong><p>训练、推理、采样、资源占用和量化。</p></div>
-          <div class="map-arrow">→</div>
-          <div class="map-node"><span>3</span><strong>推理优化</strong><p>KV Cache、MQA/GQA、MLA 和投机解码。</p></div>
-          <div class="map-arrow">→</div>
-          <div class="map-node"><span>4</span><strong>继续深挖</strong><p>按自己的问题选择长上下文、MoE 或量化路线。</p></div>
-        </div>
-
-        <h2>一、先说明整理范围</h2>
-        <p>本文只收录标题明确属于「探秘Transformer系列」的 1 到 36 篇。博客园分页中还存在 Transformer 相关的置顶书籍介绍文章，但它不是系列编号文章，因此放在文末作为扩展阅读，不混入主清单。</p>
-        <div class="callout"><strong>链接原则：</strong>下面每一项都指向博客园原文；标题尽量按原页面的正式标题保留。第 8 篇页面标题是「探秘Transformer之（8）」，虽然少了“系列”二字，但编号和主题连续，仍纳入主系列。</div>
-
-        <h2>二、基础结构：先把 Transformer 拆开</h2>
-        <p>这一段回答“Transformer 由什么组成、一个 token 如何进入模型、一个 block 如何完成计算”。第一次学习建议按顺序阅读 1 到 15，不要先跳到 KV Cache 或 MLA。</p>
+        <h2>一、基础结构</h2>
         <ol class="reference-list">
-          <li><a href="https://www.cnblogs.com/rossiXYZ/p/18705809" target="_blank" rel="noopener noreferrer">（1）注意力机制</a><span>从 Attention 的核心问题开始，是整个系列的入口。</span></li>
-          <li><a href="https://www.cnblogs.com/rossiXYZ/p/18706134" target="_blank" rel="noopener noreferrer">（2）总体架构</a><span>把 Transformer 的整体模块和数据流串起来。</span></li>
-          <li><a href="https://www.cnblogs.com/rossiXYZ/p/18722830" target="_blank" rel="noopener noreferrer">（3）数据处理</a><span>从原始文本到模型输入，补齐模型之外的数据入口。</span></li>
-          <li><a href="https://www.cnblogs.com/rossiXYZ/p/18727704" target="_blank" rel="noopener noreferrer">（4）编码器 &amp; 解码器</a><span>理解 encoder、decoder 及其差异。</span></li>
-          <li><a href="https://www.cnblogs.com/rossiXYZ/p/18730583" target="_blank" rel="noopener noreferrer">（5）训练 &amp; 推理</a><span>区分 teacher forcing、并行训练与自回归生成。</span></li>
-          <li><a href="https://www.cnblogs.com/rossiXYZ/p/18732939" target="_blank" rel="noopener noreferrer">（6）token</a><span>理解文本如何被切分成模型真正处理的离散单位。</span></li>
-          <li><a href="https://www.cnblogs.com/rossiXYZ/p/18741857" target="_blank" rel="noopener noreferrer">（7）embedding</a><span>从 token id 进入连续向量空间。</span></li>
-          <li><a href="https://www.cnblogs.com/rossiXYZ/p/18744797" target="_blank" rel="noopener noreferrer">（8）位置编码</a><span>解释没有循环结构的 Transformer 如何感知顺序。</span></li>
-          <li><a href="https://www.cnblogs.com/rossiXYZ/p/18746838" target="_blank" rel="noopener noreferrer">（9）位置编码分类</a><span>横向比较不同位置表示方法及其设计取舍。</span></li>
-          <li><a href="https://www.cnblogs.com/rossiXYZ/p/18751758" target="_blank" rel="noopener noreferrer">（10）自注意力</a><span>聚焦 self-attention 的计算过程。</span></li>
-          <li><a href="https://www.cnblogs.com/rossiXYZ/p/18758992" target="_blank" rel="noopener noreferrer">（11）掩码</a><span>理解 causal mask 等约束如何改变可见性。</span></li>
-          <li><a href="https://www.cnblogs.com/rossiXYZ/p/18759167" target="_blank" rel="noopener noreferrer">（12）多头自注意力</a><span>进入 MHA，理解多个子空间并行建模的原因。</span></li>
-          <li><a href="https://www.cnblogs.com/rossiXYZ/p/18765884" target="_blank" rel="noopener noreferrer">（13）FFN</a><span>补齐 Transformer block 中 attention 之外的主要计算。</span></li>
-          <li><a href="https://www.cnblogs.com/rossiXYZ/p/18774865" target="_blank" rel="noopener noreferrer">（14）残差网络和归一化</a><span>理解深层训练稳定性和 block 连接方式。</span></li>
-          <li><a href="https://www.cnblogs.com/rossiXYZ/p/18777574" target="_blank" rel="noopener noreferrer">（15）采样和输出</a><span>从 logits 走到生成 token，连接模型与解码策略。</span></li>
+          <li><a href="https://www.cnblogs.com/rossiXYZ/p/18705809" target="_blank" rel="noopener noreferrer">（1）注意力机制</a></li><li><a href="https://www.cnblogs.com/rossiXYZ/p/18706134" target="_blank" rel="noopener noreferrer">（2）总体架构</a></li><li><a href="https://www.cnblogs.com/rossiXYZ/p/18722830" target="_blank" rel="noopener noreferrer">（3）数据处理</a></li><li><a href="https://www.cnblogs.com/rossiXYZ/p/18727704" target="_blank" rel="noopener noreferrer">（4）编码器 &amp; 解码器</a></li><li><a href="https://www.cnblogs.com/rossiXYZ/p/18730583" target="_blank" rel="noopener noreferrer">（5）训练 &amp; 推理</a></li><li><a href="https://www.cnblogs.com/rossiXYZ/p/18732939" target="_blank" rel="noopener noreferrer">（6）token</a></li><li><a href="https://www.cnblogs.com/rossiXYZ/p/18741857" target="_blank" rel="noopener noreferrer">（7）embedding</a></li><li><a href="https://www.cnblogs.com/rossiXYZ/p/18744797" target="_blank" rel="noopener noreferrer">（8）位置编码</a></li><li><a href="https://www.cnblogs.com/rossiXYZ/p/18746838" target="_blank" rel="noopener noreferrer">（9）位置编码分类</a></li><li><a href="https://www.cnblogs.com/rossiXYZ/p/18751758" target="_blank" rel="noopener noreferrer">（10）自注意力</a></li><li><a href="https://www.cnblogs.com/rossiXYZ/p/18758992" target="_blank" rel="noopener noreferrer">（11）掩码</a></li><li><a href="https://www.cnblogs.com/rossiXYZ/p/18759167" target="_blank" rel="noopener noreferrer">（12）多头自注意力</a></li><li><a href="https://www.cnblogs.com/rossiXYZ/p/18765884" target="_blank" rel="noopener noreferrer">（13）FFN</a></li><li><a href="https://www.cnblogs.com/rossiXYZ/p/18774865" target="_blank" rel="noopener noreferrer">（14）残差网络和归一化</a></li><li><a href="https://www.cnblogs.com/rossiXYZ/p/18777574" target="_blank" rel="noopener noreferrer">（15）采样和输出</a></li>
         </ol>
 
-        <h2>三、效率账本：资源、位置与 KV Cache</h2>
-        <p>读完基础结构后，第二条主线是“为什么模型能运行，但长文本和高并发会变贵”。第 16 到 29 篇集中处理显存、带宽、上下文长度、KV Cache 和专家模型。</p>
+        <h2>二、资源与架构优化</h2>
         <ol class="reference-list">
-          <li><a href="https://www.cnblogs.com/rossiXYZ/p/18785615" target="_blank" rel="noopener noreferrer">（16）资源占用</a><span>建立参数、激活、显存和计算量的成本意识。</span></li>
-          <li><a href="https://www.cnblogs.com/rossiXYZ/p/18787343" target="_blank" rel="noopener noreferrer">（17）RoPE</a><span>深入当前大模型常用的旋转位置编码。</span></li>
-          <li><a href="https://www.cnblogs.com/rossiXYZ/p/18791822" target="_blank" rel="noopener noreferrer">（18）FlashAttention</a><span>从 IO 和显存访问角度理解 attention 加速。</span></li>
-          <li><a href="https://www.cnblogs.com/rossiXYZ/p/18798185" target="_blank" rel="noopener noreferrer">（19）FlashAttention V2 及升级版本</a><span>继续追踪 attention kernel 的并行化和版本演进。</span></li>
-          <li><a href="https://www.cnblogs.com/rossiXYZ/p/18799503" target="_blank" rel="noopener noreferrer">（20）KV Cache</a><span>理解自回归 decode 为什么需要缓存历史 K/V。</span></li>
-          <li><a href="https://www.cnblogs.com/rossiXYZ/p/18800825" target="_blank" rel="noopener noreferrer">（21）MoE</a><span>进入稀疏专家模型，区分总参数量和每 token 激活参数量。</span></li>
-          <li><a href="https://www.cnblogs.com/rossiXYZ/p/18805103" target="_blank" rel="noopener noreferrer">（22）LoRA</a><span>理解参数高效微调如何用低秩更新降低训练成本。</span></li>
-          <li><a href="https://www.cnblogs.com/rossiXYZ/p/18808744" target="_blank" rel="noopener noreferrer">（23）长度外推</a><span>讨论训练上下文长度与推理上下文长度之间的鸿沟。</span></li>
-          <li><a href="https://www.cnblogs.com/rossiXYZ/p/18811723" target="_blank" rel="noopener noreferrer">（24）KV Cache 优化</a><span>从基础缓存继续进入 KV Cache 的工程优化。</span></li>
-          <li><a href="https://www.cnblogs.com/rossiXYZ/p/18811785" target="_blank" rel="noopener noreferrer">（25）KV Cache 优化之处理长文本序列</a><span>针对长上下文场景分析缓存压力。</span></li>
-          <li><a href="https://www.cnblogs.com/rossiXYZ/p/18815541" target="_blank" rel="noopener noreferrer">（26）KV Cache 优化：分离 or 合并</a><span>从存储组织角度比较不同缓存布局。</span></li>
-          <li><a href="https://www.cnblogs.com/rossiXYZ/p/18823734" target="_blank" rel="noopener noreferrer">（27）MQA &amp; GQA</a><span>理解减少 KV head 如何降低缓存和 decode 带宽。</span></li>
-          <li><a href="https://www.cnblogs.com/rossiXYZ/p/18827618" target="_blank" rel="noopener noreferrer">（28）DeepSeek MLA</a><span>从共享 head 推进到 latent KV 压缩。</span></li>
-          <li><a href="https://www.cnblogs.com/rossiXYZ/p/18835426" target="_blank" rel="noopener noreferrer">（29）DeepSeek MoE</a><span>进一步理解 DeepSeek 路线中的稀疏专家架构。</span></li>
+          <li><a href="https://www.cnblogs.com/rossiXYZ/p/18785615" target="_blank" rel="noopener noreferrer">（16）资源占用</a></li><li><a href="https://www.cnblogs.com/rossiXYZ/p/18787343" target="_blank" rel="noopener noreferrer">（17）RoPE</a></li><li><a href="https://www.cnblogs.com/rossiXYZ/p/18791822" target="_blank" rel="noopener noreferrer">（18）FlashAttention</a></li><li><a href="https://www.cnblogs.com/rossiXYZ/p/18798185" target="_blank" rel="noopener noreferrer">（19）FlashAttention V2 及升级版本</a></li><li><a href="https://www.cnblogs.com/rossiXYZ/p/18799503" target="_blank" rel="noopener noreferrer">（20）KV Cache</a></li><li><a href="https://www.cnblogs.com/rossiXYZ/p/18800825" target="_blank" rel="noopener noreferrer">（21）MoE</a></li><li><a href="https://www.cnblogs.com/rossiXYZ/p/18805103" target="_blank" rel="noopener noreferrer">（22）LoRA</a></li><li><a href="https://www.cnblogs.com/rossiXYZ/p/18808744" target="_blank" rel="noopener noreferrer">（23）长度外推</a></li><li><a href="https://www.cnblogs.com/rossiXYZ/p/18811723" target="_blank" rel="noopener noreferrer">（24）KV Cache 优化</a></li><li><a href="https://www.cnblogs.com/rossiXYZ/p/18811785" target="_blank" rel="noopener noreferrer">（25）KV Cache 优化之处理长文本序列</a></li><li><a href="https://www.cnblogs.com/rossiXYZ/p/18815541" target="_blank" rel="noopener noreferrer">（26）KV Cache 优化：分离 or 合并</a></li><li><a href="https://www.cnblogs.com/rossiXYZ/p/18823734" target="_blank" rel="noopener noreferrer">（27）MQA &amp; GQA</a></li><li><a href="https://www.cnblogs.com/rossiXYZ/p/18827618" target="_blank" rel="noopener noreferrer">（28）DeepSeek MLA</a></li><li><a href="https://www.cnblogs.com/rossiXYZ/p/18835426" target="_blank" rel="noopener noreferrer">（29）DeepSeek MoE</a></li>
         </ol>
 
-        <h2>四、推理加速：从一次生成到一次生成多个 token</h2>
-        <p>第 30 到 33 篇围绕 speculative decoding 及其变体展开。它们共同面对一个问题：目标模型质量高但单步生成慢，能否用额外结构提出多个候选，再让目标模型并行验证。</p>
+        <h2>三、推理加速</h2>
         <ol class="reference-list">
-          <li><a href="https://www.cnblogs.com/rossiXYZ/p/18837229" target="_blank" rel="noopener noreferrer">（30）投机解码</a><span>建立 draft-and-verify 的总框架。</span></li>
-          <li><a href="https://www.cnblogs.com/rossiXYZ/p/18845475" target="_blank" rel="noopener noreferrer">（31）Medusa</a><span>了解多头草稿结构如何并行提出未来 token。</span></li>
-          <li><a href="https://www.cnblogs.com/rossiXYZ/p/18859771" target="_blank" rel="noopener noreferrer">（32）Lookahead Decoding</a><span>从前瞻式候选生成理解另一条加速路径。</span></li>
-          <li><a href="https://www.cnblogs.com/rossiXYZ/p/18880573" target="_blank" rel="noopener noreferrer">（33）DeepSeek MTP</a><span>理解多 token 预测如何接入大模型训练和推理。</span></li>
+          <li><a href="https://www.cnblogs.com/rossiXYZ/p/18837229" target="_blank" rel="noopener noreferrer">（30）投机解码</a></li><li><a href="https://www.cnblogs.com/rossiXYZ/p/18845475" target="_blank" rel="noopener noreferrer">（31）Medusa</a></li><li><a href="https://www.cnblogs.com/rossiXYZ/p/18859771" target="_blank" rel="noopener noreferrer">（32）Lookahead Decoding</a></li><li><a href="https://www.cnblogs.com/rossiXYZ/p/18880573" target="_blank" rel="noopener noreferrer">（33）DeepSeek MTP</a></li>
         </ol>
 
-        <h2>五、量化：把模型放进更现实的硬件预算</h2>
-        <p>最后三篇集中讨论量化。建议先读第 16 篇资源占用，再读这里的基础和方案，否则容易只看到 bit 数变化，却忽略误差、校准、权重和激活的区别。</p>
+        <h2>四、量化</h2>
         <ol class="reference-list">
-          <li><a href="https://www.cnblogs.com/rossiXYZ/p/18889724" target="_blank" rel="noopener noreferrer">（34）量化基础</a><span>建立量化的基本概念和问题边界。</span></li>
-          <li><a href="https://www.cnblogs.com/rossiXYZ/p/18903277" target="_blank" rel="noopener noreferrer">（35）大模型量化基础</a><span>把通用量化概念映射到 LLM 权重和激活。</span></li>
-          <li><a href="https://www.cnblogs.com/rossiXYZ/p/18916637" target="_blank" rel="noopener noreferrer">（36）大模型量化方案</a><span>从基础走向具体的大模型量化路线和方案比较。</span></li>
+          <li><a href="https://www.cnblogs.com/rossiXYZ/p/18889724" target="_blank" rel="noopener noreferrer">（34）量化基础</a></li><li><a href="https://www.cnblogs.com/rossiXYZ/p/18903277" target="_blank" rel="noopener noreferrer">（35）大模型量化基础</a></li><li><a href="https://www.cnblogs.com/rossiXYZ/p/18916637" target="_blank" rel="noopener noreferrer">（36）大模型量化方案</a></li>
         </ol>
-
-        <h2>六、怎么读这 36 篇</h2>
-        <table class="decision-table">
-          <thead><tr><th>你的目标</th><th>建议路线</th><th>读完应获得的判断力</th></tr></thead>
-          <tbody>
-            <tr><td>第一次系统学 Transformer</td><td>1 → 15</td><td>能说清一个 Transformer block 的数据流。</td></tr>
-            <tr><td>分析推理显存和吞吐</td><td>16 → 20 → 24 → 29</td><td>能把上下文长度、KV head、带宽和缓存联系起来。</td></tr>
-            <tr><td>理解当前大模型架构</td><td>17 → 21 → 27 → 28 → 29</td><td>能区分位置编码、稀疏专家和注意力缓存的不同问题。</td></tr>
-            <tr><td>研究生成加速</td><td>15 → 20 → 30 → 33</td><td>能理解候选生成、目标验证和多 token 预测的关系。</td></tr>
-            <tr><td>做模型部署与压缩</td><td>16 → 18 → 19 → 24 → 34 → 36</td><td>能同时看计算、IO、缓存和量化误差，而不是只看参数量。</td></tr>
-          </tbody>
-        </table>
-        <aside class="aside-card"><strong>阅读时的一个原则：</strong>不要把编号顺序当成唯一学习顺序。基础篇适合线性阅读；进入工程阶段后，应围绕问题跳读。例如你在排查 decode 性能，最短路径通常是 16 → 20 → 24 → 27/28，而不是重新从第 1 篇开始。</aside>
-
-        <h2>七、系列之外的扩展</h2>
-        <p>博客园作者还出版并介绍了《Transformer 技术纵深：架构解析与前沿突破》。它不是上面 36 篇编号文章的一部分，但可以作为系列之后的系统扩展阅读：</p>
-        <ul class="note-list">
-          <li><a href="https://www.cnblogs.com/rossiXYZ/p/19867301" target="_blank" rel="noopener noreferrer">第二本书出版了：《Transformer技术纵深：架构解析与前沿突破》</a></li>
-          <li><a href="https://www.cnblogs.com/rossiXYZ?page=12" target="_blank" rel="noopener noreferrer">博客园第 12 页：可核对系列第 34 到 36 篇及页面归档</a></li>
-          <li><a href="https://www.cnblogs.com/rossiXYZ" target="_blank" rel="noopener noreferrer">罗西的思考：博客园主页</a></li>
-        </ul>
-
-        <div class="essay-ending">这 36 篇文章可以看成一条由“模型内部结构”逐步走向“模型运行成本”的路线：先理解 token、位置、attention 和 FFN，再理解训练、推理、缓存和资源，最后进入 MQA/GQA/MLA、投机解码与量化。真正值得带走的不是一份链接清单，而是遇到新模型时能问对问题：它改变了表示方式、计算路径、缓存布局，还是硬件上的数据搬运方式？</div>
-
-        <section class="references-section" aria-label="参考与扩展阅读">
-          <h2>参考与扩展阅读</h2>
-          <ol class="reference-list">
-            <li><a href="https://www.cnblogs.com/rossiXYZ" target="_blank" rel="noopener noreferrer">罗西的思考：博客园主页</a><span>系列作者主页及最新文章入口。</span></li>
-            <li><a href="https://www.cnblogs.com/rossiXYZ?page=12" target="_blank" rel="noopener noreferrer">罗西的思考：第 12 页</a><span>本次整理的用户入口页面，可核对系列后半段文章。</span></li>
-            <li><a href="https://www.cnblogs.com/rossiXYZ/p/18705809" target="_blank" rel="noopener noreferrer">探秘Transformer系列之（1）：注意力机制</a><span>主系列起点。</span></li>
-            <li><a href="https://www.cnblogs.com/rossiXYZ/p/18916637" target="_blank" rel="noopener noreferrer">探秘Transformer系列之（36）：大模型量化方案</a><span>当前主系列清单终点。</span></li>
-          </ol>
-        </section>
       </section>
 
       <section class="comments-section" id="comments" aria-label="Discussion">
