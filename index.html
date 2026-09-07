@@ -133,21 +133,22 @@
           </div>
         </article>
 
-        <article class="post-card" data-category="inference" data-keywords="pd-disagg mooncake inference-systems" data-date="2026-08-14" data-title="Mooncake Connector 读码（一）：PD 分离里，vLLM 到底在编排什么">
-          <a href="posts/inference/mooncake-connector-pd-control-plane.html" class="post-card-link">
+        <article class="post-card" data-category="inference" data-keywords="pd-disagg mooncake inference-systems hardware" data-date="2026-09-07" data-title="Mooncake 学习（0）：架构总览、组件拆解与一次 KVCache 流转">
+          <a href="posts/inference/mooncake-architecture-overview.html" class="post-card-link">
             <div class="post-meta-row">
               <span class="post-tag">Inference</span>
             </div>
-            <h3 class="post-title">Mooncake Connector 读码（一）：PD 分离里，vLLM 到底在编排什么</h3>
+            <h3 class="post-title">Mooncake 学习（0）：架构总览、组件拆解与一次 KVCache 流转</h3>
             <p class="post-excerpt">
-              先分清 Mooncake 本体与 vLLM-Ascend Connector，再顺着 Scheduler 控制面走通一次 Prefill→Decode 交接：delay_free、kv_transfer_params，以及 Decode 侧三连。
+              基于官方文档与源码学习手册，从 KVCache-centric 和 PD 分离出发，梳理 Transfer Engine、RDMA、Mooncake Store、分层存储、高可用、生态集成与一次请求全链路。
             </p>
-            <p class="post-card-stats">2026年8月14日 · 7 分钟 · 1880 字 · MOFANG</p>
+            <p class="post-card-stats">2026年9月7日 · 45 分钟 · 3167 字 · MOFANG</p>
           </a>
           <div class="post-card-keywords">
             <button class="post-keyword-chip" data-keyword="pd-disagg" type="button">PD 分离</button>
             <button class="post-keyword-chip" data-keyword="mooncake" type="button">Mooncake</button>
             <button class="post-keyword-chip" data-keyword="inference-systems" type="button">推理框架</button>
+            <button class="post-keyword-chip" data-keyword="hardware" type="button">硬件与 Kernel</button>
           </div>
         </article>
 

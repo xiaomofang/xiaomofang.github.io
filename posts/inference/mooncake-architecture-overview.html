@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="night">
+<head>
+  <meta charset="UTF-8" />
+  <script>(function(){try{var s=localStorage.getItem("yichuan-theme");document.documentElement.setAttribute("data-theme",s||("matchMedia" in window&&matchMedia("(prefers-color-scheme: dark)").matches?"night":"day"));}catch(e){}})();</script>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <link rel="stylesheet" href="../../styles.css?v=47" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous" />
+  <title>Mooncake 学习（0）：架构总览、组件拆解与一次 KVCache 流转</title>
+  <meta name="description" content="基于 Mooncake 官方文档与源码学习手册，系统梳理 KVCache-centric、PD 分离、Transfer Engine、Mooncake Store、分层存储、高可用与生态集成。" />
+</head>
+<body>
+  <div class="ambient" aria-hidden="true"><span class="orb orb-a"></span><span class="orb orb-b"></span></div>
+  <canvas id="star-canvas"></canvas>
+  <header class="site-header"><div class="header-inner">
+    <a href="../../index.html" class="logo"><span class="logo-dot"></span><span class="logo-text">MOFANG</span></a>
+    <div class="header-actions"><nav class="site-nav"><a href="../../index.html">← Back</a></nav><button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle theme"><span class="icon-sun">☀️</span><span class="icon-moon">🌙</span></button></div>
+  </div></header>
+  <main class="site-main"><article class="post-page">
+    <header class="post-page-header">
+      <p class="post-page-category">Inference · Mooncake 学习 0</p>
+      <h1 class="post-page-title">Mooncake 学习（0）：架构总览、组件拆解与一次 KVCache 流转</h1>
+      <p class="post-lead">先不钻进某个函数。这一篇要建立一张能指导后续读码的地图：<strong>Mooncake 不是一个“RDMA 工具”，而是以 KVCache 为中心，把推理计算、缓存存储、异构传输和全局编排接起来的分布式基础设施。</strong></p>
+      <div class="post-page-keywords" aria-label="Keywords"><a class="post-keyword-chip" href="../../index.html?keyword=mooncake">Mooncake</a><a class="post-keyword-chip" href="../../index.html?keyword=pd-disagg">PD 分离</a><a class="post-keyword-chip" href="../../index.html?keyword=inference-systems">推理框架</a><a class="post-keyword-chip" href="../../index.html?keyword=hardware">硬件与 Kernel</a></div>
+      <p class="post-page-meta" data-date="2026-09-07" data-author="MOFANG" data-minutes="45"></p>
+    </header>
+    <section class="post-page-content">
+      <p>本文根据<a href="https://docs.kvcache.com.cn/Mooncake/" target="_blank" rel="noopener noreferrer">Mooncake 官方文档</a>和<a href="https://vinlee19.github.io/handbooks/mooncake/index.html" target="_blank" rel="noopener noreferrer">Mooncake 源码深度学习手册</a>整理。官方文档描述对外设计、API、部署和支持范围；源码手册基于特定 <code>main</code> 提交做实现级分析。两者版本会变化，所以下文把“稳定抽象”和“当前实现线索”分开说。</p>
+      <div class="logic-map" aria-label="Mooncake 架构学习逻辑地图">
+        <div class="map-node map-node--start"><span>1</span><strong>为什么</strong><p>Decode 受 KV 访存约束，Prefill 与 Decode 互相干扰。</p></div><div class="map-arrow">→</div>
+        <div class="map-node map-node--ar"><span>2</span><strong>怎么搬</strong><p>Transfer Engine 把 Segment 间异构数据搬运统一起来。</p></div><div class="map-arrow">→</div>
+        <div class="map-node map-node--par"><span>3</span><strong>怎么管</strong><p>Store 用 Master、Client、副本和租约治理 KV 对象。</p></div><div class="map-arrow">→</div>
+        <div class="map-node map-node--conv"><span>4</span><strong>怎么串</strong><p>PD、HiCache、vLLM、SGLang 把能力接入请求热路径。</p></div>
+      </div>
+
+      <h2>一、先定边界：Mooncake 到底解决什么</h2>
+      <h3>1.1 LLM 推理为什么需要另一种基础设施</h3>
+      <p>Prefill 一次处理整段 prompt，主要受矩阵计算吞吐影响；Decode 每生成一个 token 都要读取历史 KV，逐步变成访存受限。把两者放在同一组实例，长 prompt 的计算突发会影响 Decode 的 token 间延迟。另一方面，system prompt、多轮对话和相同前缀会反复产生相同的 KV，若只放在单卡显存里，跨请求和跨节点都无法复用。</p>
+      <p>Mooncake 的核心判断是：两个阶段真正需要交换的中间产物不是完整请求，而是 KVCache。因此可以把 Prefill 和 Decode 拆成 <strong>PD disaggregation / XpYd</strong>，再把 GPU 之外的 DRAM、NVMe 等资源组织成共享 KV 池。</p>
+      <div class="callout"><strong>边界先记住：</strong>Mooncake 不负责模型权重、Attention kernel 或 token 生成。推理引擎负责算，Mooncake 负责让已经算出的 KV 在正确的节点、正确的地址和正确的生命周期内可用。</div>
+      <h3>1.2 “KVCache-centric”不是一句口号</h3>
+      <p>传统服务通常以请求为调度单位；KVCache-centric 系统还要围绕“哪些前缀已经存在、在哪里、能否读、何时淘汰”做决策。于是请求路由、Prefill 计算、Decode 接棒、缓存复用和资源回收都围绕 KV 对象展开。</p>
+      <table class="decision-table"><thead><tr><th>问题</th><th>Mooncake 的回答</th><th>对应组件</th></tr></thead><tbody>
+        <tr><td>数据放哪</td><td>GPU/DRAM Segment，必要时下沉到本地盘、共享盘或 3FS</td><td>Store、Storage Backend</td></tr><tr><td>怎么搬</td><td>按地址和长度提交批量 READ/WRITE，尽量零拷贝并行传输</td><td>Transfer Engine</td></tr><tr><td>谁能读</td><td>Master 返回 COMPLETE 副本，并用 lease 保护读期间的对象</td><td>Master、Client</td></tr><tr><td>没空间怎么办</td><td>近似 LRU 驱逐、软/硬 pin、offload 和副本迁移</td><td>Eviction、Task Manager</td></tr><tr><td>控制面挂了怎么办</td><td>快照加 OpLog，etcd/Redis/Kubernetes Lease 协调主备</td><td>HA</td></tr>
+      </tbody></table>
+
+      <h2>二、四层架构：从硬件到推理框架</h2>
+      <figure class="diagram-figure diagram-figure--wide"><svg viewBox="0 0 840 430" role="img" aria-label="Mooncake 四层架构"><rect x="24" y="20" width="792" height="82" rx="12" class="d-box-purple"/><text x="420" y="52" text-anchor="middle" class="d-tag-purple">L4 · 集成层</text><text x="420" y="78" text-anchor="middle" class="d-label">vLLM · SGLang · TensorRT-LLM · LMDeploy · HiCache · RL</text><rect x="24" y="122" width="792" height="82" rx="12" class="d-box-orange"/><text x="420" y="154" text-anchor="middle" class="d-tag-orange">L3 · KV 存储层</text><text x="420" y="180" text-anchor="middle" class="d-label">Mooncake Store：Master 元数据 + Client 数据面 + 副本/租约/淘汰</text><rect x="24" y="224" width="792" height="82" rx="12" class="d-box-blue"/><text x="420" y="256" text-anchor="middle" class="d-tag-blue">L2 · 传输层</text><text x="420" y="282" text-anchor="middle" class="d-label">Transfer Engine：Segment · BatchTransfer · Transport · 拓扑选路</text><rect x="24" y="326" width="792" height="82" rx="12" class="d-box"/><text x="420" y="358" text-anchor="middle" class="d-tag">L1 · 物理资源层</text><text x="420" y="384" text-anchor="middle" class="d-label">GPU/VRAM · CPU/DRAM · RDMA NIC · NVLink · NVMe/3FS · CXL</text></svg><figcaption>上层只依赖语义接口：Store 不需要知道 RDMA verbs，推理引擎也不需要管理 QP。</figcaption></figure>
+      <p>读源码时可以沿依赖反向走：先看应用如何提出 <code>put/get</code> 或 KV connector 请求，再看 Store 如何返回副本描述，最后落到 Transfer Engine 的 <code>submitTransfer</code> 与具体 Transport。这样不会把“调度时机”“对象协议”和“网卡执行”混成一层。</p>
+
+      <h2>三、物理部署：两张网络与四类角色</h2>
+      <p>一个典型 XpYd 集群包含 Prefill 节点、Decode 节点、可选的独立 KV 池节点，以及 Master/元数据服务。推理节点也可以同时贡献 DRAM Segment，所以“存储节点”和“计算节点”不是必须的两种机器。</p>
+      <table class="decision-table"><thead><tr><th>通道</th><th>承载内容</th><th>关键性质</th></tr></thead><tbody><tr><td>RDMA 数据面</td><td>KV 的 READ/WRITE</td><td>节点间直达，目标地址是已注册的 DRAM/VRAM</td></tr><tr><td>TCP 握手/通知</td><td>GID、QP 参数、完成通知</td><td>小流量控制面，不搬大块数据</td></tr><tr><td>Master RPC</td><td>PutStart、PutEnd、GetReplicaList 等</td><td>分配地址和维护状态，不经过数据</td></tr><tr><td>etcd/Redis/HTTP 元数据</td><td>Segment 描述、RPC 地址、HA 状态</td><td>可替换；P2P 模式可减少中心依赖</td></tr></tbody></table>
+      <p>节点内拓扑同样重要：GPU 到 NIC 的 PCIe 距离、NIC 所属 NUMA、GPU 间 NVLink 都会影响真实带宽。Transfer Engine 会生成位置到 HCA 的优先矩阵，优先选择本 NUMA 或本 PCIe 路径；故障时才退到备选路径。</p>
+      <aside class="aside-card"><strong>部署提醒：</strong>RDMA 内存注册通常要求足够的 memlock；多 NIC 环境可用 <code>MC_MS_FILTERS</code> 限定设备，大段内存可考虑 hugepage。没有 RDMA 时，Transfer Engine 可以使用 TCP，但性能语义不是同一回事。</aside>
+
+      <h2>四、Transfer Engine：统一的“搬运动词”</h2>
+      <h3>4.1 Segment 和 BatchTransfer</h3>
+      <p><strong>Segment</strong> 是可被引用的地址空间。RAM Segment 逻辑上覆盖一个进程的地址空间，实际只有注册过的 Buffer 可被远端访问；也可以存在 NVMe-oF Segment。每个进程通常有一个本地 Segment，其他进程通过名称 <code>openSegment</code> 引用它。</p>
+      <p><strong>BatchTransfer</strong> 是一组非连续 READ/WRITE 请求，描述本地地址、远端 Segment、远端偏移和长度。调用方注册本地内存、打开目标 Segment、分配 Batch、提交请求，再通过 <code>getTransferStatus</code> 观察异步完成状态。Store 的 <code>TransferSubmitter</code> 只是把这个底层接口包装成更适合对象读写的 Future。</p>
+      <h3>4.2 初始化与传输路径</h3>
+      <ol class="algo-steps"><li class="algo-step algo-step--core"><span class="algo-step-num">1</span><div class="algo-step-body"><strong>发现资源</strong><p>初始化 RPC 端口、接入 etcd/Redis/HTTP 元数据服务，探测 HCA、GPU、NUMA 和 PCI 拓扑。</p></div></li><li class="algo-step"><span class="algo-step-num">2</span><div class="algo-step-body"><strong>发布 SegmentDesc</strong><p>公布设备、优先矩阵、Buffer 地址和每张 NIC 对应的 rkey；对端据此知道“在哪里读/写”。</p></div></li><li class="algo-step"><span class="algo-step-num">3</span><div class="algo-step-body"><strong>选择 Transport</strong><p>根据对端协议和本地硬件选择 RDMA、TCP、NVLink、HIP、NVMe-oF、EFA、昇腾等后端。</p></div></li><li class="algo-step"><span class="algo-step-num">4</span><div class="algo-step-body"><strong>切片并异步提交</strong><p>大请求拆成片，按本地/远端拓扑挑路径，放入 worker 和 QP 窗口；CQ 完成后聚合为 Batch 状态。</p></div></li></ol>
+      <p>RDMA 版本的关键对象可以记成 <code>Context → EndPoint → QP</code>。Context 对应 HCA，EndPoint 对应本地 NIC 到远端 NIC 的连接，QP 承担实际 work request。连接通常惰性建立，失败后会从端点池移除并重建。大传输切片、多个 QP、CQ 轮询和重试共同把带宽变成流水线，而不是一次阻塞调用。</p>
+      <div class="callout"><strong>Transfer Engine 的价值不是“只支持 RDMA”。</strong>它把 RDMA、TCP、GPU 互联、NVMe 等差异收敛在 Transport 接口后面，上层只表达“从哪个地址向哪个 Segment 搬多少字节”。</div>
+
+      <h2>五、Mooncake Store：控制面与数据面分离</h2>
+      <h3>5.1 Master 是地址簿，不是 Redis 数据转发器</h3>
+      <p>Master 维护 key 到副本的映射、Segment 空间、状态、租约和淘汰信息；Client 挂载连续内存并真正持有数据。客户端从 Master 拿到副本描述符后，数据直接在 Client 之间通过 Transfer Engine 传输，Master 不在大流量路径上。因此容量和带宽可以随 Segment/NIC 横向增加，Master 的负担主要随元数据和请求数增长。</p>
+      <h3>5.2 Put 为什么要三段式</h3>
+      <p><code>PutStart</code> 根据切片长度和 <code>ReplicateConfig</code> 预分配副本，并登记正在处理的 key；Client 将数据写到远端内存或 SSD；所有副本成功后调用 <code>PutEnd</code>，副本才变成 <code>COMPLETE</code>，随后 Get 才能看到。失败则调用 <code>PutRevoke</code> 回滚。这个协议的重点是：读者永远不会读到半个对象。</p>
+      <pre><code class="language-python"># 语义上的 Store 写入，不是完整实现
+replicas = master.put_start(key, slice_lengths, config)
+for replica in replicas:
+    transfer_or_write_file(replica)
+if all_writes_succeeded:
+    master.put_end(key)
+else:
+    master.put_revoke(key)</code></pre>
+      <h3>5.3 Get、复制与分配</h3>
+      <p><code>GetReplicaList</code> 只返回可读副本，并可授予读租约。Client 通常优先本机内存，再选远端内存，之后才回退本地盘或共享盘。对象可按切片条带化到不同 Segment；副本数是尽力而为，资源不足时可能得到少于请求数量的副本，但每个切片的放置仍需满足系统约束。<code>Upsert</code> 支持不存在则插入、存在则更新，<code>Copy/Move</code> 由异步任务系统支撑再均衡和 Drain。</p>
+      <table class="decision-table"><thead><tr><th>状态/机制</th><th>作用</th></tr></thead><tbody><tr><td>INITIALIZED → PROCESSING → COMPLETE</td><td>把“空间已分配”和“数据已可读”分开</td></tr><tr><td>Lease</td><td>读期间保护副本，租约过期前不应被淘汰</td></tr><tr><td>Soft pin</td><td>一段时间内优先保护热点前缀，长期不访问可失效</td></tr><tr><td>Hard pin</td><td>永久跳过自动淘汰，只能显式删除</td></tr><tr><td>Eviction</td><td>高水位或分配失败时回收过期对象，通常近似 LRU</td></tr></tbody></table>
+
+      <h2>六、分层存储与高可用：缓存系统如何活下去</h2>
+      <h3>6.1 三层缓存</h3>
+      <p>与 SGLang HiCache 结合时，可以把 GPU 看作 L1、本机 Host Memory 看作 L2、Mooncake Store 看作共享 L3。Mooncake 自身也支持从内存副本向 <code>LOCAL_DISK</code>、共享盘或 3FS 下沉。热数据可以被本地热缓存短路，冷数据让出昂贵的 DRAM；读取时再提升到更快层级。</p>
+      <p>HiCache 的 <code>HiRadixTree</code> 记录 token 前缀在 L1/L2 的位置，L3 的存在和位置则按需询问后端。预取要求命中部分构成连续前缀，并可用 <code>best_effort</code>、<code>wait_complete</code> 或 <code>timeout</code> 在延迟和命中率之间取舍；回写则有 write-through、选择性 write-through 和 write-back 三种风格。</p>
+      <h3>6.2 Master HA 与数据面容错</h3>
+      <p>高可用模式把 Master 做成由 Lease 协调的主备/多实例：快照提供元数据基线，OpLog 传播增量，standby 追平后才允许提升。主节点失效时客户端跟随新的 leader。由于 KV 数据本身在 Client 副本中，Master 切换主要影响新的元数据查询，不需要把所有 KV 经过 Master 搬一遍。</p>
+      <p>这里要区分两种故障：链路故障由 Transport 的重试、端点重建和备用 NIC 处理；Client 故障由副本和重新复制处理；Master 故障由选主、快照和 OpLog 处理。三者分别属于数据传输、数据副本、控制元数据三个故障域。</p>
+
+      <h2>七、生态集成：同一底座的不同用法</h2>
+      <table class="decision-table"><thead><tr><th>集成</th><th>主要用途</th><th>Mooncake 扮演的角色</th></tr></thead><tbody><tr><td>vLLM PD 分离</td><td>Prefill 产出 KV，Decode 拉取并生成</td><td>Transfer Engine 作为 KV 连接器的数据面</td></tr><tr><td>vLLM Store Connector</td><td>跨请求、跨实例的前缀复用</td><td>Mooncake Store 提供池化 KV</td></tr><tr><td>SGLang HiCache</td><td>GPU/Host/L3 分层缓存</td><td>L3 后端和 RDMA 读写能力</td></tr><tr><td>P2P Store</td><td>训练 checkpoint 向大量节点分发</td><td>节点边拉边成为新数据源</td></tr><tr><td>mooncake-ep / mooncake-pg</td><td>MoE dispatch/combine、容错集合通信</td><td>复用 Transfer Engine/RDMA 设施</td></tr><tr><td>mooncake-rl / reshard</td><td>RL rollout↔训练、权重重分片规划</td><td>跨阶段数据总线和传输计划执行底座</td></tr></tbody></table>
+      <p>因此，“Mooncake 集成”不是唯一模式：点对点 TE 路径追求 PD 交接的低延迟，Store 路径追求全局前缀复用和分层容量；两者可以在同一集群中叠加。</p>
+
+      <h2>八、把它串成一次请求</h2>
+      <ol class="algo-steps"><li class="algo-step algo-step--core"><span class="algo-step-num">1</span><div class="algo-step-body"><strong>路由</strong><p>入口根据负载与前缀亲和性选择 Prefill/Decode，过载时可提前拒绝无法满足 SLO 的请求。</p></div></li><li class="algo-step"><span class="algo-step-num">2</span><div class="algo-step-body"><strong>命中或计算</strong><p>先查本地/共享 KV；未命中的前缀由 Prefill 计算，已命中的部分直接复用。</p></div></li><li class="algo-step"><span class="algo-step-num">3</span><div class="algo-step-body"><strong>交接</strong><p>Prefill 把远端地址、Segment、block/page 信息交给 Decode；此时要延迟释放仍可能被读取的源 KV。</p></div></li><li class="algo-step"><span class="algo-step-num">4</span><div class="algo-step-body"><strong>搬运与生成</strong><p>Decode 分配目标 block，Transfer Engine 批量 READ/WRITE，数据就位后进入逐 token Decode。</p></div></li><li class="algo-step"><span class="algo-step-num">5</span><div class="algo-step-body"><strong>沉淀</strong><p>新 KV 按策略写入 Host/L3，热点保留，冷数据 offload；未来相同前缀跳过重复 Prefill。</p></div></li></ol>
+      <div class="callout"><strong>一条主线：</strong>上层决定“要哪个 KV”，Store 决定“它在哪里且能否安全读”，Transfer Engine 决定“怎样最快搬过去”，硬件决定“这条路径的真实成本”。</div>
+
+      <h2>九、后续源码学习路线</h2>
+      <p>后续逐模块读码时建议按下面顺序，而不是从某个 vLLM connector 的长文件随机跳入：</p>
+      <ol><li><strong>Transfer Engine API：</strong>先看 <code>TransferEngine</code>、<code>Segment</code>、<code>BatchTransfer</code> 和状态轮询。</li><li><strong>RDMA Transport：</strong>再看内存注册、QP、端点池、切片、CQ 和拓扑选路。</li><li><strong>Store Master：</strong>重点追 <code>PutStart/PutEnd/PutRevoke</code>、<code>GetReplicaList</code>、分配器、租约和淘汰。</li><li><strong>Store Client：</strong>追 <code>RealClient</code>、<code>DummyClient</code>、共享内存、读写路径和 SSD backend。</li><li><strong>HA 与 HiCache：</strong>最后看快照/OpLog、选主、预取/回写和多 Rank 同步。</li><li><strong>上层集成：</strong>再回到 vLLM、SGLang，观察应用如何把 block/page 生命周期映射到上述抽象。</li></ol>
+      <div class="essay-ending">Mooncake 的本质不是“把 RDMA 接进推理框架”，而是把 KVCache 变成可寻址、可传输、可复制、可分层、可治理的分布式对象。理解这条主线，后面每个模块都只是同一问题在不同层次上的具体答案。</div>
+      <section class="references-section" aria-label="参考与扩展阅读"><h2>参考与扩展阅读</h2><ol class="reference-list">
+        <li><a href="https://docs.kvcache.com.cn/Mooncake/design/architecture.html" target="_blank" rel="noopener noreferrer">Mooncake 官方：架构</a><span>对象级存储、Transfer Engine、Master/Client 和托管池缓冲区的正式边界。</span></li>
+        <li><a href="https://docs.kvcache.com.cn/Mooncake/design/mooncake-store.html" target="_blank" rel="noopener noreferrer">Mooncake 官方：Mooncake Store</a><span>Put/Get、复制、分配策略、租约、淘汰、持久化和 API。</span></li>
+        <li><a href="https://docs.kvcache.com.cn/Mooncake/design/transfer-engine/index.html" target="_blank" rel="noopener noreferrer">Mooncake 官方：Transfer Engine</a><span>Segment、BatchTransfer、拓扑感知路径、端点管理和 Transport。</span></li>
+        <li><a href="https://docs.kvcache.com.cn/Mooncake/design/hicache-design.html" target="_blank" rel="noopener noreferrer">Mooncake x SGLang HiCache 系统设计</a><span>HiRadixTree、L1/L2/L3、预取、回写和 PD 集成。</span></li>
+        <li><a href="https://vinlee19.github.io/handbooks/mooncake/index.html" target="_blank" rel="noopener noreferrer">Mooncake 源码深度学习手册</a><span>按物理架构、TE、RDMA、Store、HA、生态和端到端数据流组织的源码阅读入口。</span></li>
+        <li><a href="https://github.com/kvcache-ai/Mooncake" target="_blank" rel="noopener noreferrer">kvcache-ai/Mooncake</a><span>源码、技术报告、示例、基准和最新实现，以仓库当前版本为准。</span></li>
+      </ol></section>
+    </section>
+    <section class="comments-section" id="comments" aria-label="Discussion"><div class="comments-header"><h2>Discussion</h2></div><div id="utterances-container" class="utterances-container"></div><noscript>请启用 JavaScript 后查看评论区。</noscript></section>
+  </article></main>
+  <footer class="site-footer"><span class="footer-credit"><span class="footer-prefix">© 2026 by</span><a href="../../index.html" class="footer-brand"><span>MOFANG</span></a></span></footer>
+  <script src="../../app.js?v=43"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js" onload="renderMathInElement(document.body,{delimiters:[{left:'\\[',right:'\\]',display:true},{left:'\\(',right:'\\)',display:false}]});"></script>
+</body></html>
