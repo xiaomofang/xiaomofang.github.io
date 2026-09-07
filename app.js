@@ -15,6 +15,7 @@
     "llm-gateway": "LLM Gateway",
     determinism: "确定性",
     hardware: "硬件与 Kernel",
+    pytorch: "PyTorch",
   };
 
   function initTheme() {

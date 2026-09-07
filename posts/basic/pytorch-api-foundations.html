@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="night">
+<head>
+  <meta charset="UTF-8" />
+  <script>(function(){try{var s=localStorage.getItem("yichuan-theme");document.documentElement.setAttribute("data-theme",s||("matchMedia" in window&&matchMedia("(prefers-color-scheme: dark)").matches?"night":"day"));}catch(e){}})();</script>
+  <style>html{font-size:16px}@media(min-width:1024px){html{font-size:26px}}@media(min-width:1200px){html{font-size:34px}}html,body{margin:0;min-height:100%}html[data-theme="night"],html[data-theme="night"] body{background:#0c0c0c;color:#ededed;color-scheme:dark}html[data-theme="day"],html[data-theme="day"] body{background:#fff;color:#1a1a1a;color-scheme:light}</style>
+  <link rel="stylesheet" href="../../styles.css?v=70" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous" />
+  <title>PyTorch 基础 API：从 Tensor 到大模型训练与推理</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="description" content="从 Tensor 的形状、设备与 dtype 出发，理解 PyTorch Autograd、模型训练、混合精度，以及 Transformer 推理中的常用 API。" />
+</head>
+<body>
+  <div class="ambient" aria-hidden="true"><span class="orb orb-a"></span><span class="orb orb-b"></span></div><canvas id="star-canvas"></canvas>
+  <header class="site-header"><div class="header-inner"><a href="../../index.html" class="logo"><span class="logo-dot"></span><span class="logo-text">MOFANG</span></a><div class="header-actions"><nav class="site-nav"><a href="../../index.html">← Back</a></nav><button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle theme"><span class="icon-sun">☀️</span><span class="icon-moon">🌙</span></button></div></div></header>
+  <main class="site-main"><article class="post-page">
+    <header class="post-page-header">
+      <p class="post-page-category">Basic Knowledge · PyTorch</p>
+      <h1 class="post-page-title">PyTorch 基础 API：从 Tensor 到大模型训练与推理</h1>
+      <p class="post-lead">PyTorch 不必从一张 API 清单开始学。真正贯穿数据、模型和硬件的主线只有一句话：<strong>Tensor 带着形状、dtype、device 和梯度状态流过计算图</strong>。本文沿着这条线，把最常见的写法整理成一张可以迁移到 CNN、Transformer 和 Hugging Face 的基础地图。</p>
+      <div class="post-page-keywords" aria-label="Keywords"><a class="post-keyword-chip" href="../../index.html?keyword=pytorch">PyTorch</a><a class="post-keyword-chip" href="../../index.html?keyword=training">训练</a><a class="post-keyword-chip" href="../../index.html?keyword=inference-systems">推理框架</a></div>
+      <p class="post-page-meta" data-date="2026-09-07" data-author="MOFANG" data-minutes="22">2026年9月7日 · MOFANG</p>
+    </header>
+    <section class="post-page-content">
+      <div class="logic-map" aria-label="PyTorch 学习逻辑地图"><div class="map-node map-node--start"><span class="map-step">1</span><strong>Tensor</strong><p>形状、dtype、device。</p></div><div class="map-arrow">→</div><div class="map-node map-node--ar"><span class="map-step">2</span><strong>Autograd</strong><p>计算图与梯度。</p></div><div class="map-arrow">→</div><div class="map-node map-node--par"><span class="map-step">3</span><strong>训练</strong><p>Module、Loss、Optimizer。</p></div><div class="map-arrow">→</div><div class="map-node map-node--conv"><span class="map-step">4</span><strong>推理</strong><p>Attention、Generate。</p></div></div>
+      <div class="callout"><strong>先记一个排错顺序：</strong>看到 PyTorch 报错时，先看 shape，再看 dtype，最后看 device；如果数值不对，再检查 train/eval 和梯度上下文。</div>
+
+      <h2>一、Tensor 是什么：数据和元数据的组合</h2>
+      <p>Tensor 可以理解为带有统一数据类型的多维数组，但它比普通数组多了三个决定行为的属性：<code>shape</code> 描述每一维大小，<code>dtype</code> 描述元素精度，<code>device</code> 描述数据位于 CPU、CUDA 还是其他设备。大模型中的 token、hidden states、logits 和 KV cache，本质上都是 Tensor。</p>
+      <pre><code class="language-python">import torch
+
+x = torch.tensor([[1, 2], [3, 4]], dtype=torch.float32)
+print(x.shape, x.dtype, x.device, x.ndim, x.numel())
+a = torch.zeros(2, 3)
+b = torch.randn(2, 3)
+ids = torch.arange(0, 8, dtype=torch.long)
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+x = x.to(device=device, dtype=torch.float16)</code></pre>
+      <p class="aside-card"><span class="aside-card__label">蓝色定义层</span>遇到 <code>mat1 and mat2 shapes cannot be multiplied</code>，不要先改代码，先把每个 Tensor 的 shape 打出来。</p>
+
+      <h3>1.1 形状变换不等于数据变换</h3>
+      <p><code>reshape</code>、<code>view</code>、<code>unsqueeze</code>、<code>squeeze</code> 和 <code>permute</code> 常常连续出现。它们改变的是观察方式或维度顺序，不一定改变元素本身。Transformer 里把输入从 <code>[batch, seq, hidden]</code> 拆成多头，关键就是这些操作。</p>
+      <pre><code class="language-python">x = torch.randn(2, 3, 4)       # [batch, seq, hidden]
+y = x.reshape(6, 4)
+z = x.unsqueeze(1)              # [2, 1, 3, 4]
+p = x.permute(0, 2, 1)          # [2, 4, 3]
+q = torch.randn(2, 8, 16)
+k = torch.randn(2, 8, 16)
+scores = q @ k.transpose(-2, -1) # [2, 8, 8]</code></pre>
+      <div class="callout muted"><strong>注意：</strong><code>transpose/permute</code> 可能产生非 contiguous Tensor。需要时使用 <code>contiguous()</code>，或优先使用更灵活的 <code>reshape()</code>。</div>
+
+      <h2>二、Autograd：为什么 loss.backward() 能工作</h2>
+      <p>当 Tensor 参与计算且 <code>requires_grad=True</code> 时，PyTorch 会记录由算子组成的动态计算图。调用 <code>backward()</code>，框架从 loss 沿图反向应用链式法则，把结果累积到叶子 Tensor 的 <code>.grad</code> 中。</p>
+      <div class="math-block" aria-label="autograd chain rule">\[y=x^2+3x,\qquad \frac{\partial y}{\partial x}=2x+3\]</div>
+      <pre><code class="language-python">x = torch.tensor(2.0, requires_grad=True)
+y = x * x + 3 * x
+y.backward()
+print(x.grad)  # tensor(7.)
+
+features = model(input_ids).last_hidden_state.detach()
+with torch.inference_mode():
+    logits = model(input_ids)</code></pre>
+      <p class="aside-card"><span class="aside-card__label">橙色直觉层</span><code>backward()</code> 不会自动清空上一次梯度，所以训练循环必须在下一次反传前调用 <code>optimizer.zero_grad()</code>。梯度累积正是利用了这一点。</p>
+
+      <h2>三、nn.Module：把参数、前向和模式组织起来</h2>
+      <p><code>nn.Module</code> 不只是一个函数容器。赋给它的 <code>nn.Parameter</code> 会被 <code>model.parameters()</code> 找到，子模块会随父模块一起移动设备、保存 checkpoint，并受到 <code>train()</code>/<code>eval()</code> 模式切换影响。</p>
+      <pre><code class="language-python">import torch.nn as nn
+
+class TinyMLP(nn.Module):
+    def __init__(self, hidden=768, classes=10):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(hidden, 1024), nn.GELU(),
+            nn.LayerNorm(1024), nn.Linear(1024, classes)
+        )
+
+    def forward(self, x):
+        return self.net(x)
+
+model = TinyMLP().to(device)</code></pre>
+      <table class="decision-table"><thead><tr><th>目标</th><th>典型 API</th><th>注意点</th></tr></thead><tbody><tr><td>词 id → 向量</td><td><code>nn.Embedding</code></td><td><code>[B,T] → [B,T,H]</code></td></tr><tr><td>分类 / LM loss</td><td><code>nn.CrossEntropyLoss</code></td><td>输入 logits，不要先 Softmax</td></tr><tr><td>训练态 / 推理态</td><td><code>train()</code> / <code>eval()</code></td><td>影响 Dropout、BatchNorm</td></tr></tbody></table>
+
+      <h2>四、训练循环：五步形成闭环</h2>
+      <p>最小训练循环可以压缩为：取 batch、前向、算 loss、反向、更新参数。<code>zero_grad</code> 清理旧梯度，<code>backward</code> 产生新梯度，<code>step</code> 才根据梯度更新参数。</p>
+      <pre><code class="language-python">import torch.optim as optim
+
+criterion = nn.CrossEntropyLoss()
+optimizer = optim.AdamW(model.parameters(), lr=2e-5, weight_decay=0.01)
+model.train()
+for batch in dataloader:
+    inputs = batch["input_ids"].to(device)
+    labels = batch["labels"].to(device)
+    optimizer.zero_grad(set_to_none=True)
+    logits = model(inputs)
+    loss = criterion(logits, labels)
+    loss.backward()
+    torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+    optimizer.step()</code></pre>
+      <p class="aside-card"><span class="aside-card__label">紫色落地层</span>优化器只持有参数引用和状态，不理解模型结构。因此要先构造 model，再把 <code>model.parameters()</code> 传给 optimizer。</p>
+      <p><code>Dataset</code> 定义单条样本，<code>DataLoader</code> 负责 batch、shuffle 和 worker。数据处理逻辑越清楚，越容易排查 padding、label shift 和吞吐问题。</p>
+
+      <h2>五、设备、dtype 与混合精度</h2>
+      <p>把模型搬到 GPU 不等于把输入也搬过去；参与同一次算子的 Tensor 通常必须位于兼容的 device。工程上建议把 device 作为入口变量，而不是到处直接写 <code>.cuda()</code>。</p>
+      <pre><code class="language-python">device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+model = model.to(device)
+batch = {k: v.to(device, non_blocking=True) for k, v in batch.items()}
+with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+    outputs = model(**batch)
+    loss = outputs.loss</code></pre>
+      <p><code>autocast</code> 让适合低精度的算子使用低精度，同时保留敏感计算的精度。BF16 通常不需要 loss scaling；FP16 在部分环境中需要 <code>GradScaler</code>。实际速度还取决于 GPU、算子实现和输入 shape。</p>
+
+      <h2>六、Transformer 与大模型推理</h2>
+      <p>Attention 的核心是三步：<code>QKᵀ</code> 得到 token 间分数，除以 <code>sqrt(d)</code> 做尺度归一化，Softmax 后与 V 加权求和。PyTorch 2.x 可以用 fused API，避免手写版本产生多余中间 Tensor。</p>
+      <pre><code class="language-python">import torch.nn.functional as F
+
+# q, k, v: [batch, heads, seq, head_dim]
+out = F.scaled_dot_product_attention(q, k, v, is_causal=True)
+
+# 手写等价结构，便于理解
+scores = q @ k.transpose(-2, -1) / (q.size(-1) ** 0.5)
+weights = torch.softmax(scores, dim=-1)
+out = weights @ v</code></pre>
+      <p>推理时要同时做两件事：<code>model.eval()</code> 关闭训练态行为，<code>torch.inference_mode()</code> 关闭 autograd 的额外记录。前者是模型状态，后者是执行上下文，二者不是一回事。</p>
+      <pre><code class="language-python">model.eval()
+with torch.inference_mode():
+    inputs = tokenizer(prompt, return_tensors="pt").to(device)
+    outputs = model.generate(**inputs, max_new_tokens=128,
+                             do_sample=True, temperature=0.7, top_p=0.9)
+text = tokenizer.decode(outputs[0], skip_special_tokens=True)</code></pre>
+      <div class="callout"><strong>生成参数的边界：</strong><code>max_new_tokens</code> 控制长度，<code>temperature/top_p/top_k</code> 控制采样。它们改变的是如何从 logits 选 token，不是模型本身的知识。</div>
+
+      <h2>七、保存、加载与最小排错表</h2>
+      <pre><code class="language-python">torch.save(model.state_dict(), "model.pt")
+model.load_state_dict(torch.load("model.pt", map_location=device))
+tokenizer.save_pretrained("./checkpoint")
+model.save_pretrained("./checkpoint")</code></pre>
+      <table class="decision-table"><thead><tr><th>现象</th><th>优先检查</th><th>典型原因</th></tr></thead><tbody><tr><td>shape mismatch</td><td><code>shape</code>、<code>permute</code></td><td>batch / seq / hidden 顺序反了</td></tr><tr><td>device error</td><td><code>device</code></td><td>模型、输入或 mask 不在同一设备</td></tr><tr><td>loss 不下降</td><td>label、lr、梯度</td><td>标签错位或参数未更新</td></tr><tr><td>结果每次不同</td><td><code>eval</code>、采样参数</td><td>Dropout 或随机采样仍开启</td></tr></tbody></table>
+      <div class="essay-ending">学 PyTorch 的最短路径不是把函数背完，而是追踪一个 Tensor 的旅程：它从哪里创建，形状如何变化，在哪个 device 上，是否需要梯度，最后被哪个 loss 或生成策略消费。掌握这条主线，API 名称会从零散记忆变成可推导的工具箱。</div>
+      <section class="references-section" aria-label="参考与扩展阅读"><h2>参考与扩展阅读</h2><ol class="reference-list"><li><a href="https://pytorch.org/docs/stable/torch.html" target="_blank" rel="noopener noreferrer">PyTorch · torch API</a><span>Tensor 创建、属性与基础运算。</span></li><li><a href="https://pytorch.org/docs/stable/autograd.html" target="_blank" rel="noopener noreferrer">PyTorch · Automatic differentiation</a><span>Autograd、no_grad 与 inference mode。</span></li><li><a href="https://pytorch.org/docs/stable/nn.html" target="_blank" rel="noopener noreferrer">PyTorch · torch.nn</a><span>Module、层和损失函数。</span></li><li><a href="https://pytorch.org/docs/stable/generated/torch.nn.functional.scaled_dot_product_attention.html" target="_blank" rel="noopener noreferrer">scaled_dot_product_attention</a><span>Transformer 注意力的基础 API。</span></li><li><a href="https://huggingface.co/docs/transformers/index" target="_blank" rel="noopener noreferrer">Hugging Face Transformers</a><span>预训练模型、tokenizer 与 generate。</span></li></ol></section>
+    </section>
+    <section class="comments-section" id="comments" aria-label="Discussion"><div class="comments-header"><h2>Discussion</h2></div><div id="utterances-container" class="utterances-container"></div><noscript>请启用 JavaScript 后查看评论区。</noscript></section>
+  </article></main>
+  <footer class="site-footer"><span class="footer-credit"><span class="footer-prefix">© 2026 by</span><a href="../../index.html" class="footer-brand"><span>MOFANG</span></a></span></footer>
+  <script src="../../app.js?v=41"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" crossorigin="anonymous"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js" crossorigin="anonymous" onload="renderMathInElement(document.body,{delimiters:[{left:'\\[',right:'\\]',display:true},{left:'\\(',right:'\\)',display:false}],ignoredTags:['script','noscript','style','textarea','pre','code','option','svg'],throwOnError:false});"></script>
+</body>
+</html>
