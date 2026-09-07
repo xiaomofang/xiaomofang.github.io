@@ -22,7 +22,6 @@
       <p class="post-page-meta" data-date="2026-09-07" data-author="MOFANG" data-minutes="22">2026年9月7日 · MOFANG</p>
     </header>
     <section class="post-page-content">
-      <div class="logic-map" aria-label="PyTorch 学习逻辑地图"><div class="map-node map-node--start"><span class="map-step">1</span><strong>Tensor</strong><p>形状、dtype、device。</p></div><div class="map-arrow">→</div><div class="map-node map-node--ar"><span class="map-step">2</span><strong>Autograd</strong><p>计算图与梯度。</p></div><div class="map-arrow">→</div><div class="map-node map-node--par"><span class="map-step">3</span><strong>训练</strong><p>Module、Loss、Optimizer。</p></div><div class="map-arrow">→</div><div class="map-node map-node--conv"><span class="map-step">4</span><strong>推理</strong><p>Attention、Generate。</p></div></div>
       <div class="callout"><strong>先记一个排错顺序：</strong>看到 PyTorch 报错时，先看 shape，再看 dtype，最后看 device；如果数值不对，再检查 train/eval 和梯度上下文。</div>
 
       <h2>一、Tensor 是什么：数据和元数据的组合</h2>
