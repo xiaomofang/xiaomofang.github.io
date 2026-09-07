@@ -129,7 +129,157 @@ with torch.inference_mode():
 text = tokenizer.decode(outputs[0], skip_special_tokens=True)</code></pre>
       <div class="callout"><strong>生成参数的边界：</strong><code>max_new_tokens</code> 控制长度，<code>temperature/top_p/top_k</code> 控制采样。它们改变的是如何从 logits 选 token，不是模型本身的知识。</div>
 
-      <h2>七、保存、加载与最小排错表</h2>
+      <h2>七、常用 API 速查：把函数放回各自的位置</h2>
+      <p>前面的章节解释了 API 为什么这样组合。下面补齐日常写代码和面试复习中最容易查找的函数。速查表不追求覆盖整个 PyTorch，而是覆盖从 Tensor 到训练、分布式和 Transformers 的高频入口。</p>
+
+      <h3>7.1 创建、转换与形状</h3>
+      <table class="decision-table"><thead><tr><th>类别</th><th>API</th><th>作用</th></tr></thead><tbody>
+        <tr><td>创建</td><td><code>tensor / zeros / ones / empty</code></td><td>从数据或形状创建 Tensor；<code>empty</code> 不初始化内容</td></tr>
+        <tr><td>序列</td><td><code>arange / linspace</code></td><td>等差序列 / 固定步数的等分序列</td></tr>
+        <tr><td>随机与矩阵</td><td><code>rand / randn / eye</code></td><td>均匀分布、标准正态分布、单位矩阵</td></tr>
+        <tr><td>转换</td><td><code>to / float / half / bfloat16 / cpu / cuda</code></td><td>切换 device 或 dtype；优先用 <code>to</code> 统一管理</td></tr>
+        <tr><td>形状</td><td><code>view / reshape / unsqueeze / squeeze / flatten</code></td><td>改变形状、增删大小为 1 的维度、展平</td></tr>
+        <tr><td>维度顺序</td><td><code>transpose / permute</code></td><td>交换两个维度 / 重排多个维度</td></tr>
+      </tbody></table>
+      <pre><code class="language-python">x = torch.ones(2, 3)
+u = torch.empty(2, 3)
+steps = torch.linspace(0, 1, steps=5)
+uniform = torch.rand(2, 3)
+normal = torch.randn(2, 3)
+identity = torch.eye(3)
+
+flat = x.flatten()
+viewed = x.view(3, 2)
+expanded = x.unsqueeze(0)
+same = expanded.squeeze(0)
+cpu_x = x.float().cpu()</code></pre>
+
+      <h3>7.2 拼接、切分、索引与数学运算</h3>
+      <p><code>cat</code> 不增加维度，<code>stack</code> 会增加一个新维度；<code>chunk</code> 按块数切分，<code>split</code> 按指定大小切分。数学运算可以使用运算符，也可以使用显式的 <code>torch.*</code> 函数，后者在阅读通用代码时更直观。</p>
+      <pre><code class="language-python">a = torch.randn(4, 3)
+b = torch.randn(4, 3)
+joined = torch.cat([a, b], dim=0)
+stacked = torch.stack([a, b], dim=0)
+chunks = torch.chunk(joined, chunks=2, dim=0)
+splits = torch.split(joined, split_size_or_sections=2, dim=0)
+
+first = joined[0]
+column = joined[:, 0]
+lower = torch.tril(torch.ones(4, 4))
+upper = torch.triu(torch.ones(4, 4), diagonal=1)
+
+sum_x = torch.sum(a)
+mean_x = torch.mean(a)
+maximum = torch.max(a)
+minimum = torch.min(a)
+indices = torch.argmax(a, dim=-1)
+value = torch.abs(torch.log(torch.exp(a)))
+product = torch.matmul(a.T, b)
+matrix_product = torch.mm(a.T, b)</code></pre>
+      <div class="callout muted"><strong>Attention 里的最小组合：</strong><code>torch.matmul(q, k.transpose(-2, -1))</code> 计算分数，<code>torch.softmax(scores, dim=-1)</code> 归一化，<code>masked_fill</code> 屏蔽未来 token，最后再与 <code>v</code> 做矩阵乘法。</div>
+
+      <h3>7.3 Autograd、模块与损失</h3>
+      <pre><code class="language-python">x = torch.tensor(2.0)
+x.requires_grad_(True)
+y = x * x + 3 * x
+y.backward()
+print(x.grad)
+
+# 只做评估时关闭梯度；detach 适合把某个结果拿出当前计算图
+with torch.no_grad():
+    prediction = model(inputs)
+features = prediction.detach()
+
+network = nn.Sequential(
+    nn.Linear(768, 1024),
+    nn.ReLU(),
+    nn.Dropout(0.1),
+    nn.Linear(1024, 10),
+)
+probability = nn.Softmax(dim=-1)(network(hidden))
+loss_ce = nn.CrossEntropyLoss()(logits, labels)
+loss_mse = nn.MSELoss()(prediction, target)</code></pre>
+      <p>激活函数常见组合是 <code>ReLU</code>、<code>GELU</code> 和 <code>SiLU</code>；<code>Softmax</code> 把 logits 变成概率，但传给 <code>CrossEntropyLoss</code> 时不要提前 Softmax，因为该损失已经内置了稳定的 log-softmax。<code>nn.MultiheadAttention</code> 是模块化的多头注意力，手写或追求 fused kernel 时则常用 <code>F.scaled_dot_product_attention</code>。</p>
+
+      <h3>7.4 优化器、学习率与混合精度</h3>
+      <pre><code class="language-python">sgd = torch.optim.SGD(model.parameters(), lr=1e-2, momentum=0.9)
+adam = torch.optim.Adam(model.parameters(), lr=1e-4)
+adamw = torch.optim.AdamW(model.parameters(), lr=2e-5, weight_decay=0.01)
+scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=100)
+
+optimizer.zero_grad(set_to_none=True)
+loss.backward()
+torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+optimizer.step()
+scheduler.step()
+
+# FP16 训练时使用 GradScaler；BF16 通常不需要 scaling
+scaler = torch.cuda.amp.GradScaler()
+with torch.autocast("cuda", dtype=torch.float16):
+    loss = model(**batch).loss
+scaler.scale(loss).backward()
+scaler.step(optimizer)
+scaler.update()</code></pre>
+
+      <h3>7.5 Dataset、DataLoader 与 DDP</h3>
+      <pre><code class="language-python">from torch.utils.data import Dataset, DataLoader
+
+class TextDataset(Dataset):
+    def __init__(self, samples):
+        self.samples = samples
+
+    def __len__(self):
+        return len(self.samples)
+
+    def __getitem__(self, index):
+        return self.samples[index]
+
+dataloader = DataLoader(
+    TextDataset(samples), batch_size=8, shuffle=True,
+    num_workers=4, pin_memory=True,
+)
+
+# 多卡训练的核心入口（省略进程启动与 sampler 配置）
+import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
+dist.init_process_group("nccl")
+model = DDP(model.to(local_rank), device_ids=[local_rank])</code></pre>
+      <p><code>Dataset</code> 描述单条数据，<code>DataLoader</code> 组织 batch 和 worker；DDP 让每个进程持有一份模型并同步梯度，实际使用时还要配合 <code>DistributedSampler</code> 和每个进程独立的 GPU。</p>
+
+      <h3>7.6 Transformers 与生成参数</h3>
+      <pre><code class="language-python">from transformers import (
+    AutoConfig, AutoTokenizer, AutoModel,
+    AutoModelForCausalLM, AutoModelForSequenceClassification,
+    Trainer, TrainingArguments,
+)
+
+config = AutoConfig.from_pretrained(model_id)
+tokenizer = AutoTokenizer.from_pretrained(model_id)
+base = AutoModel.from_pretrained(model_id)
+causal = AutoModelForCausalLM.from_pretrained(model_id)
+classifier = AutoModelForSequenceClassification.from_pretrained(model_id)
+
+outputs = causal.generate(
+    **inputs, max_new_tokens=64,
+    do_sample=True, temperature=0.8,
+    top_k=50, top_p=0.95,
+    repetition_penalty=1.05,
+    no_repeat_ngram_size=3,
+    eos_token_id=tokenizer.eos_token_id,
+    pad_token_id=tokenizer.pad_token_id,
+)
+text = tokenizer.decode(outputs[0], skip_special_tokens=True)
+texts = tokenizer.batch_decode(outputs, skip_special_tokens=True)
+
+args = TrainingArguments(
+    output_dir="./output", per_device_train_batch_size=4,
+    learning_rate=2e-5, num_train_epochs=3,
+)
+trainer = Trainer(model=causal, args=args, train_dataset=train_dataset)
+trainer.train()</code></pre>
+      <table class="decision-table"><thead><tr><th>参数</th><th>作用</th><th>典型理解</th></tr></thead><tbody><tr><td><code>do_sample</code></td><td>是否从分布采样</td><td>关闭时通常走贪心或 beam search</td></tr><tr><td><code>temperature</code></td><td>调整分布尖锐程度</td><td>越低越确定，越高越发散</td></tr><tr><td><code>top_k / top_p</code></td><td>限制候选 token</td><td>一个按数量，一个按累计概率</td></tr><tr><td><code>num_beams</code></td><td>束搜索宽度</td><td>非采样生成时常用</td></tr><tr><td><code>repetition_penalty</code></td><td>降低重复倾向</td><td>不要用过大，否则可能损伤连贯性</td></tr></tbody></table>
+
+      <h2>八、保存、加载与最小排错表</h2>
       <pre><code class="language-python">torch.save(model.state_dict(), "model.pt")
 model.load_state_dict(torch.load("model.pt", map_location=device))
 tokenizer.save_pretrained("./checkpoint")
