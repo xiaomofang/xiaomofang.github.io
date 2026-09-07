@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="night">
+<head>
+  <meta charset="UTF-8" />
+  <script>(function(){try{var s=localStorage.getItem("yichuan-theme");document.documentElement.setAttribute("data-theme",s||("matchMedia" in window&&matchMedia("(prefers-color-scheme: dark)").matches?"night":"day"));}catch(e){}})();</script>
+  <style>html{font-size:16px}@media(min-width:1024px){html{font-size:26px}}@media(min-width:1200px){html{font-size:34px}}html,body{margin:0;min-height:100%}html[data-theme="night"],html[data-theme="night"] body{background:#0c0c0c;color:#ededed;color-scheme:dark}html[data-theme="day"],html[data-theme="day"] body{background:#fff;color:#1a1a1a;color-scheme:light}</style>
+  <link rel="stylesheet" href="../styles.css?v=71" />
+  <title>AI Interview 01：大模型技术面试题地图</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="description" content="按知识关联整理的大模型技术面试题：模型基础、推理、KV Cache、调度、并行、RAG、Agent 和线上排障。" />
+</head>
+<body>
+  <div class="ambient" aria-hidden="true"><span class="orb orb-a"></span><span class="orb orb-b"></span></div><canvas id="star-canvas"></canvas>
+  <header class="site-header"><div class="header-inner"><a href="../index.html" class="logo"><span class="logo-dot"></span><span class="logo-text">MOFANG</span></a><div class="header-actions"><nav class="site-nav"><a href="index.html">AI Interview</a><a href="../index.html">← Blog</a></nav><button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle theme"><span class="icon-sun">☀️</span><span class="icon-moon">🌙</span></button></div></div></header>
+  <main class="site-main"><article class="post-page interview-article">
+    <header class="post-page-header"><p class="post-page-category">AI INTERVIEW · TECHNICAL TRACK 01</p><h1 class="post-page-title">从 Token 到线上故障：大模型技术面试题地图</h1><p class="post-lead">这不是按“一面、二面”堆起来的题库，而是沿着一条真实的系统链路组织：<strong>模型如何生成 → 推理为什么变慢 → 服务如何扩展 → 指标如何证明 → 故障如何定位</strong>。项目和 HR 题不放在这里，个人经历只在需要解释工程判断时作为追问。</p><div class="post-page-keywords"><a class="post-keyword-chip" href="index.html#model-basics">模型基础</a><a class="post-keyword-chip" href="index.html#inference-core">推理核心</a><a class="post-keyword-chip" href="index.html#observability">工程排障</a></div><p class="post-page-meta" data-date="2026-09-07" data-author="MOFANG" data-minutes="55"></p></header>
+    <section class="post-page-content">
+      <div class="logic-map" aria-label="面试题知识地图"><div class="map-node map-node--start"><span>01</span><strong>模型</strong><p>从输入到 logits</p></div><div class="map-arrow">→</div><div class="map-node map-node--ar"><span>02</span><strong>推理</strong><p>KV 与阶段瓶颈</p></div><div class="map-arrow">→</div><div class="map-node map-node--par"><span>03</span><strong>系统</strong><p>调度与并行</p></div><div class="map-arrow">→</div><div class="map-node map-node--conv"><span>04</span><strong>验证</strong><p>指标与排障</p></div></div>
+      <div class="callout"><strong>回答模板：</strong>先给一句定义，再解释它解决的结构性问题；接着说代价和适用边界，最后给出一个能验证结论的指标或实验。只说“更快”“更省显存”通常不够。</div>
+
+      <h2 id="section-01">一、模型基础：先讲清楚模型在算什么</h2>
+      <p class="section-intro">编号 Q01—Q12。目标不是背组件名，而是能从一个输入 Token 走到下一个 Token，并说明每个组件为什么存在。</p>
+      <div class="question-list">
+        <article class="interview-question"><div class="question-top"><span>Q01 · ★★★★★</span><b>从输入一个 Token 开始，Decoder-only Transformer 如何生成下一个 Token？</b></div><p>文本经 Tokenizer 变成 token id，查 Embedding 后加入位置关系信息；经过多层带 Causal Mask 的 Self-Attention、残差和 FFN，得到最后位置的 hidden state；LM Head 映射成 logits，再经过 Temperature、Top-k/Top-p 等处理并采样下一个 Token，拼回上下文循环。Decode 阶段会用 KV Cache 复用历史 K/V。</p><small>追问：为什么只取最后一个位置？因为下一步只需要当前前缀对应的条件分布。</small></article>
+        <article class="interview-question"><div class="question-top"><span>Q02 · ★★★★★</span><b>Self-Attention 的 Q、K、V 分别是什么？</b></div><p>通常 Q=XWq、K=XWk、V=XWv，注意力为 softmax(QKᵀ/√dₖ + mask)V。Q 表示当前查询，K 提供可匹配的索引，V 是被加权汇聚的内容。QKᵀ决定“看谁”，V决定“拿什么信息”。</p></article>
+        <article class="interview-question"><div class="question-top"><span>Q03 · ★★★★☆</span><b>为什么 Attention 要除以 √dₖ？</b></div><p>若 Q、K 各维度近似独立、方差为 1，点积的方差会随 dₖ 增大。除以 √dₖ 可把 logits 的尺度拉回稳定范围，避免 softmax 过早饱和、梯度变小。它是数值稳定性设计，不是降低复杂度。</p></article>
+        <article class="interview-question"><div class="question-top"><span>Q04 · ★★★★☆</span><b>MHA、MQA、GQA 有什么区别？</b></div><p>MHA 的每个 Query Head 都有独立 K/V；MQA 共享一组 K/V；GQA 将 Query Head 分组，每组共享 K/V。GQA 在保留多 Query 表达能力的同时减少 KV Cache 容量和读取量，常是质量、显存、带宽之间的折中。</p><small>关联阅读：<a href="../posts/basic/attention-mechanism-evolution-mha-mqa-gqa-mla.html">注意力机制如何演变</a>。</small></article>
+        <article class="interview-question"><div class="question-top"><span>Q05 · ★★★★☆</span><b>没有位置编码会怎样？Causal Mask 能替代它吗？</b></div><p>Self-Attention 本身主要依据内容相似度聚合，不携带绝对位置、相对顺序和距离方向。Causal Mask 只限制不能看未来，不能告诉模型两个 Token 的相对位置。RoPE 通过对 Q/K 做位置相关旋转，把位置信息融入点积并表达相对关系。</p></article>
+        <article class="interview-question"><div class="question-top"><span>Q06 · ★★★☆☆</span><b>LayerNorm 和 RMSNorm 有什么区别？</b></div><p>LayerNorm 会减均值再按方差归一化；RMSNorm 只按均方根缩放，不做均值中心化，计算更简洁。Llama 等模型采用 RMSNorm，是在经验效果、稳定性和计算开销之间的选择，不能脱离具体模型说谁绝对更好。</p></article>
+        <article class="interview-question"><div class="question-top"><span>Q07 · ★★★☆☆</span><b>FFN 在 Transformer 中做什么？为什么常用 SwiGLU？</b></div><p>Attention 负责跨 Token 信息混合，FFN 在每个位置独立地做通道维度的非线性变换，提供特征变换和容量。SwiGLU 用门控分支调节信息通过比例，通常以参数和中间维度调整换取更好的表达能力。</p></article>
+        <article class="interview-question"><div class="question-top"><span>Q08 · ★★★★☆</span><b>为什么 8K 模型不能直接把 Context Length 改成 128K？</b></div><p>训练时的长度分布、位置编码外推能力、注意力数值稳定性、KV Cache 显存和长上下文数据质量都可能成为限制。需要位置插值或 RoPE scaling、长上下文继续训练和质量评测；改配置只改变上限，不会凭空获得泛化能力。</p></article>
+        <article class="interview-question"><div class="question-top"><span>Q09 · ★★★☆☆</span><b>Temperature、Top-k、Top-p 分别改变什么？</b></div><p>Temperature 缩放 logits，改变分布平滑度；Top-k 固定保留概率最高的 K 个候选；Top-p 保留累计概率达到 p 的最小集合。过滤后对剩余候选重新归一化。Beam Search 是序列搜索策略，不等于随机采样。</p></article>
+        <article class="interview-question"><div class="question-top"><span>Q10 · ★★★★☆</span><b>LoRA 为什么只训练少量参数也能微调？</b></div><p>冻结基础权重 W，只学习低秩增量 ΔW=BA，让任务变化落在较低维的适配子空间。训练参数、优化器状态和显存大幅下降，但低秩假设可能限制复杂任务，秩、目标层和数据质量需要验证。</p></article>
+        <article class="interview-question"><div class="question-top"><span>Q11 · ★★★☆☆</span><b>Base Model 如何变成 Chat Model？</b></div><p>常见链路是预训练得到 Base Model，经过指令数据 SFT 学会遵循格式，再通过偏好数据和 RLHF、DPO 等方法改善 helpfulness、harmlessness、风格和拒答边界。SFT 解决“怎么回答”，偏好对齐解决“多个回答中更偏好哪个”。</p></article>
+        <article class="interview-question"><div class="question-top"><span>Q12 · ★★★☆☆</span><b>大模型有“推理能力”吗？</b></div><p>更严谨的说法是模型表现出数学、代码、多步决策和规划等推理行为，但不能因此等同于意识或可靠的形式化推理器。CoT 能改善部分任务，却不保证正确；生产系统还需要验证器、工具、检索和约束输出。</p></article>
+      </div>
+
+      <h2 id="section-02">二、推理核心：KV Cache、Prefill 与 Decode</h2>
+      <p class="section-intro">编号 Q13—Q30。回答这组题时，始终把计算量、显存、带宽和串行依赖放在一起看。</p>
+      <div class="question-list">
+        <article class="interview-question"><div class="question-top"><span>Q13 · ★★★★★</span><b>KV Cache 是什么？为什么推理需要它？</b></div><p>自回归生成时，新 Token 的 Query 需要与历史 Token 的 Key 做匹配并聚合 Value。历史 K/V 若每步重算会产生大量重复计算，因此缓存每层历史 K/V，只计算新 Token 的 Q/K/V，并把新 K/V 追加进缓存。代价是显存随层数、序列长度、并发和 KV Head 数增长。</p></article>
+        <article class="interview-question"><div class="question-top"><span>Q14 · ★★★★★</span><b>Prefill 和 Decode 的瓶颈为什么不同？</b></div><p>Prefill 一次处理整个 Prompt，矩阵形状大、并行度高，通常偏计算密集；Decode 每步只处理新 Token，逐步串行，频繁读取历史 KV，更容易受 HBM 带宽、Kernel 启动、通信和调度影响。前者常影响 TTFT，后者常影响 TPOT/ITL。</p><small>关联阅读：<a href="../posts/inference/llm-inference-prefill-decode-bottleneck-analysis.html">LLM 推理性能怎么分析</a>。</small></article>
+        <article class="interview-question"><div class="question-top"><span>Q15 · ★★★★★</span><b>KV Cache 显存怎么估算？</b></div><p>粗略可写为：层数 × 序列长度 × batch × 2（K/V）× KV Head 数 × Head Dimension × 每元素字节数。还要乘上并发和生成长度，并考虑分页管理、对齐、workspace 与通信 buffer。MHA 改成 GQA/MQA 的直接收益是减少 KV Head 数，而不是改变模型权重大小。</p></article>
+        <article class="interview-question"><div class="question-top"><span>Q16 · ★★★★☆</span><b>为什么 Decode 通常比 Prefill 慢？</b></div><p>“慢”要先定义是单 Token 延迟还是总吞吐。Decode 的单步工作量小却要读取全历史 KV，矩阵乘形状也更像小 GEMM，难以吃满 GPU；自回归依赖让每步不能完全并行。Batch 能提高吞吐，但会增加带宽竞争和尾延迟。</p></article>
+        <article class="interview-question"><div class="question-top"><span>Q17 · ★★★★☆</span><b>FlashAttention 更快，但是否改变了 O(n²)？</b></div><p>标准 Attention 的理论计算复杂度仍是 O(n²)。FlashAttention 通过 tiling、片上 SRAM 重用和 online softmax，减少 HBM 读写与中间矩阵物化，因此实际更快、更省显存；它优化的是 IO 复杂度和常数，不是把一般 Attention 变成线性复杂度。</p></article>
+        <article class="interview-question"><div class="question-top"><span>Q18 · ★★★★☆</span><b>GPU 和 CPU 推理如何比较？</b></div><p>GPU 更适合大模型、批量矩阵、并发和低精度 Tensor Core；CPU 适合小模型、低并发、量化、成本敏感或没有 GPU 的场景。必须固定模型、量化、输入输出长度、并发、硬件和指标，不能只比较设备名称。</p></article>
+        <article class="interview-question"><div class="question-top"><span>Q19 · ★★★★☆</span><b>INT8 一定比 FP16 快吗？</b></div><p>不一定。INT8 可能降低权重和访存压力，并在支持良好的硬件与 Kernel 上提升吞吐；但 scale、反量化、算子覆盖和小 Batch 开销都可能抵消收益。应分别测 TTFT、TPOT、吞吐、显存和精度回归。</p></article>
+        <article class="interview-question"><div class="question-top"><span>Q20 · ★★★★☆</span><b>显存为什么涨了还一直占着？</b></div><p>要区分权重常驻、KV Cache 增长、workspace、通信 buffer 和分配器保留。nvidia-smi 更接近 reserved，不等于活跃 Tensor；应对照 allocated、reserved、KV block 使用量和请求生命周期。allocated 持续增长且对象无法释放，才更像泄漏或缓存归还问题。</p></article>
+        <article id="section-03" class="interview-question"><div class="question-top"><span>Q21 · ★★★★☆</span><b>Batch 增大时 Decode 延迟怎么变？</b></div><p>初期 Batch 增大可提高 GPU 利用率和总体吞吐；到饱和点后，KV 读取竞争、HBM 带宽、同步和调度开销上升，短请求还可能被长请求拖住。最终要在吞吐、TPOT、P95/P99 和成本间找工作点。</p></article>
+        <article class="interview-question"><div class="question-top"><span>Q22 · ★★★★☆</span><b>什么是 Continuous Batching？</b></div><p>请求不是等整批结束再替换，而是在每个 Decode step 动态加入新请求、移除已完成请求。它提高设备利用率和吞吐，但需要处理不同长度、KV block、优先级、公平性和抢占。</p></article>
+        <article class="interview-question"><div class="question-top"><span>Q23 · ★★★★☆</span><b>Chunk Prefill 解决什么问题？</b></div><p>把长 Prefill 切成小块，让 Decode 请求在块之间插入，降低长输入对 Decode 的阻塞和队头阻塞。代价是调度复杂、Kernel 次数可能增加、单次 Prefill 效率下降。它通常不自动减少总 HBM 流量，需实测。</p></article>
+        <article class="interview-question"><div class="question-top"><span>Q24 · ★★★★☆</span><b>PageAttention 解决什么问题？</b></div><p>把 KV Cache 按固定 Block 管理，像虚拟内存一样避免每个请求要求连续大块显存，减少外部碎片并支持动态增长、共享和回收。代价是页表/映射元数据、地址转换和可能较差的访存局部性。</p></article>
+        <article class="interview-question"><div class="question-top"><span>Q25 · ★★★☆☆</span><b>PageSize 大小如何取舍？</b></div><p>大 Page 减少元数据与管理次数，访问更连续，但序列尾部和短请求的内部碎片更大；小 Page 分配灵活、碎片少，却会增加映射、调度和访存开销。PageSize=1 通常管理成本过高，不是免费获得最优碎片率。</p></article>
+        <article class="interview-question"><div class="question-top"><span>Q26 · ★★★★☆</span><b>Prefix Cache 命中率低怎么排查？</b></div><p>检查公共前缀是否被时间戳、用户字段、随机示例、工具结果、空格换行和 Chat Template 变化污染；确认 Tokenizer、模型和 Prompt 版本一致，再看 Cache Key、TTL、容量淘汰、Block 粒度和权限域。稳定公共内容放前，动态内容放后。</p></article>
+        <article class="interview-question"><div class="question-top"><span>Q27 · ★★★★☆</span><b>多租户 Prefix Cache 如何保证安全？</b></div><p>Cache Key 至少纳入 tenant、项目、模型版本、Prompt 版本和权限域，按租户隔离或做严格 ACL；不能因为前缀相同就跨租户复用可能包含私密信息的结果。缓存命中率必须服从数据安全边界。</p></article>
+        <article class="interview-question"><div class="question-top"><span>Q28 · ★★★☆☆</span><b>输入分桶 Input Bucketing 的目的是什么？</b></div><p>按输入长度把请求放入近似长度的桶，减少 Padding，提升 Batch 内形状一致性和 Kernel 利用率，也让 Benchmark 输入分布可控。桶过多会增加调度复杂度，过少则仍有 Padding 浪费。</p></article>
+        <article class="interview-question"><div class="question-top"><span>Q29 · ★★★★☆</span><b>TTFT、TPOT、ITL 分别看什么？</b></div><p>TTFT 是请求到首 Token 的时间，包含排队、预处理、检索和 Prefill；TPOT 是平均每个输出 Token 时间；ITL 是相邻输出 Token 的间隔。线上体验还应看 E2E、请求级 P95/P99，不能只报一个平均 Tokens/s。</p></article>
+        <article class="interview-question"><div class="question-top"><span>Q30 · ★★★☆☆</span><b>冷启动包含哪些阶段？</b></div><p>容器/进程启动、权重加载、CUDA 初始化、Kernel 编译或 autotune、Engine 初始化、Cache 建立、连接池和依赖服务准备都可能是冷启动。Warmup 只覆盖其中一部分，排查时要按链路拆时间。</p></article>
+      </div>
+
+      <h2 id="section-03">三、调度、并行与 P/D 分离</h2><p class="section-intro">编号 Q31—Q48。系统题的关键是把“优化方向”说成可观测的资源变化。</p>
+      <div class="question-list">
+        <article id="section-04" class="interview-question"><div class="question-top"><span>Q31 · ★★★★★</span><b>P/D 分离为什么有价值？</b></div><p>Prefill 偏算力、Decode 偏带宽和低延迟，混在同一资源池会互相干扰。分离后可以分别配置并行度、Batch、优先级和扩缩容策略；代价是 KV 传输、节点间通信、路由和调度复杂度增加。</p></article>
+        <article class="interview-question"><div class="question-top"><span>Q32 · ★★★★☆</span><b>P/D 分离中的主要通信问题是什么？</b></div><p>Prefill 产出的 KV 需要可靠、高吞吐、低抖动地交给 Decode；要考虑传输协议、拓扑、序列化、分块、流控、失败重试和 KV 一致性。优化不能只看 GPU 算力，还要测 KV transfer latency 和队列等待。</p></article>
+        <article class="interview-question"><div class="question-top"><span>Q33 · ★★★★★</span><b>Tensor Parallel 和 Pipeline Parallel 的区别？</b></div><p>TP 把同一层的张量切到多卡，需要层内通信；PP 把不同层切到不同 Stage，按 Microbatch 流水执行。TP 适合层内并行但通信频繁，PP 可容纳更大模型却引入 Bubble、Stage 不均衡和跨阶段传输。</p></article>
+        <article class="interview-question"><div class="question-top"><span>Q34 · ★★★★★</span><b>Pipeline Bubble 从哪里来？</b></div><p>流水线启动和排空时，各 Stage 不能一直有 Microbatch 工作，产生空闲区间。Bubble 比例受 Stage 数、Microbatch 数和调度策略影响；增加 Microbatch 可摊薄 Bubble，但会增加调度、激活和同步管理成本。</p></article>
+        <article class="interview-question"><div class="question-top"><span>Q35 · ★★★★☆</span><b>Stage Imbalance 如何定位？</b></div><p>分别记录每 Stage 的计算时间、通信时间、空闲时间、输入输出队列和显存使用，找出最长 Stage 或等待链。原因可能是层计算量不同、Embedding/LM Head 特殊、Kernel 不同或通信拓扑不均。不要只看整机 GPU Utilization。</p></article>
+        <article class="interview-question"><div class="question-top"><span>Q36 · ★★★★☆</span><b>PP 对 Prefill 和 Decode 的影响一样吗？</b></div><p>Prefill 有较多 Token，可用 Microbatch 更充分地填满流水线；Decode 每步 Token 少且同步频繁，Bubble 和通信占比更明显。应分别测 TTFT、TPOT、吞吐和 Bubble，而不是用 Prefill 的加速推断 Decode。</p></article>
+        <article class="interview-question"><div class="question-top"><span>Q37 · ★★★★☆</span><b>如何选择 TP、PP、DP？</b></div><p>先由模型权重、KV 和 workspace 判断单副本能否放下，再结合通信拓扑、目标并发和指标选择。TP 扩大单实例容量，PP 跨层拆模型，DP 复制服务实例承接请求。最终必须用目标输入输出分布实测。</p></article>
+        <article class="interview-question"><div class="question-top"><span>Q38 · ★★★★☆</span><b>连续 Batch 如何和 PP 配合？</b></div><p>需要让动态加入/退出的请求在不同 Stage 间保持一致的 Microbatch 状态和 KV 生命周期，并处理短请求完成、长请求占用、公平性和回压。调度器不仅要决定“下一个请求”，还要维护流水线可持续供料。</p></article>
+        <article class="interview-question"><div class="question-top"><span>Q39 · ★★★☆☆</span><b>为什么 Batch 不是越大越好？</b></div><p>Batch 提升并行度，但会增加 KV 读取、显存、同步和排队时间；长请求还会拖累短请求的尾延迟。应设最大 Batch 或 token budget，并用吞吐曲线和 P95/P99 找拐点。</p></article>
+        <article class="interview-question"><div class="question-top"><span>Q40 · ★★★★☆</span><b>如何分析一次推理请求的完整链路？</b></div><p>请求接入 → 排队 → Tokenize → RAG/预处理 → Prompt 构造 → Prefill → Decode → 流式网络返回。每段都打时间戳和 trace/span，才能区分应用、调度、模型、通信和网络延迟。</p></article>
+      </div>
+
+      <h2 id="section-04">四、量化与真实优化</h2><p class="section-intro">编号 Q41—Q48。工程回答要避免“理论压缩比等于真实加速”的误区。</p>
+      <div class="question-list">
+        <article id="section-05" class="interview-question"><div class="question-top"><span>Q41 · ★★★★☆</span><b>FP8 量化哪些层需要谨慎？</b></div><p>LayerNorm/RMSNorm、Softmax、Embedding、LM Head、首尾层、MoE Router 和 outlier 明显的投影层常需要更高精度或特殊 scale。不是绝对不能量化，需结合模型、硬件、scale 方案和精度回归决定。</p></article>
+        <article class="interview-question"><div class="question-top"><span>Q42 · ★★★★☆</span><b>剪枝、蒸馏和量化分别解决什么？</b></div><p>剪枝移除结构或权重，只有硬件 Kernel 能利用稀疏性才有实际收益；蒸馏用教师监督训练更小模型；量化降低数值表示精度和存储带宽。它们都可能损失质量，需联合评测。</p></article>
+        <article class="interview-question"><div class="question-top"><span>Q43 · ★★★☆☆</span><b>Kernel Fusion 和 CUDA Graph 为什么能加速？</b></div><p>Fusion 减少中间读写和 Kernel launch，把多个小操作合并；CUDA Graph 预先记录稳定执行图，减少 CPU 发射和调度开销。动态形状、分支和请求变化会限制收益，不能脱离形状稳定性判断。</p></article>
+        <article class="interview-question"><div class="question-top"><span>Q44 · ★★★★☆</span><b>Speculative Decoding 为什么可能加速？</b></div><p>用便宜的 Draft Model 或并行草稿一次提出多个 Token，再由 Target Model 并行验证；接受的连续 Token 越多，越能减少 Target 自回归步数。收益取决于接受率、草稿成本、验证并行度和额外 KV 管理。</p></article>
+        <article class="interview-question"><div class="question-top"><span>Q45 · ★★★☆☆</span><b>CPU Offload 什么时候值得用？</b></div><p>当模型或 KV 无法完全放入 GPU，且吞吐要求允许 PCIe/NVLink 传输代价时可用于容量兜底。它通常会牺牲延迟，必须分析传输带宽、驻留策略和访问热度。</p></article>
+        <article class="interview-question"><div class="question-top"><span>Q46 · ★★★☆☆</span><b>为什么梯度裁剪不算主要显存优化？</b></div><p>梯度裁剪主要控制训练中的梯度爆炸和稳定性，通常不显著降低参数、激活或优化器状态占用。训练省显存应优先考虑混合精度、Checkpointing、Gradient Accumulation、ZeRO/FSDP 和动态 Padding。</p></article>
+        <article class="interview-question"><div class="question-top"><span>Q47 · ★★★★☆</span><b>Benchmark 如何避免 Prefix Cache 污染？</b></div><p>明确缓存开关和状态，预热与正式测量分开，控制 Prompt 前缀是否重复，记录命中率和 Cache eviction；不同框架必须统一模型、Tokenizer、硬件、量化、输入输出分布、并发、Warmup 和指标定义。</p></article>
+        <article class="interview-question"><div class="question-top"><span>Q48 · ★★★★☆</span><b>vLLM 的 GPU Memory 和某框架 Static Memory 能直接换算吗？</b></div><p>不能只看名字。应拆成权重、KV Cache、Runtime Workspace、通信 Buffer、元数据和框架开销，并确认两边的预留策略、动态池、最大长度和 Cache 配置。最终以同环境的可用 KV 容量和运行指标对齐。</p></article>
+      </div>
+
+      <h2 id="section-05">五、RAG 与 Agent：应用系统的可靠性</h2><p class="section-intro">编号 Q49—Q57。重点从“会调用模型”推进到“能解释质量、成本和失败恢复”。</p>
+      <div class="question-list">
+        <article id="section-06" class="interview-question"><div class="question-top"><span>Q49 · ★★★★☆</span><b>为什么 RAG 不直接 Fine-tuning？</b></div><p>RAG 适合知识经常更新、需要引用和权限控制的场景，更新成本低且可追溯；Fine-tuning 更适合行为、格式和领域能力迁移，不适合当作动态数据库。二者可以结合。</p></article>
+        <article class="interview-question"><div class="question-top"><span>Q50 · ★★★★☆</span><b>完整 RAG Pipeline 怎么讲？</b></div><p>文档解析 → 清洗 → Chunk → Embedding/倒排索引 → Query Rewrite → 召回 → Hybrid Search → Rerank → Context Compression → Prompt 构造 → 生成 → 引用与答案评测。每一段都可能引入召回损失或延迟。</p></article>
+        <article class="interview-question"><div class="question-top"><span>Q51 · ★★★★☆</span><b>BM25、Embedding Retrieval、Hybrid Search 的关系？</b></div><p>BM25 擅长关键词、稀有词和精确匹配；向量检索擅长语义相似。Hybrid Search 融合两类信号，通常提升召回稳健性，但要处理分数归一化、权重、去重和额外延迟。</p></article>
+        <article class="interview-question"><div class="question-top"><span>Q52 · ★★★★☆</span><b>为什么检索到了正确 Context，模型仍会答错？</b></div><p>可能是 Context 太长或排序不佳、证据被噪声淹没、Prompt 约束不足、模型未使用证据、冲突信息未处理、引用范围错误或生成参数不稳。应分别评估 Retrieval Recall、Context Precision、Groundedness 和最终答案。</p></article>
+        <article class="interview-question"><div class="question-top"><span>Q53 · ★★★★☆</span><b>Agent、Workflow、Function Calling 有什么区别？</b></div><p>Workflow 是预定义流程；Function Calling 是模型输出结构化工具调用的能力；Agent 根据目标、观察结果和状态动态选择行动。Function Calling 是能力组件，不自动等于 Agent。</p></article>
+        <article class="interview-question"><div class="question-top"><span>Q54 · ★★★★☆</span><b>ReAct 和 Plan-Execute 的本质区别？</b></div><p>ReAct 边思考边行动，适应性强但轮次、延迟和成本不可控；Plan-Execute 先形成计划再执行，流程稳定、易审计，但计划错误时需要重规划。生产中常做受限 ReAct 或混合 Workflow。</p></article>
+        <article class="interview-question"><div class="question-top"><span>Q55 · ★★★☆☆</span><b>如何限制 ReAct 的开销？</b></div><p>限制最大轮数和 Tool 次数，设置超时与重试上限，使用 Tool 白名单、结果缓存、并行调用、小模型路由和大模型决策，超限后转固定流程、人工确认或降级。</p></article>
+        <article class="interview-question"><div class="question-top"><span>Q56 · ★★★★☆</span><b>Checkpoint 能恢复什么，不能恢复什么？</b></div><p>可保存消息、当前节点、状态变量、工具参数和结果；不能天然回滚已发生的数据库写入、扣款或第三方副作用。需要幂等键、事务日志、Saga、补偿动作和人工审计。</p></article>
+        <article class="interview-question"><div class="question-top"><span>Q57 · ★★★☆☆</span><b>MCP 和 Function Calling 的关系是什么？</b></div><p>Function Calling 描述模型如何请求一个函数；MCP 更关注工具、资源和提示的标准化发现与连接协议。MCP 可以承载工具调用，但两者抽象层次不同，是否采用要看生态和治理需求。</p></article>
+      </div>
+
+      <h2 id="section-06">六、Benchmark、质量与线上排障</h2><p class="section-intro">编号 Q58—Q67。排障回答必须从现象拆到链路、指标、假设和验证。</p>
+      <div class="question-list">
+        <article id="section-07" class="interview-question"><div class="question-top"><span>Q58 · ★★★★★</span><b>首 Token 从 1 秒突然变成 3 秒，代码和模型没变，怎么排查？</b></div><p>先把请求接入、排队、Tokenize、RAG/Rerank、Prompt 构造、Prefill、首 Token 和网络拆开。再查流量、队列、实例冷启动、GPU 降频/抢占、Prompt 长度、Cache 命中、Batch/Chunk 配置、依赖服务和网络。用 trace 与基线对比，不要先改模型。</p></article>
+        <article class="interview-question"><div class="question-top"><span>Q59 · ★★★★★</span><b>P95 和 P99 怎么计算？请求级和 Token 级有什么区别？</b></div><p>把同一统计窗口内的样本按延迟排序，取约 95%/99% 不超过的分位点。请求级每请求一个样本，反映用户 TTFT/E2E；Token 级每个 Decode step 一个样本，反映 ITL/TPOT。二者不能混报，线上 SLA 通常优先请求级。</p></article>
+        <article class="interview-question"><div class="question-top"><span>Q60 · ★★★★★</span><b>模型质量回归应该看哪些指标？</b></div><p>任务准确率、Recall/Precision/F1、Groundedness、Faithfulness、幻觉率、引用准确率、工具调用成功率和用户满意度；同时看 TTFT、E2E、吞吐、Token 成本和错误率。离线集、线上抽样和版本对照要分开。</p></article>
+        <article class="interview-question"><div class="question-top"><span>Q61 · ★★★★★</span><b>OOM 怎么定位？</b></div><p>先区分权重、激活、KV Cache、workspace、通信 buffer 和碎片；记录 allocated/reserved、峰值、请求长度、并发、Batch 和 Cache block。再用缩短上下文、降低并发、关闭 Cache、换精度等实验二分定位，最后确认是否是泄漏或配置预算错误。</p></article>
+        <article class="interview-question"><div class="question-top"><span>Q62 · ★★★★☆</span><b>NAN/Inf 常见原因是什么？</b></div><p>学习率或梯度爆炸、混合精度溢出、非法输入、除零、Softmax 数值问题、量化 scale 异常都可能造成。需要定位首次出现的层和 batch，检查输入、激活范围、loss scale、算子精度和 checkpoint，而不是只在末端加 clamp。</p></article>
+        <article class="interview-question"><div class="question-top"><span>Q63 · ★★★★☆</span><b>NCCL Timeout 该怎么查？</b></div><p>检查是否有某个 Rank 先崩溃、Shape/Collective 次序不一致、某 Stage 计算过慢、网络拓扑或 IB 配置异常、GPU hang/降频。收集各 Rank 日志、通信耗时、拓扑和最小复现，不能只盲目增大 timeout。</p></article>
+        <article class="interview-question"><div class="question-top"><span>Q64 · ★★★★☆</span><b>CUDNN Error、Shape Mismatch、Illegal Memory Access 如何区分？</b></div><p>CUDNN Error 常需结合输入 shape、dtype、workspace 和版本；Shape Mismatch 检查模型配置、Tokenizer、Batch 和并行切分；Illegal Memory Access 可能是异步 Kernel 越界，需同步执行、缩小复现并检查自定义 Kernel。先让异步错误变同步，定位才可靠。</p></article>
+        <article class="interview-question"><div class="question-top"><span>Q65 · ★★★★☆</span><b>如何对齐 SGLang 与 vLLM Benchmark？</b></div><p>对齐模型权重、Tokenizer、Chat Template、GPU/驱动、精度、最大上下文、输入输出分布、并发/到达模式、Warmup、Prefix Cache、Chunk Prefill、Sampling 和统计窗口。还要确认指标定义一致，避免把实现差异误判成框架能力差异。</p></article>
+        <article class="interview-question"><div class="question-top"><span>Q66 · ★★★★☆</span><b>如何证明一次优化真的有效？</b></div><p>固定环境和 workload，保留优化前基线，至少比较 TTFT、TPOT/ITL、吞吐、P95/P99、显存、GPU Utilization、HBM 带宽、通信时间和质量指标。做多次重复、置信区间或稳定窗口，并解释收益来自哪个资源瓶颈。</p></article>
+        <article class="interview-question"><div class="question-top"><span>Q67 · ★★★★★</span><b>技术题最后如何给出“工程化的一句话回答”？</b></div><p>用“机制 + 目标 + 代价 + 验证”四段式。例如：<strong>KV Cache 复用历史 K/V，避免 Decode 重复计算；代价是显存和带宽压力；因此要结合 GQA、分页管理和 Cache budget，并用 TPOT、HBM 带宽和 KV 命中/占用验证。</strong></p></article>
+      </div>
+
+      <div class="essay-ending"><h2>复习路线</h2><p>第一次阅读按 Q01 → Q17 → Q21 → Q31 → Q58 走主线；第二次用 Q13—Q30 建立推理细节；第三次挑一个线上故障，用 Q40、Q58—Q66 讲完整排障闭环。后续新增题目会继续追加在最相近的知识域，不使用“第一批、第二批”作为分类。</p></div>
+      <section class="references-section"><h2>相关长文</h2><ol><li><a href="../posts/inference/llm-inference-prefill-decode-bottleneck-analysis.html">LLM 推理性能怎么分析：从 Prefill、Decode 到 PD 分离与并行策略</a></li><li><a href="../posts/basic/attention-mechanism-evolution-mha-mqa-gqa-mla.html">注意力机制如何演变：从 MHA 到 MQA、GQA 与 MLA</a></li><li><a href="../posts/inference/flash-attention-deep-dive.html">FlashAttention 深入理解</a></li></ol></section>
+    </section>
+  </article></main>
+  <footer class="site-footer"><span class="footer-credit"><span class="footer-prefix">© 2026 by</span> <a href="index.html" class="footer-brand">AI Interview</a></span></footer>
+  <script src="../app.js?v=43"></script>
+</body>
+</html>

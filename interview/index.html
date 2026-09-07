@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="night">
+<head>
+  <meta charset="UTF-8" />
+  <script>
+    (function () {
+      try {
+        var saved = localStorage.getItem("yichuan-theme");
+        var theme = saved || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "night" : "day");
+        document.documentElement.setAttribute("data-theme", theme);
+      } catch (e) {}
+    })();
+  </script>
+  <style>
+    html { font-size: 16px; }
+    @media (min-width: 1024px) { html { font-size: 26px; } }
+    @media (min-width: 1200px) { html { font-size: 34px; } }
+    html, body { margin: 0; min-height: 100%; }
+    html[data-theme="night"], html[data-theme="night"] body { background: #0c0c0c; color: #ededed; color-scheme: dark; }
+    html[data-theme="day"], html[data-theme="day"] body { background: #ffffff; color: #1a1a1a; color-scheme: light; }
+  </style>
+  <link rel="stylesheet" href="../styles.css?v=71" />
+  <title>AI Interview · MOFANG's Blog</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="description" content="AI 技术面试知识库：按知识关联整理大模型原理、推理系统、RAG、Agent 与工程排障。" />
+</head>
+<body class="interview-page">
+  <div class="ambient" aria-hidden="true"><span class="orb orb-a"></span><span class="orb orb-b"></span></div>
+  <canvas id="star-canvas"></canvas>
+  <header class="site-header">
+    <div class="header-inner">
+      <a href="../index.html" class="logo"><span class="logo-dot"></span><span class="logo-text">MOFANG</span></a>
+      <div class="header-actions">
+        <nav class="site-nav"><a href="../index.html">← Blog</a></nav>
+        <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle theme"><span class="icon-sun">☀️</span><span class="icon-moon">🌙</span></button>
+      </div>
+    </div>
+  </header>
+  <main class="site-main interview-main">
+    <section class="interview-hero">
+      <p class="post-page-category">KNOWLEDGE TRACK · 01</p>
+      <h1>AI Interview</h1>
+      <p class="interview-hero-lead">把“面试八股”还原成一张能长期维护的知识地图。</p>
+      <p class="interview-hero-copy">这里不按完整面试轮次分批，也不收录 HR 题和强个人经历题。题目按概念依赖与工程链路排列：先理解模型，再解释推理，最后落到系统、指标和排障。</p>
+      <div class="interview-stats"><span><strong>67</strong> 个技术题</span><span><strong>7</strong> 个知识域</span><span><strong>Q01—Q67</strong> 连续编号</span></div>
+    </section>
+
+    <section class="interview-layout" aria-label="AI Interview 目录">
+      <aside class="interview-sidebar">
+        <p class="toc-label">CONTENTS</p>
+        <nav class="interview-toc">
+          <a href="#how-to-read">00 · 阅读方法</a>
+          <a href="#model-basics">01 · 模型基础</a>
+          <a href="#inference-core">02 · 推理核心</a>
+          <a href="#serving-system">03 · 调度与显存</a>
+          <a href="#distributed">04 · 分布式推理</a>
+          <a href="#optimization">05 · 量化与优化</a>
+          <a href="#rag-agent">06 · RAG 与 Agent</a>
+          <a href="#observability">07 · Benchmark 与排障</a>
+          <a href="#quick-cards">08 · 速记卡</a>
+        </nav>
+      </aside>
+      <div class="interview-directory">
+        <section id="how-to-read" class="directory-section directory-intro">
+          <p class="section-kicker">00 / HOW TO USE</p>
+          <h2>先建立主线，再用题目验证理解</h2>
+          <p>每题保留题号，题号只增不改，方便后续新增、互相引用和复盘。星级表示准备优先级，不代表题目唯一答案：★★★★★ 需要能讲原理、代价和验证方法；★★★★☆ 需要掌握常见实现；★★★☆☆ 作为基础补全。</p>
+          <div class="interview-chain"><span>Transformer</span><i>→</i><span>KV Cache</span><i>→</i><span>Prefill / Decode</span><i>→</i><span>Serving</span><i>→</i><span>指标排障</span></div>
+        </section>
+        <section id="model-basics" class="directory-section">
+          <div class="directory-heading"><span class="directory-number">01</span><div><p class="section-kicker">MODEL FOUNDATIONS</p><h2>模型基础：从 Token 到下一个 Token</h2></div><span class="question-count">12 题</span></div>
+          <p>先把 Decoder-only Transformer、Attention、位置编码、Norm、FFN 和采样串成一条生成链。后面的 KV Cache、量化和推理优化都建立在这里。</p>
+          <a class="directory-card" href="01-ai-interview-question-map.html#section-01"><span class="card-index">Q01—Q12</span><strong>模型基础与生成流程</strong><span>进入题目 →</span></a>
+        </section>
+        <section id="inference-core" class="directory-section">
+          <div class="directory-heading"><span class="directory-number">02</span><div><p class="section-kicker">INFERENCE CORE</p><h2>推理核心：Prefill、Decode 与 KV Cache</h2></div><span class="question-count">8 题</span></div>
+          <p>这是本知识库的主轴：解释为什么 Decode 慢、KV Cache 如何计算、MHA/MQA/GQA 如何改变访存，以及 TTFT、TPOT、ITL 分别在看什么。</p>
+          <a class="directory-card directory-card--featured" href="01-ai-interview-question-map.html#section-02"><span class="card-index">Q13—Q20</span><strong>推理核心：从计算图到服务指标</strong><span>进入题目 →</span></a>
+        </section>
+        <section id="serving-system" class="directory-section">
+          <div class="directory-heading"><span class="directory-number">03</span><div><p class="section-kicker">SERVING SYSTEM</p><h2>调度与显存：Batch、分页和缓存</h2></div><span class="question-count">10 题</span></div>
+          <p>从 Continuous Batching、Chunk Prefill 到 PagedAttention、Prefix Cache，重点回答“解决了什么问题、代价是什么、如何验证”。</p>
+          <a class="directory-card" href="01-ai-interview-question-map.html#section-03"><span class="card-index">Q21—Q30</span><strong>调度、PageSize 与 Prefix Cache</strong><span>定位章节 →</span></a>
+        </section>
+        <section id="distributed" class="directory-section">
+          <div class="directory-heading"><span class="directory-number">04</span><div><p class="section-kicker">DISTRIBUTED INFERENCE</p><h2>分布式推理：TP、PP 与 P/D 分离</h2></div><span class="question-count">8 题</span></div>
+          <p>围绕 Pipeline Parallel 的切分、Microbatch、Bubble、Stage Imbalance，以及 Prefill/Decode 分离后的通信和调度问题。</p>
+          <a class="directory-card" href="01-ai-interview-question-map.html#section-04"><span class="card-index">Q31—Q40</span><strong>并行策略与 P/D 协同</strong><span>定位章节 →</span></a>
+        </section>
+        <section id="optimization" class="directory-section">
+          <div class="directory-heading"><span class="directory-number">05</span><div><p class="section-kicker">OPTIMIZATION</p><h2>量化与推理优化</h2></div><span class="question-count">8 题</span></div>
+          <p>理解 FP8、INT8、INT4、敏感层、Kernel Fusion、CUDA Graph 和 Speculative Decoding 的收益边界。</p>
+          <a class="directory-card" href="01-ai-interview-question-map.html#section-05"><span class="card-index">Q41—Q48</span><strong>精度、带宽与真实加速</strong><span>定位章节 →</span></a>
+        </section>
+        <section id="rag-agent" class="directory-section">
+          <div class="directory-heading"><span class="directory-number">06</span><div><p class="section-kicker">APPLICATION SYSTEMS</p><h2>RAG 与 Agent</h2></div><span class="question-count">9 题</span></div>
+          <p>把 RAG 的召回、切分、Rerank 和评测，与 Agent 的 ReAct、Plan-Execute、MCP、Checkpoint 和补偿机制连起来。</p>
+          <a class="directory-card" href="01-ai-interview-question-map.html#section-06"><span class="card-index">Q49—Q57</span><strong>从检索质量到工具调用可靠性</strong><span>定位章节 →</span></a>
+        </section>
+        <section id="observability" class="directory-section">
+          <div class="directory-heading"><span class="directory-number">07</span><div><p class="section-kicker">BENCHMARK & DEBUGGING</p><h2>Benchmark、质量与线上排障</h2></div><span class="question-count">10 题</span></div>
+          <p>覆盖 Benchmark 对齐、P95/P99 聚合口径、回归指标，以及 OOM、NAN、NCCL Timeout、CUDNN Error 的排查框架。</p>
+          <a class="directory-card" href="01-ai-interview-question-map.html#section-07"><span class="card-index">Q58—Q67</span><strong>从指标定义到故障定位</strong><span>定位章节 →</span></a>
+        </section>
+        <section id="quick-cards" class="directory-section directory-ending">
+          <p class="section-kicker">08 / QUICK CARDS</p><h2>速记卡正在建设中</h2><p>长文负责理解，速记卡负责面试前十分钟复习。后续会把每个知识域压缩成“20 秒回答 + 3 个追问 + 1 个验证指标”。</p>
+        </section>
+      </div>
+    </section>
+  </main>
+  <footer class="site-footer"><span class="footer-credit"><span class="footer-prefix">© 2026 by</span> <a href="../index.html" class="footer-brand">MOFANG</a></span></footer>
+  <script src="../app.js?v=43"></script>
+</body>
+</html>
