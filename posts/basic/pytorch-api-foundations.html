@@ -17,13 +17,11 @@
     <header class="post-page-header">
       <p class="post-page-category">Basic Knowledge · PyTorch</p>
       <h1 class="post-page-title">PyTorch 基础 API：从 Tensor 到大模型训练与推理</h1>
-      <p class="post-lead">PyTorch 不必从一张 API 清单开始学。真正贯穿数据、模型和硬件的主线只有一句话：<strong>Tensor 带着形状、dtype、device 和梯度状态流过计算图</strong>。本文沿着这条线，把最常见的写法整理成一张可以迁移到 CNN、Transformer 和 Hugging Face 的基础地图。</p>
+      <p class="post-lead">本文整理 PyTorch 在深度学习和大模型开发中的常用 API：从 Tensor 创建、形状变换、索引与数学运算，到 Autograd、<code>nn.Module</code>、损失函数、优化器、混合精度、DataLoader、DDP，再延伸到 Transformer Attention、Hugging Face 模型加载与文本生成。</p>
       <div class="post-page-keywords" aria-label="Keywords"><a class="post-keyword-chip" href="../../index.html?keyword=pytorch">PyTorch</a><a class="post-keyword-chip" href="../../index.html?keyword=training">训练</a><a class="post-keyword-chip" href="../../index.html?keyword=inference-systems">推理框架</a></div>
       <p class="post-page-meta" data-date="2026-09-07" data-author="MOFANG" data-minutes="22">2026年9月7日 · MOFANG</p>
     </header>
     <section class="post-page-content">
-      <div class="callout"><strong>先记一个排错顺序：</strong>看到 PyTorch 报错时，先看 shape，再看 dtype，最后看 device；如果数值不对，再检查 train/eval 和梯度上下文。</div>
-
       <h2>一、Tensor 是什么：数据和元数据的组合</h2>
       <p>Tensor 可以理解为带有统一数据类型的多维数组，但它比普通数组多了三个决定行为的属性：<code>shape</code> 描述每一维大小，<code>dtype</code> 描述元素精度，<code>device</code> 描述数据位于 CPU、CUDA 还是其他设备。大模型中的 token、hidden states、logits 和 KV cache，本质上都是 Tensor。</p>
       <pre><code class="language-python">import torch
