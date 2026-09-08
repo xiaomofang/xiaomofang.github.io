@@ -899,8 +899,8 @@ body {
 .directory-card:hover,
 .directory-card--featured {
   transform: translateX(3px);
-  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
-  background: color-mix(in srgb, var(--accent) 7%, var(--surface-muted));
+  border-color: var(--text-soft);
+  background: var(--surface-muted);
 }
 
 .directory-card strong {
@@ -944,15 +944,9 @@ body {
 
 .interview-question {
   scroll-margin-top: 90px;
-  padding: 16px 18px;
-  border: 1px solid var(--border);
-  border-left: 3px solid var(--hue-blue);
-  border-radius: 9px;
-  background: color-mix(in srgb, var(--surface-muted) 80%, transparent);
+  padding: 19px 0 21px;
+  border-bottom: 1px solid var(--border);
 }
-
-.interview-question:nth-child(3n) { border-left-color: var(--hue-orange); }
-.interview-question:nth-child(3n + 1) { border-left-color: var(--hue-purple); }
 
 .question-top {
   display: grid;
@@ -960,7 +954,7 @@ body {
 }
 
 .question-top span {
-  color: var(--accent-2);
+  color: var(--text-faint);
   font-family: Consolas, monospace;
   font-size: 0.7rem;
   letter-spacing: 0.03em;
@@ -990,6 +984,61 @@ body {
 .interview-question a,
 .references-section a {
   color: var(--accent);
+}
+
+.interview-article .post-page-header {
+  margin-bottom: 18px;
+}
+
+.interview-article .post-lead {
+  font-size: 0.92rem;
+}
+
+.interview-article .post-page-content h2 {
+  font-size: 1.36rem;
+  margin-top: 42px;
+}
+
+.interview-article .question-list {
+  margin-top: 10px;
+}
+
+.interview-article .question-top b {
+  font-family: var(--font-sans);
+  font-weight: 650;
+}
+
+/* Keep the interview track quiet: hierarchy comes from type and spacing. */
+.interview-page,
+.interview-article {
+  --accent: var(--text);
+  --accent-2: var(--text-soft);
+}
+
+.interview-page .interview-hero h1 {
+  letter-spacing: -0.02em;
+}
+
+.interview-page .directory-number,
+.interview-page .interview-stats strong,
+.interview-page .interview-chain i,
+.interview-page .directory-card > span:last-child,
+.interview-page .interview-promo-link span {
+  color: var(--text-soft);
+}
+
+.interview-page .directory-card--featured,
+.interview-page .directory-card:hover {
+  border-color: var(--text-soft);
+  background: var(--surface-muted);
+}
+
+.interview-article .post-page-keywords {
+  display: none;
+}
+
+.interview-article .question-top span {
+  color: var(--text-faint);
 }
 
 .site-footer {
@@ -1230,6 +1279,124 @@ body {
   max-width: 760px;
   height: auto;
   margin: 0 auto;
+}
+
+/* Mooncake architecture plates use a quieter, editorial diagram language. */
+.mooncake-plate {
+  background: radial-gradient(circle at 18% 12%, color-mix(in srgb, var(--hue-blue) 9%, transparent), transparent 34%),
+    radial-gradient(circle at 86% 82%, color-mix(in srgb, var(--hue-purple) 8%, transparent), transparent 36%),
+    var(--surface-muted);
+  border-color: color-mix(in srgb, var(--accent) 24%, var(--border));
+}
+
+.mooncake-plate svg {
+  max-width: 1040px;
+  overflow: visible;
+}
+
+.mooncake-plate .mc-panel {
+  fill: color-mix(in srgb, var(--code-bg) 92%, transparent);
+  stroke: var(--border);
+  stroke-width: 1.2;
+}
+
+.mooncake-plate .mc-panel-blue {
+  fill: color-mix(in srgb, var(--hue-blue) 7%, var(--code-bg));
+  stroke: color-mix(in srgb, var(--hue-blue) 44%, var(--border));
+  stroke-width: 1.2;
+}
+
+.mooncake-plate .mc-panel-orange {
+  fill: color-mix(in srgb, var(--hue-orange) 7%, var(--code-bg));
+  stroke: color-mix(in srgb, var(--hue-orange) 44%, var(--border));
+  stroke-width: 1.2;
+}
+
+.mooncake-plate .mc-panel-purple {
+  fill: color-mix(in srgb, var(--hue-purple) 7%, var(--code-bg));
+  stroke: color-mix(in srgb, var(--hue-purple) 44%, var(--border));
+  stroke-width: 1.2;
+}
+
+.mooncake-plate .mc-card {
+  fill: var(--code-bg);
+  stroke: var(--border);
+  stroke-width: 1.1;
+}
+
+.mooncake-plate .mc-card-blue {
+  fill: color-mix(in srgb, var(--hue-blue) 15%, var(--code-bg));
+  stroke: var(--hue-blue);
+  stroke-width: 1.4;
+}
+
+.mooncake-plate .mc-card-orange {
+  fill: color-mix(in srgb, var(--hue-orange) 15%, var(--code-bg));
+  stroke: var(--hue-orange);
+  stroke-width: 1.4;
+}
+
+.mooncake-plate .mc-card-purple {
+  fill: color-mix(in srgb, var(--hue-purple) 15%, var(--code-bg));
+  stroke: var(--hue-purple);
+  stroke-width: 1.4;
+}
+
+.mooncake-plate .mc-title {
+  fill: var(--text);
+  font-size: 18px;
+  font-weight: 700;
+  font-family: var(--font-sans);
+  letter-spacing: 0.02em;
+}
+
+.mooncake-plate .mc-kicker {
+  fill: var(--text-faint);
+  font-size: 10px;
+  font-weight: 700;
+  font-family: var(--font-sans);
+  letter-spacing: 0.16em;
+}
+
+.mooncake-plate .mc-label {
+  fill: var(--text);
+  font-size: 13px;
+  font-weight: 650;
+  font-family: var(--font-sans);
+}
+
+.mooncake-plate .mc-copy {
+  fill: var(--text-soft);
+  font-size: 11px;
+  font-family: var(--font-sans);
+}
+
+.mooncake-plate .mc-small {
+  fill: var(--text-faint);
+  font-size: 10px;
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+}
+
+.mooncake-plate .mc-route-blue,
+.mooncake-plate .mc-route-orange,
+.mooncake-plate .mc-route-purple,
+.mooncake-plate .mc-route-accent {
+  fill: none;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.mooncake-plate .mc-route-blue { stroke: var(--hue-blue); }
+.mooncake-plate .mc-route-orange { stroke: var(--hue-orange); }
+.mooncake-plate .mc-route-purple { stroke: var(--hue-purple); }
+.mooncake-plate .mc-route-accent { stroke: var(--accent); }
+
+.mooncake-plate .mc-dash {
+  fill: none;
+  stroke: var(--border);
+  stroke-width: 1;
+  stroke-dasharray: 4 5;
 }
 
 .diagram-figure .d-label {

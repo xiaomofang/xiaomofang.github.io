@@ -273,6 +273,13 @@
     meta.setAttribute("data-chars", String(chars));
   }
 
+  function simplifyInterviewLabels() {
+    if (!document.querySelector(".interview-article")) return;
+    document.querySelectorAll(".interview-question .question-top span").forEach(function (label) {
+      label.textContent = label.textContent.replace(/\s+·\s+★+/g, "");
+    });
+  }
+
   function escapeHtml(value) {
     return value
       .replace(/&/g, "&amp;")
@@ -347,6 +354,7 @@
     initYear();
     initCodeHighlighting();
     initReadingStats();
+    simplifyInterviewLabels();
     initComments();
     filterPosts();
 
