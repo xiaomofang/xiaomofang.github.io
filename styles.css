@@ -1282,67 +1282,69 @@ body {
 }
 
 /* Mooncake architecture plates use a quieter, editorial diagram language. */
-.mooncake-plate {
+.diagram-figure--wide {
   background: radial-gradient(circle at 18% 12%, color-mix(in srgb, var(--hue-blue) 9%, transparent), transparent 34%),
     radial-gradient(circle at 86% 82%, color-mix(in srgb, var(--hue-purple) 8%, transparent), transparent 36%),
     var(--surface-muted);
   border-color: color-mix(in srgb, var(--accent) 24%, var(--border));
+  box-shadow: 0 16px 40px color-mix(in srgb, var(--bg) 42%, transparent), inset 0 1px 0 color-mix(in srgb, var(--text) 5%, transparent);
 }
 
-.mooncake-plate svg {
+.diagram-figure--wide svg {
   max-width: 1040px;
   overflow: visible;
+  filter: drop-shadow(0 10px 18px color-mix(in srgb, var(--bg) 28%, transparent));
 }
 
-.mooncake-plate .mc-panel {
+.diagram-figure--wide .mc-panel {
   fill: color-mix(in srgb, var(--code-bg) 92%, transparent);
   stroke: var(--border);
   stroke-width: 1.2;
 }
 
-.mooncake-plate .mc-panel-blue {
+.diagram-figure--wide .mc-panel-blue {
   fill: color-mix(in srgb, var(--hue-blue) 7%, var(--code-bg));
   stroke: color-mix(in srgb, var(--hue-blue) 44%, var(--border));
   stroke-width: 1.2;
 }
 
-.mooncake-plate .mc-panel-orange {
+.diagram-figure--wide .mc-panel-orange {
   fill: color-mix(in srgb, var(--hue-orange) 7%, var(--code-bg));
   stroke: color-mix(in srgb, var(--hue-orange) 44%, var(--border));
   stroke-width: 1.2;
 }
 
-.mooncake-plate .mc-panel-purple {
+.diagram-figure--wide .mc-panel-purple {
   fill: color-mix(in srgb, var(--hue-purple) 7%, var(--code-bg));
   stroke: color-mix(in srgb, var(--hue-purple) 44%, var(--border));
   stroke-width: 1.2;
 }
 
-.mooncake-plate .mc-card {
+.diagram-figure--wide .mc-card {
   fill: var(--code-bg);
   stroke: var(--border);
   stroke-width: 1.1;
 }
 
-.mooncake-plate .mc-card-blue {
+.diagram-figure--wide .mc-card-blue {
   fill: color-mix(in srgb, var(--hue-blue) 15%, var(--code-bg));
   stroke: var(--hue-blue);
   stroke-width: 1.4;
 }
 
-.mooncake-plate .mc-card-orange {
+.diagram-figure--wide .mc-card-orange {
   fill: color-mix(in srgb, var(--hue-orange) 15%, var(--code-bg));
   stroke: var(--hue-orange);
   stroke-width: 1.4;
 }
 
-.mooncake-plate .mc-card-purple {
+.diagram-figure--wide .mc-card-purple {
   fill: color-mix(in srgb, var(--hue-purple) 15%, var(--code-bg));
   stroke: var(--hue-purple);
   stroke-width: 1.4;
 }
 
-.mooncake-plate .mc-title {
+.diagram-figure--wide .mc-title {
   fill: var(--text);
   font-size: 18px;
   font-weight: 700;
@@ -1350,7 +1352,7 @@ body {
   letter-spacing: 0.02em;
 }
 
-.mooncake-plate .mc-kicker {
+.diagram-figure--wide .mc-kicker {
   fill: var(--text-faint);
   font-size: 10px;
   font-weight: 700;
@@ -1358,41 +1360,41 @@ body {
   letter-spacing: 0.16em;
 }
 
-.mooncake-plate .mc-label {
+.diagram-figure--wide .mc-label {
   fill: var(--text);
   font-size: 13px;
   font-weight: 650;
   font-family: var(--font-sans);
 }
 
-.mooncake-plate .mc-copy {
+.diagram-figure--wide .mc-copy {
   fill: var(--text-soft);
   font-size: 11px;
   font-family: var(--font-sans);
 }
 
-.mooncake-plate .mc-small {
+.diagram-figure--wide .mc-small {
   fill: var(--text-faint);
   font-size: 10px;
   font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
 }
 
-.mooncake-plate .mc-route-blue,
-.mooncake-plate .mc-route-orange,
-.mooncake-plate .mc-route-purple,
-.mooncake-plate .mc-route-accent {
+.diagram-figure--wide .mc-route-blue,
+.diagram-figure--wide .mc-route-orange,
+.diagram-figure--wide .mc-route-purple,
+.diagram-figure--wide .mc-route-accent {
   fill: none;
   stroke-width: 2.2;
   stroke-linecap: round;
   stroke-linejoin: round;
 }
 
-.mooncake-plate .mc-route-blue { stroke: var(--hue-blue); }
-.mooncake-plate .mc-route-orange { stroke: var(--hue-orange); }
-.mooncake-plate .mc-route-purple { stroke: var(--hue-purple); }
-.mooncake-plate .mc-route-accent { stroke: var(--accent); }
+.diagram-figure--wide .mc-route-blue { stroke: var(--hue-blue); }
+.diagram-figure--wide .mc-route-orange { stroke: var(--hue-orange); }
+.diagram-figure--wide .mc-route-purple { stroke: var(--hue-purple); }
+.diagram-figure--wide .mc-route-accent { stroke: var(--accent); }
 
-.mooncake-plate .mc-dash {
+.diagram-figure--wide .mc-dash {
   fill: none;
   stroke: var(--border);
   stroke-width: 1;
