@@ -924,7 +924,7 @@ body {
 }
 
 .interview-article {
-  max-width: 1000px;
+  max-width: 900px;
 }
 
 .interview-article .post-page-content h2 {
@@ -933,52 +933,69 @@ body {
 
 .section-intro {
   color: var(--text-faint) !important;
-  font-size: 0.86rem !important;
+  max-width: 720px;
+  margin: 0 0 22px !important;
+  font-size: 0.82rem !important;
+  line-height: 1.65 !important;
 }
 
 .question-list {
   display: grid;
-  gap: 10px;
-  margin: 18px 0 8px;
+  gap: 0;
+  margin: 24px 0 8px;
 }
 
 .interview-question {
   scroll-margin-top: 90px;
-  padding: 19px 0 21px;
+  padding: 26px 0 30px;
   border-bottom: 1px solid var(--border);
 }
 
 .question-top {
   display: grid;
-  gap: 6px;
+  gap: 9px;
+  max-width: 820px;
 }
 
 .question-top span {
   color: var(--text-faint);
   font-family: Consolas, monospace;
-  font-size: 0.7rem;
-  letter-spacing: 0.03em;
+  font-size: 0.68rem;
+  letter-spacing: 0.05em;
 }
 
 .question-top b {
   color: var(--text);
   font-family: var(--font-serif);
-  font-size: 1rem;
-  line-height: 1.5;
+  font-size: 1.04rem;
+  line-height: 1.55;
 }
 
 .interview-question p {
-  margin: 9px 0 0;
+  max-width: 820px;
+  margin: 16px 0 0;
   font-size: 0.88rem;
-  line-height: 1.75;
+  line-height: 1.9;
+  text-align: left;
+  text-wrap: pretty;
+}
+
+.interview-question p + p {
+  margin-top: 14px;
+}
+
+.interview-question strong {
+  color: var(--text);
+  font-weight: 650;
 }
 
 .interview-question small {
   display: block;
-  margin-top: 9px;
+  max-width: 820px;
+  margin-top: 16px;
   color: var(--text-faint);
-  font-size: 0.76rem;
-  line-height: 1.6;
+  font-size: 0.75rem;
+  line-height: 1.75;
 }
 
 .interview-question a,
@@ -995,12 +1012,14 @@ body {
 }
 
 .interview-article .post-page-content h2 {
-  font-size: 1.36rem;
-  margin-top: 42px;
+  max-width: 820px;
+  font-size: 1.38rem;
+  margin-top: 54px;
+  margin-bottom: 14px;
 }
 
 .interview-article .question-list {
-  margin-top: 10px;
+  margin-top: 6px;
 }
 
 .interview-article .question-top b {
@@ -2325,7 +2344,25 @@ body {
   }
 
   .interview-question {
-    padding: 14px;
+    padding: 22px 0 25px;
+  }
+
+  .interview-article {
+    max-width: none;
+  }
+
+  .interview-article .post-page-content h2 {
+    margin-top: 42px;
+    font-size: 1.2rem;
+  }
+
+  .interview-question p {
+    font-size: 0.92rem;
+    line-height: 1.88;
+  }
+
+  .question-top b {
+    font-size: 1rem;
   }
 
   .map-node {
