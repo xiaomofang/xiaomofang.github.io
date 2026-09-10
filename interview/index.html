@@ -19,7 +19,7 @@
     html[data-theme="night"], html[data-theme="night"] body { background: #0c0c0c; color: #ededed; color-scheme: dark; }
     html[data-theme="day"], html[data-theme="day"] body { background: #ffffff; color: #1a1a1a; color-scheme: light; }
   </style>
-  <link rel="stylesheet" href="../styles.css?v=71" />
+  <link rel="stylesheet" href="../styles.css?v=73" />
   <title>AI Interview · MOFANG's Blog</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="description" content="AI 技术面试知识库：按知识关联整理大模型原理、推理系统、RAG、Agent 与工程排障。" />
@@ -29,9 +29,14 @@
   <canvas id="star-canvas"></canvas>
   <header class="site-header">
     <div class="header-inner">
-      <a href="../index.html" class="logo"><span class="logo-dot"></span><span class="logo-text">MOFANG</span></a>
+      <div class="header-left">
+        <a href="../index.html" class="logo"><span class="logo-dot"></span><span class="logo-text">MOFANG</span></a>
+        <nav class="site-nav header-nav" aria-label="Site navigation">
+          <a href="../classic-blog.html">经典 Blog</a>
+          <a href="index.html" class="nav-active">八股</a>
+        </nav>
+      </div>
       <div class="header-actions">
-        <nav class="site-nav"><a href="../index.html">← Blog</a></nav>
         <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle theme"><span class="icon-sun">☀️</span><span class="icon-moon">🌙</span></button>
       </div>
     </div>
@@ -42,7 +47,13 @@
       <h1>AI Interview</h1>
       <p class="interview-hero-lead">整理大模型技术面试题，方便复习和查找。</p>
       <p class="interview-hero-copy">内容包括模型基础、推理系统、分布式部署、RAG、Agent、Benchmark 和工程排障。</p>
-      <div class="interview-stats"><span><strong>67</strong> 个技术题</span><span><strong>7</strong> 个知识域</span><span><strong>Q01—Q67</strong> 连续编号</span></div>
+      <div class="interview-hero-footer">
+        <div class="interview-stats"><span><strong>67</strong> 个技术题</span><span><strong>7</strong> 个知识域</span><span><strong>Q01—Q67</strong> 连续编号</span></div>
+        <div class="view-switcher" role="group" aria-label="目录显示方式">
+          <button class="view-switcher-button active" type="button" data-interview-view="list" aria-pressed="true">列表</button>
+          <button class="view-switcher-button" type="button" data-interview-view="cards" aria-pressed="false">模块卡片</button>
+        </div>
+      </div>
     </section>
 
     <section class="interview-layout" aria-label="AI Interview 目录">
@@ -105,6 +116,6 @@
     </section>
   </main>
   <footer class="site-footer"><span class="footer-credit"><span class="footer-prefix">© 2026 by</span> <a href="../index.html" class="footer-brand">MOFANG</a></span></footer>
-  <script src="../app.js?v=43"></script>
+  <script src="../app.js?v=44"></script>
 </body>
 </html>

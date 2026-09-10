@@ -226,6 +226,39 @@
     if (el) el.textContent = new Date().getFullYear();
   }
 
+  function initInterviewView() {
+    const directory = document.querySelector(".interview-directory");
+    const buttons = document.querySelectorAll("[data-interview-view]");
+    if (!directory || !buttons.length) return;
+
+    const storageKey = "mofang-interview-view";
+
+    function setView(view) {
+      const next = view === "cards" ? "cards" : "list";
+      directory.classList.toggle("view-cards", next === "cards");
+      buttons.forEach(function (button) {
+        const active = button.dataset.interviewView === next;
+        button.classList.toggle("active", active);
+        button.setAttribute("aria-pressed", String(active));
+      });
+      try {
+        localStorage.setItem(storageKey, next);
+      } catch (e) {}
+    }
+
+    let savedView = "list";
+    try {
+      savedView = localStorage.getItem(storageKey) || "list";
+    } catch (e) {}
+    setView(savedView);
+
+    buttons.forEach(function (button) {
+      button.addEventListener("click", function () {
+        setView(button.dataset.interviewView);
+      });
+    });
+  }
+
   // Chinese reading pace used for 预计阅读时间 (~300 字 / min).
   const CHARS_PER_MINUTE = 300;
 
@@ -352,6 +385,7 @@
     initStars();
     initFilters();
     initYear();
+    initInterviewView();
     initCodeHighlighting();
     initReadingStats();
     simplifyInterviewLabels();

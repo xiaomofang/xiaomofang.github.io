@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="night">
+<head>
+  <meta charset="UTF-8" />
+  <script>
+    (function () {
+      try {
+        var saved = localStorage.getItem("yichuan-theme");
+        var theme = saved || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "night" : "day");
+        document.documentElement.setAttribute("data-theme", theme);
+      } catch (e) {}
+    })();
+  </script>
+  <style>
+    html { font-size: 16px; }
+    @media (min-width: 1024px) { html { font-size: 26px; } }
+    @media (min-width: 1200px) { html { font-size: 34px; } }
+    html, body { margin: 0; min-height: 100%; }
+    html[data-theme="night"], html[data-theme="night"] body { background: #0c0c0c; color: #ededed; color-scheme: dark; }
+    html[data-theme="day"], html[data-theme="day"] body { background: #ffffff; color: #1a1a1a; color-scheme: light; }
+  </style>
+  <link rel="stylesheet" href="styles.css?v=63" />
+  <title>经典 Blog · MOFANG's Blog</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="description" content="MOFANG 持续整理的优质技术博客、课程与学习资料。" />
+</head>
+<body>
+  <div class="ambient" aria-hidden="true"><span class="orb orb-a"></span><span class="orb orb-b"></span></div>
+  <canvas id="star-canvas"></canvas>
+  <header class="site-header">
+    <div class="header-inner">
+      <div class="header-left">
+        <a href="index.html" class="logo"><span class="logo-dot"></span><span class="logo-text">MOFANG</span></a>
+        <nav class="site-nav header-nav" aria-label="Site navigation">
+          <a href="classic-blog.html" class="nav-active">经典 Blog</a>
+          <a href="interview/index.html">八股</a>
+        </nav>
+      </div>
+      <div class="header-actions">
+        <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle theme"><span class="icon-sun">☀️</span><span class="icon-moon">🌙</span></button>
+      </div>
+    </div>
+  </header>
+
+  <main class="site-main classic-main">
+    <header class="classic-header">
+      <p class="section-kicker">Bookmarks / Growing</p>
+      <h1>经典 Blog</h1>
+      <p>值得反复阅读的网站、博客与课程。这里只做克制的索引，按主题持续补充。</p>
+    </header>
+
+    <div class="classic-groups">
+      <section class="classic-group">
+        <h2>学习资料与项目</h2>
+        <ol class="classic-list">
+          <li>
+            <p><a href="https://github.com/wdndev/llm_interview_note" target="_blank" rel="noopener noreferrer"><strong>wdndev / llm_interview_note</strong></a>：主要记录大语言模型（LLMs）算法、应用工程师相关的知识及面试题。</p>
+            <p class="classic-related">相关链接：<a href="https://dongnian.icu/" target="_blank" rel="noopener noreferrer">在线阅读首页</a></p>
+          </li>
+          <li>
+            <p><a href="https://github.com/chenzomi12/AISystem" target="_blank" rel="noopener noreferrer"><strong>chenzomi12 / AISystem</strong></a>：AI 系统全栈资料，覆盖 AI 芯片、AI 编译器、推理和训练框架等底层技术。</p>
+            <p class="classic-related">延伸阅读：<a href="https://infrasys-ai.github.io/aiinfra-docs/05Infer04LongInfer/02RingAttention.html" target="_blank" rel="noopener noreferrer">Ring Attention</a></p>
+          </li>
+        </ol>
+      </section>
+
+      <section class="classic-group">
+        <h2>B 站视频课</h2>
+        <ol class="classic-list">
+          <li>
+            <p><a href="https://space.bilibili.com/517221395" target="_blank" rel="noopener noreferrer"><strong>ZOMI 酱</strong></a>：AI 系统、芯片、编译器、训练与推理基础设施课程。</p>
+          </li>
+          <li>
+            <p><a href="https://www.bilibili.com/video/BV1aTxMehEjK/?spm_id_from=333.1387.upload.video_card.click&amp;vd_source=1755be72f5cee2ed43566d56d81259ec" target="_blank" rel="noopener noreferrer"><strong>3Blue1Brown：深度学习的 7 节课</strong></a>：用可视化理解神经网络、梯度下降与反向传播。</p>
+          </li>
+        </ol>
+      </section>
+
+      <section class="classic-group">
+        <h2>个人博客</h2>
+        <ol class="classic-list">
+          <li>
+            <p><a href="https://insujang.github.io/" target="_blank" rel="noopener noreferrer"><strong>Better Tomorrow with Computer Science</strong></a>：Insu Jang 的工程博客，包含分布式训练、Context Parallelism、FlashAttention 与 LLM 推理。</p>
+          </li>
+          <li>
+            <p><a href="https://fancyerii.github.io/" target="_blank" rel="noopener noreferrer"><strong>李理的博客</strong></a>：深度学习、NLP、LLM、系统优化与源码实践。</p>
+          </li>
+          <li>
+            <p><a href="https://spaces.ac.cn/" target="_blank" rel="noopener noreferrer"><strong>科学空间</strong></a>：机器学习、深度学习与自然语言处理中的推导和直觉。</p>
+          </li>
+        </ol>
+      </section>
+    </div>
+  </main>
+
+  <footer class="site-footer"><span class="footer-credit"><span class="footer-prefix">© 2026 by</span> <a href="index.html" class="footer-brand">MOFANG</a></span></footer>
+  <script src="app.js?v=44"></script>
+</body>
+</html>

@@ -19,7 +19,7 @@
     html[data-theme="night"], html[data-theme="night"] body { background: #0c0c0c; color: #ededed; color-scheme: dark; }
     html[data-theme="day"], html[data-theme="day"] body { background: #ffffff; color: #1a1a1a; color-scheme: light; }
   </style>
-  <link rel="stylesheet" href="styles.css?v=61" />
+  <link rel="stylesheet" href="styles.css?v=63" />
   <title>MOFANG's Blog</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="description" content="LLM notes — understanding, one question at a time." />
@@ -33,13 +33,17 @@
 
   <header class="site-header">
     <div class="header-inner">
-      <a href="index.html" class="logo">
-        <span class="logo-dot"></span>
-        <span class="logo-text">MOFANG</span>
-      </a>
+      <div class="header-left">
+        <a href="index.html" class="logo">
+          <span class="logo-dot"></span>
+          <span class="logo-text">MOFANG</span>
+        </a>
+        <nav class="site-nav header-nav" aria-label="Site navigation">
+          <a href="classic-blog.html">经典 Blog</a>
+          <a href="interview/index.html">八股</a>
+        </nav>
+      </div>
       <div class="header-actions">
-        <a href="#resources" class="header-link">学习资料</a>
-        <a href="interview/index.html" class="header-link">AI Interview</a>
         <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle theme">
           <span class="icon-sun">☀️</span>
           <span class="icon-moon">🌙</span>
@@ -64,47 +68,6 @@
         </h1>
         <p class="slogan-primary">Understanding, One Question at a Time</p>
         <p class="slogan-secondary">Every answer reveals a deeper question.</p>
-      </div>
-    </section>
-
-    <section id="resources" class="resource-shelf" aria-labelledby="resources-title">
-      <div class="resource-shelf-heading">
-        <div>
-          <p class="section-kicker">A small, growing library</p>
-          <h2 id="resources-title">值得反复阅读的学习资料</h2>
-        </div>
-        <p class="resource-shelf-note">置顶收藏 · 持续补充</p>
-      </div>
-      <div class="resource-grid">
-        <a class="resource-card" href="https://infrasys-ai.github.io/aiinfra-docs/05Infer04LongInfer/02RingAttention.html" target="_blank" rel="noopener noreferrer">
-          <div class="resource-card-top">
-            <span class="resource-type">AI Infra Docs</span>
-            <span class="resource-arrow" aria-hidden="true">↗</span>
-          </div>
-          <h3>Ring Attention</h3>
-          <p>从长上下文推理出发，理解序列并行、环形通信与 Attention 计算如何协同。</p>
-          <span class="resource-domain">infrasys-ai.github.io</span>
-        </a>
-
-        <a class="resource-card" href="https://spaces.ac.cn/" target="_blank" rel="noopener noreferrer">
-          <div class="resource-card-top">
-            <span class="resource-type">博客 · 科学空间</span>
-            <span class="resource-arrow" aria-hidden="true">↗</span>
-          </div>
-          <h3>科学空间</h3>
-          <p>以推导和直觉拆解机器学习、深度学习与自然语言处理中的关键问题。</p>
-          <span class="resource-domain">spaces.ac.cn</span>
-        </a>
-
-        <a class="resource-card" href="https://www.bilibili.com/video/BV1aTxMehEjK/?spm_id_from=333.1387.upload.video_card.click&amp;vd_source=1755be72f5cee2ed43566d56d81259ec" target="_blank" rel="noopener noreferrer">
-          <div class="resource-card-top">
-            <span class="resource-type">视频课程 · 3Blue1Brown</span>
-            <span class="resource-arrow" aria-hidden="true">↗</span>
-          </div>
-          <h3>深度学习的 7 节课</h3>
-          <p>用可视化建立神经网络、梯度下降与反向传播的整体直觉，适合作为基础入口。</p>
-          <span class="resource-domain">bilibili.com</span>
-        </a>
       </div>
     </section>
 
@@ -387,6 +350,6 @@
     </span>
   </footer>
 
-  <script src="app.js?v=43"></script>
+  <script src="app.js?v=44"></script>
 </body>
 </html>
