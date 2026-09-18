@@ -278,9 +278,9 @@ def apply_rope(x, position_ids, base=10000.0):
             <li><a href="https://spaces.ac.cn/archives/8265/comment-page-1" target="_blank" rel="noopener noreferrer">苏剑林，科学空间：Transformer 升级之路：2、博采众长的旋转式位置编码</a><span>RoPE 的中文原始介绍，适合沿着绝对位置与相对位置的联系继续阅读。</span></li>
             <li><a href="https://arxiv.org/abs/2104.09864" target="_blank" rel="noopener noreferrer">Su et al., RoFormer: Enhanced Transformer with Rotary Position Embedding</a><span>本文公式与两张原图的主要依据；§3.2 给出旋转形式，§3.4 展开实现与衰减分析。</span></li>
             <li><a href="https://github.com/ZhuiyiTechnology/roformer" target="_blank" rel="noopener noreferrer">ZhuiyiTechnology / roformer</a><span>作者团队开源实现，可对照论文理解旋转位置编码。</span></li>
-            <li><a href="https://arxiv.org/abs/2306.15595" target="_blank" rel="noopener noreferrer">Chen et al., Extending Context Window of Large Language Models via Positional Interpolation</a><span>位置插值的动机、微调方法与长上下文实验。</span></li>
-            <li><a href="https://arxiv.org/abs/2309.00071" target="_blank" rel="noopener noreferrer">Peng et al., YaRN: Efficient Context Window Extension of Large Language Models</a><span>进一步讨论不同频段的扩展与注意力缩放。</span></li>
-            <li><a href="https://zhuanlan.zhihu.com/p/647109286" target="_blank" rel="noopener noreferrer">知乎参考文章（读者提供）</a><span>延伸阅读入口；本次撰写时页面访问受限，技术论证与图片来源以可核验的原论文为准。</span></li>
+            <li><a href="https://arxiv.org/abs/2306.15595" target="_blank" rel="noopener noreferrer">Chen et al., Extending Context Window of Large Language Models via Positional Interpolation</a><span>对应第六章的位置插值：解释为什么把位置压回训练窗口，再用少量长文本微调，可以比直接外推更稳。</span></li>
+            <li><a href="https://arxiv.org/abs/2309.00071" target="_blank" rel="noopener noreferrer">Peng et al., YaRN: Efficient Context Window Extension of Large Language Models</a><span>对应第六章的频段扩展：进一步讨论不同频率区间的缩放，以及注意力温度修正。</span></li>
+            <li><a href="https://zhuanlan.zhihu.com/p/647109286" target="_blank" rel="noopener noreferrer">十分钟读懂旋转编码（RoPE）</a><span>中文入门文章；用于补充直觉与公式阅读，原图与论文事实仍以 RoFormer 原论文为准。</span></li>
             <li><a href="pytorch-api-foundations.html">PyTorch 基础 API：从 Tensor 到大模型训练与推理</a><span>补充本文代码涉及的 Tensor 形状、广播、dtype 与混合精度基础。</span></li>
           </ol>
         </section>
