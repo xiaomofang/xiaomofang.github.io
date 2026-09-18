@@ -11,7 +11,7 @@
       } catch (e) {}
     })();
   </script>
-  <link rel="stylesheet" href="../../styles.css?v=70" />
+  <link rel="stylesheet" href="../../styles.css?v=71" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous" />
   <title>RoPE 旋转位置编码：从二维旋转到相对位置与长上下文</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
@@ -30,7 +30,7 @@
     </div>
   </header>
   <main class="site-main">
-    <article class="post-page">
+    <article class="post-page rope-article">
       <header class="post-page-header">
         <p class="post-page-category">Basic Knowledge</p>
         <h1 class="post-page-title">RoPE 旋转位置编码：<br />从二维旋转到相对位置与长上下文</h1>
@@ -40,22 +40,10 @@
           <a class="post-keyword-chip" href="../../index.html?keyword=pytorch">PyTorch</a>
           <a class="post-keyword-chip" href="../../index.html?keyword=training">训练</a>
         </div>
-        <p class="post-page-meta" data-date="2026-09-18" data-author="MOFANG" data-minutes="25">2026年9月18日 · 25 分钟 · MOFANG</p>
+        <p class="post-page-meta" data-date="2026-09-18" data-author="MOFANG" data-minutes="50">2026年9月18日 · 50 分钟 · MOFANG</p>
       </header>
 
-      <div class="logic-map" aria-label="RoPE 推导逻辑地图">
-        <div class="map-node map-node--start"><span>1</span><strong>位置需求</strong><p>内容决定相关性，距离决定如何比较。</p></div>
-        <div class="map-arrow">→</div>
-        <div class="map-node map-node--ar"><span>2</span><strong>旋转恒等式</strong><p>分别旋转 Q/K，点积只留下角度差。</p></div>
-        <div class="map-arrow">→</div>
-        <div class="map-node map-node--par"><span>3</span><strong>多尺度频率</strong><p>快慢不同的旋转，共同描述位置。</p></div>
-        <div class="map-arrow">→</div>
-        <div class="map-node map-node--conv"><span>4</span><strong>工程与边界</strong><p>实现、缓存对齐，以及长上下文的限制。</p></div>
-      </div>
-
       <section class="post-page-content">
-        <aside class="aside-card"><strong>阅读路线。</strong>想理解原理，重点看第二、三章；想读模型代码，直接接第五章；想知道「用了 RoPE 为什么还要做长上下文训练」，看第四、六章。本文全部技术配图引用 RoFormer 论文原图，图下注明图号、作者与来源，可点击查看。</aside>
-
         <h2 id="position">一、位置编码要解决的，到底是什么问题</h2>
         <h3>1.1 内容相似，不等于关系相同</h3>
         <p>「小猫追小狗」和「小狗追小猫」包含相同的词，关系却相反。对一个单独的 query 而言，如果 key/value 成对换序，而没有位置编码或相应掩码提供额外结构，注意力的加权结果不会因此改变。更一般地，无位置编码的全连接 self-attention 对输入置换是等变的：输入换序，输出也跟着换序。</p>
@@ -127,7 +115,7 @@
           =\operatorname{Re}\!\left[
           \overline{z_q}z_ke^{i(n-m)\theta}\right].
         \]</div>
-        <p>某些资料使用 \(z_q\overline{z_k}\)，对应指数写成 \(m-n\)；两式互为共轭，实部相同。真正需要检查的是共轭对象、旋转方向与位置差的符号是否一致。</p>
+        <p>某些资料使用 \(z_q\overline{z_k}\)，对应指数写成 \(m-n\)；两式互为共轭，实部相同。真正需要检查的是共轭对象、旋转方向与位置差的符号是否一致。复数为什么不丢信息、共轭与实部为什么缺一不可，见<a href="#appendix-complex">附录 A</a>的完整展开。</p>
 
         <h2 id="frequencies">三、高维 RoPE：许多个不同转速的二维平面</h2>
         <h3>3.1 每两个通道组成一个旋转平面</h3>
@@ -184,7 +172,7 @@
           \le\max_{0\le j&lt;D}|h_{j+1}-h_j|
           \sum_{r=1}^{D}|P_r(\Delta)|.
         \]</div>
-        <p>Figure 2 展示的是这个推导中与频率有关的平均部分和模长 \(D^{-1}\sum_r|P_r(\Delta)|\) 的数值趋势。它不是某个模型的 attention 权重曲线，也不是任意内容向量都严格单调衰减的证明；内容系数的变化幅度仍然出现在上界中。</p>
+        <p>Figure 2 展示的是这个推导中与频率有关的平均部分和模长 \(D^{-1}\sum_r|P_r(\Delta)|\) 的数值趋势。它不是某个模型的 attention 权重曲线，也不是任意内容向量都严格单调衰减的证明；内容系数的变化幅度仍然出现在上界中。这个上界如何从前缀和得到，见<a href="#appendix-abel">附录 B</a>。</p>
         <figure class="diagram-figure">
           <a href="https://arxiv.org/html/2104.09864v5/long-term-decay.svg" target="_blank" rel="noopener noreferrer"><img src="https://arxiv.org/html/2104.09864v5/long-term-decay.svg" width="495" height="257" alt="RoFormer 原论文 Figure 2：不同维度下，频率部分和的平均模长随相对距离变化的曲线" loading="lazy" decoding="async" /></a>
           <figcaption>Figure 2 · 频率组合呈现带振荡的衰减趋势；实际 attention 还取决于内容、掩码与 softmax。</figcaption>
@@ -269,6 +257,304 @@ def apply_rope(x, position_ids, base=10000.0):
         </table>
         <p>增大底数与统一插值不是一回事：\(\theta_0=b^0=1\) 始终不变，而后面的频率才随底数变化。固定频率重标定仍保留相对旋转恒等式；如果服务过程中动态改变频率，还要保证缓存中的旧 K 与新 Q 使用兼容的频率体系。</p>
         <aside class="aside-card"><strong>上下文窗口是一项端到端能力。</strong>除了位置相位，还要检查长文本检索与推理质量、训练长度覆盖、KV 容量和注意力计算成本。RoPE 本身不会把标准 attention 的二次计算量变成线性；<a href="../inference/flash-attention-deep-dive.html">FlashAttention</a>解决的是另一层面的 IO 与中间存储问题。</aside>
+
+        <h2 id="appendix-complex">附录 A：从复数基础到 f、g 的相对位置恒等式</h2>
+        <p>这一附录补齐第二章省略的代数步骤，也对应常见 RoPE 介绍中从二维复数表达推到旋转矩阵的过程。为避免与外部资料的公式（8）～（11）混淆，附录单独使用 A、B 编号。先在二维证明，再推广到整个 attention head；不要求读者预先掌握复数内积。</p>
+        <nav class="aside-card" aria-label="推导附录导航"><strong>推导顺序。</strong><a href="#appendix-notation">列向量与 QKᵀ</a> → <a href="#appendix-euler">复数与旋转</a> → <a href="#appendix-fg">定义 f 与 g</a> → <a href="#appendix-fg-proof">证明点积等于 g</a> → <a href="#appendix-highdim">推广到多频率</a> → <a href="#appendix-abel">Abel 变换与上界</a>。</nav>
+
+        <h3 id="appendix-notation">A.1 先统一记号：为什么单个点积是 qᵀk，代码却是 QKᵀ</h3>
+        <p>本文采用线性代数中常见的<strong>列向量约定</strong>，这是作者选定的表示方式，不是 Query 必须遵守的行业规则。取 \(x_m\in\mathbb R^{d_{\mathrm{model}}}\)、\(W_Q\in\mathbb R^{d\times d_{\mathrm{model}}}\)，则 \(q_m=W_Qx_m\in\mathbb R^d\)。先不考虑 batch 和 head 的前导维度。</p>
+        <div class="math-block">\[
+          q_m=\begin{pmatrix}q_{m,0}\\q_{m,1}\\\vdots\\q_{m,d-1}\end{pmatrix},\quad
+          Q=\begin{pmatrix}q_0^{\mathsf T}\\q_1^{\mathsf T}\\\vdots\\q_{L_q-1}^{\mathsf T}\end{pmatrix},\quad
+          K^{\mathsf T}=\begin{pmatrix}k_0&amp;k_1&amp;\cdots&amp;k_{L_k-1}\end{pmatrix}.
+          \tag{A1}
+        \]</div>
+        <p>大写 Q 把每个 token 的向量按行排列，所以它的第 m 行<strong>本来就是</strong> \(q_m^{\mathsf T}\)；对大写 K 转置后，第 n 列是 \(k_n\)。转置符号没有从 K「移到」q 上，只是两个层次的记号。</p>
+        <div class="math-block">\[
+          \underbrace{Q}_{L_q\times d}\underbrace{K^{\mathsf T}}_{d\times L_k}
+          \in\mathbb R^{L_q\times L_k},\qquad
+          (QK^{\mathsf T})_{m,n}=q_m^{\mathsf T}k_n
+          =\sum_{t=0}^{d-1}q_{m,t}k_{n,t}.\tag{A2}
+        \]</div>
+        <table class="calc-table"><thead><tr><th>对象</th><th>形状</th><th>计算含义</th></tr></thead><tbody>
+          <tr><td>单个列向量 q、k</td><td>(d, 1)</td><td>qᵀk 得到一个标量</td></tr>
+          <tr><td>按行排列的 Q、K</td><td>(Lq, d)、(Lk, d)</td><td>QKᵀ 一次得到所有位置对的分数</td></tr>
+          <tr><td>NumPy 一维数组</td><td>(d,)</td><td>没有行列方向；q.T 仍为 (d,)，q[:, None] 才是列向量</td></tr>
+        </tbody></table>
+        <p>这里的 d 是参与旋转的 head 维度。hidden_size 通常就是模型主干的 \(d_{\mathrm{model}}\)；标准多头设计常有 \(d_{\mathrm{model}}=H d\)，但注意力内部投影宽度也可以另行设计，GQA 的 KV 头数还可能少于 Query 头数。不要仅根据参数名称假定所有维度相等。记号 \(R_{\Theta,m}^{d}\) 中的上标 d 表示矩阵维度，不是 d 次幂。</p>
+
+        <h3 id="appendix-euler">A.2 两个实数如何变成复数：信息不变，运算规则必须对应</h3>
+        <p>令虚数单位为 \(\mathrm{i}\)，满足 \(\mathrm{i}^2=-1\)。定义实平面到复平面的对应 \(\mathcal C\)：</p>
+        <div class="math-block">\[
+          \mathcal C\!\left(\begin{pmatrix}a\\b\end{pmatrix}\right)=a+\mathrm{i}b,
+          \qquad \mathcal C^{-1}(z)=\begin{pmatrix}\operatorname{Re}z\\\operatorname{Im}z\end{pmatrix}.
+          \tag{A3}
+        \]</div>
+        <p>实部保存 a，虚部保存 b，可以完整还原。这是 \(\mathbb R^2\) 与 \(\mathbb C\) 作为<strong>实向量空间</strong>的对应，并不表示任意实数矩阵运算都能原封不动替换成复数乘法。RoPE 恰好用到了其中与平面旋转一致的一种运算。</p>
+        <p>欧拉公式把指数函数与圆周上的坐标联系起来，角度使用弧度：</p>
+        <div class="math-block">\[
+          e^{\mathrm{i}\alpha}=\cos\alpha+\mathrm{i}\sin\alpha,
+          \qquad |e^{\mathrm{i}\alpha}|=\sqrt{\cos^2\alpha+\sin^2\alpha}=1.
+          \tag{A4}
+        \]</div>
+        <p>如果希望看到它从哪里来，可以展开指数函数的幂级数：偶数次幂形成余弦，奇数次幂形成正弦。以下级数对任意实数角度都收敛：</p>
+        <div class="math-block">\[
+          \begin{aligned}
+          e^{\mathrm{i}\alpha}
+          &amp;=1+\mathrm{i}\alpha+\frac{(\mathrm{i}\alpha)^2}{2!}+\frac{(\mathrm{i}\alpha)^3}{3!}+\cdots\\
+          &amp;=\left(1-\frac{\alpha^2}{2!}+\frac{\alpha^4}{4!}-\cdots\right)
+          +\mathrm{i}\left(\alpha-\frac{\alpha^3}{3!}+\frac{\alpha^5}{5!}-\cdots\right)\\
+          &amp;=\cos\alpha+\mathrm{i}\sin\alpha.
+          \end{aligned}
+        \]</div>
+        <p>现在让 \(z=a+\mathrm{i}b\) 乘这个单位复数。把四项全部写出来：</p>
+        <div class="math-block">\[
+          \begin{aligned}
+          ze^{\mathrm{i}\alpha}
+          &amp;=(a+\mathrm{i}b)(\cos\alpha+\mathrm{i}\sin\alpha)\\
+          &amp;=a\cos\alpha+\mathrm{i}a\sin\alpha+\mathrm{i}b\cos\alpha+\mathrm{i}^2b\sin\alpha\\
+          &amp;=(a\cos\alpha-b\sin\alpha)+\mathrm{i}(a\sin\alpha+b\cos\alpha).
+          \end{aligned}\tag{A5}
+        \]</div>
+        <p>取出实部和虚部，重新排列成列向量：</p>
+        <div class="math-block">\[
+          \mathcal C^{-1}(ze^{\mathrm{i}\alpha})
+          =\begin{pmatrix}a\cos\alpha-b\sin\alpha\\a\sin\alpha+b\cos\alpha\end{pmatrix}
+          =\underbrace{\begin{pmatrix}\cos\alpha&amp;-\sin\alpha\\\sin\alpha&amp;\cos\alpha\end{pmatrix}}_{R(\alpha)}
+          \begin{pmatrix}a\\b\end{pmatrix}.\tag{A6}
+        \]</div>
+        <p>这就是「旋转」的来源。比如 \((1,0)\) 乘 \(e^{\mathrm{i}\pi/2}=\mathrm{i}\)，变成 \((0,1)\)：向右的箭头转到向上。乘数的模为 1，所以长度保持不变；乘 \(e^{-\mathrm{i}\alpha}\) 可以逆转回原向量。</p>
+        <aside class="aside-card"><strong>复数表示不改变数据，旋转会改变坐标。</strong>从 (a,b) 改记为 a+ib 是无损换记号；再乘单位复数才是在执行 RoPE。实际实现既可以使用复数 Tensor，也可以用两组实数乘加。本文代码采用后一种，旋转后的 Q/K 与最终注意力分数仍然是实数。</aside>
+
+        <h3>A.3 为什么共轭与取实部缺一不可</h3>
+        <p>取两组实数 \(q=(a,b)^{\mathsf T}\)、\(k=(c,e)^{\mathsf T}\)，分别对应 \(z_q=a+\mathrm{i}b\)、\(z_k=c+\mathrm{i}e\)。共轭就是把虚部反号，星号与横线是常见的两种写法：</p>
+        <div class="math-block">\[
+          z_k^*=\overline{z_k}=c-\mathrm{i}e,\qquad
+          z_q\overline{z_k}=(ac+be)+\mathrm{i}(bc-ae).
+        \]</div>
+        <div class="math-block">\[
+          \boxed{q^{\mathsf T}k=ac+be=\operatorname{Re}(z_q\overline{z_k})}.
+          \tag{A7}
+        \]</div>
+        <p>不取共轭时，乘积的实部是 \(ac-be\)，不是原来的点积；只取共轭而不取实部，结果还包含 \(bc-ae\) 这个虚部，同样不等于实数点积。比如 \((1+2\mathrm{i})(3-4\mathrm{i})=11+2\mathrm{i}\)，原向量点积恰好是实部 11。</p>
+
+        <h3 id="appendix-fg">A.4 先说设计目标，再定义 f 与 g</h3>
+        <p>我们寻找位置编码函数 \(f_Q,f_K\)，希望分别给两侧输入添加位置后，内积可以写成只显式使用相对位移的函数 g：</p>
+        <div class="math-block">\[
+          \boxed{f_Q(x_m,m)^{\mathsf T}f_K(x_n,n)=g(x_m,x_n,m-n)}.
+          \tag{A8}
+        \]</div>
+        <p><strong>这里不是证明 f=g。</strong>f 输出向量，g 输出一个实数匹配分数；需要证明的是「两个 f 输出的点积等于 g」。g 仍然依赖两侧内容，并不是一个仅由距离决定的函数。</p>
+        <p>先取投影后的二维列向量 \(q=W_Qx_m\)、\(k=W_Kx_n\)，对应复数 \(z_q=\mathcal C(q)\)、\(z_k=\mathcal C(k)\)。用带帽符号表示复数形式，避免把实向量与复数直接混写成同一种对象：</p>
+        <div class="math-block">\[
+          \begin{aligned}
+          \widehat f_Q(x_m,m)&amp;=z_qe^{\mathrm{i}m\theta},
+          &amp;f_Q(x_m,m)&amp;=\mathcal C^{-1}(\widehat f_Q)=R(m\theta)q,\\
+          \widehat f_K(x_n,n)&amp;=z_ke^{\mathrm{i}n\theta},
+          &amp;f_K(x_n,n)&amp;=\mathcal C^{-1}(\widehat f_K)=R(n\theta)k.
+          \end{aligned}\tag{A9}
+        \]</div>
+        <p>这组定义来自正文 2.1 的角度差要求：选取位置线性相位后，相减能留下位移。在这个附录中统一使用 \(\delta=m-n\)，并定义：</p>
+        <div class="math-block">\[
+          g(x_m,x_n,\delta)
+          :=\operatorname{Re}\!\left[z_q\overline{z_k}e^{\mathrm{i}\delta\theta}\right].
+          \tag{A10}
+        \]</div>
+        <p>正文采用的是 \(\Delta=n-m=-\delta\)。两种方向都可以，但指数与共轭必须成套使用；下面会把它们对应起来。</p>
+
+        <h3 id="appendix-fg-proof">A.5 逐行证明：两个 f 的内积就是 g</h3>
+        <p>第一步，用 A7 把实数点积换成复数乘积的实部；第二步代入 A9；第三步对乘积取共轭，指数中的虚部符号反转；第四步合并指数：</p>
+        <div class="math-block">\[
+          \begin{aligned}
+          f_Q(x_m,m)^{\mathsf T}f_K(x_n,n)
+          &amp;=\operatorname{Re}\!\left[\widehat f_Q(x_m,m)\overline{\widehat f_K(x_n,n)}\right]\\
+          &amp;=\operatorname{Re}\!\left[(z_qe^{\mathrm{i}m\theta})\overline{(z_ke^{\mathrm{i}n\theta})}\right]\\
+          &amp;=\operatorname{Re}\!\left[z_qe^{\mathrm{i}m\theta}\overline{z_k}e^{-\mathrm{i}n\theta}\right]\\
+          &amp;=\operatorname{Re}\!\left[z_q\overline{z_k}e^{\mathrm{i}(m-n)\theta}\right]\\
+          &amp;=g(x_m,x_n,m-n).
+          \end{aligned}\tag{A11}
+        \]</div>
+        <p>为了确认这不是复数记号制造的巧合，再把 g 展开成实数。令 \(\phi=\delta\theta\)，从 A7 已知 \(z_q\overline{z_k}=(ac+be)+\mathrm{i}(bc-ae)\)，于是：</p>
+        <div class="math-block">\[
+          \begin{aligned}
+          g&amp;=(ac+be)\cos\phi-(bc-ae)\sin\phi\\
+          &amp;=ac\cos\phi+ae\sin\phi-bc\sin\phi+be\cos\phi\\
+          &amp;=\begin{pmatrix}a&amp;b\end{pmatrix}
+          \begin{pmatrix}\cos\phi&amp;\sin\phi\\-\sin\phi&amp;\cos\phi\end{pmatrix}
+          \begin{pmatrix}c\\e\end{pmatrix}\\
+          &amp;=q^{\mathsf T}R(-\phi)k
+          =q^{\mathsf T}R((n-m)\theta)k.
+          \end{aligned}\tag{A12}
+        \]</div>
+        <p>所以矩阵推导出现 n−m，而「Query 乘 Key 共轭」的复数推导出现 m−n，完全一致：A12 中间的矩阵正是负角度旋转。如果改为 \(\overline{z_q}z_k\)，指数也要改为 n−m；整体互为共轭，实部不变。</p>
+        <p>用一组数字核对符号：取 \(q=(1,2)^{\mathsf T}\)、\(k=(3,4)^{\mathsf T}\)、\(m=1,n=0,\theta=\pi/2\)。直接旋转与复数计算分别得到：</p>
+        <div class="math-block">\[
+          \begin{aligned}
+          R(\pi/2)q&amp;=(-2,1)^{\mathsf T},
+          &amp;(-2)\times3+1\times4&amp;=-2,\\
+          z_q\overline{z_k}&amp;=11+2\mathrm{i},
+          &amp;\operatorname{Re}[(11+2\mathrm{i})\mathrm{i}]&amp;=\operatorname{Re}(-2+11\mathrm{i})=-2.
+          \end{aligned}
+        \]</div>
+        <aside class="aside-card"><strong>恒等式的适用范围。</strong>两侧使用一致的固定频率与旋转约定，结论对任意实数内容向量成立，不需要随机性假设。固定 q、k 后共同平移位置不会改变该点积；但真实模型换了上下文，q、k 自身可能变化，因此不能由此推出整个网络对所有位置移动都完全不变。</aside>
+
+        <h3 id="appendix-highdim">A.6 从一对通道到整个 head：为什么角度只有 d/2 个</h3>
+        <p>令 \(N=d/2\)，用 r 表示通道对编号，避免与虚数单位混淆。第 r 对包含通道 2r 与 2r+1：</p>
+        <div class="math-block">\[
+          z_{q,r}=q_{2r}+\mathrm{i}q_{2r+1},\quad
+          z_{k,r}=k_{2r}+\mathrm{i}k_{2r+1},\quad
+          \theta_r=b^{-2r/d},\quad r=0,\ldots,N-1.
+        \]</div>
+        <p>每一对的两个坐标共享同一个角度，不是偶数通道一个频率、奇数通道另一个频率。以 d=8、b=10000 为例：</p>
+        <table class="calc-table"><thead><tr><th>组 r</th><th>通道对</th><th>指数 2r/d</th><th>频率 θr</th><th>位置 m 的角度</th></tr></thead><tbody>
+          <tr><td>0</td><td>(0,1)</td><td>0</td><td>1</td><td>m</td></tr>
+          <tr><td>1</td><td>(2,3)</td><td>1/4</td><td>0.1</td><td>0.1m</td></tr>
+          <tr><td>2</td><td>(4,5)</td><td>1/2</td><td>0.01</td><td>0.01m</td></tr>
+          <tr><td>3</td><td>(6,7)</td><td>3/4</td><td>0.001</td><td>0.001m</td></tr>
+        </tbody></table>
+        <p>把 A11 对所有通道对求和，即得到高维版本：</p>
+        <div class="math-block">\[
+          (R_mq)^{\mathsf T}(R_nk)
+          =\operatorname{Re}\!\left[\sum_{r=0}^{N-1}
+          z_{q,r}\overline{z_{k,r}}e^{\mathrm{i}(m-n)\theta_r}\right]
+          =q^{\mathsf T}R_{n-m}k.\tag{A13}
+        \]</div>
+        <p>如果输入为 (B,H,L,d)，共享位置表为 (L,)，那么频率为 (d/2,)，角度表为 (L,d/2)。代码中的 <code>positions[:, None] * frequencies[None, :]</code> 通过 (L,1) 与 (1,d/2) 广播得到这个表，再共享给 B、H 两个维度。<code>x[..., 0::2]</code> 的省略号保留所有前导维度，绝不是固定省略三个轴。</p>
+        <div class="callout"><strong>与正弦加法位置编码的差别。</strong>两者都可以使用多频率 sin/cos。RoPE 的结构性特点是把旋转直接施加到 Q/K，让点积里的显式位置因子严格合并为相对位移，同时保持各向量的长度。正弦加法编码本身也有相对位移性质，但与内容相加、再经过一般投影后，整个匹配分数不自动满足 A13。</div>
+
+        <h2 id="appendix-abel">附录 B：Abel 变换，从前缀和到远程衰减分析</h2>
+        <p>A13 已经完成 RoPE 相对位置性质的证明。Abel 变换不是再加一层编码，也不是实现时要执行的步骤；它把同一个复数求和改写成另一种形式，以便分析频率抵消如何影响分数的上界。</p>
+        <h3>B.1 把「内容系数」与「位置相位」分别命名</h3>
+        <p>延续附录 A 的方向约定，固定当前这对 q、k，令：</p>
+        <div class="math-block">\[
+          \delta=m-n,\quad h_r=z_{q,r}\overline{z_{k,r}},\quad
+          a_r(\delta)=e^{\mathrm{i}\delta\theta_r},\quad
+          Z(\delta)=\sum_{r=0}^{N-1}h_ra_r(\delta).\tag{B1}
+        \]</div>
+        <p>这里 Z 是复数求和结果，真正的未缩放注意力分数是 \(\operatorname{Re}Z\)。特意不用 T 表示总和，以免和转置上标混淆。r 遍历的是<strong>通道对</strong>，不是 token 位置；这一点决定了后面的前缀和究竟沿哪个轴计算。</p>
+        <table class="decision-table"><thead><tr><th>符号</th><th>含义</th><th>依赖什么</th></tr></thead><tbody>
+          <tr><td>hᵣ</td><td>一对通道的复数内容系数</td><td>Query 与 Key 的实际数值</td></tr>
+          <tr><td>aᵣ</td><td>长度为 1 的相位因子</td><td>相对位移与该组频率</td></tr>
+          <tr><td>Sⱼ</td><td>前 j 个相位因子的和</td><td>频率之间的方向叠加或抵消</td></tr>
+        </tbody></table>
+
+        <h3>B.2 前缀和：先看清 S 的下标</h3>
+        <div class="math-block">\[
+          S_0=0,\qquad S_j=\sum_{r=0}^{j-1}a_r,\quad 1\le j\le N.
+          \tag{B2}
+        \]</div>
+        <p>以 N=3 为例，前缀和与原始项的关系如下。S 的下标表示「已经加了几项」，不是最后一项的索引：</p>
+        <div class="math-block">\[
+          \begin{aligned}
+          S_0&amp;=0, &amp; a_0&amp;=S_1-S_0,\\
+          S_1&amp;=a_0, &amp; a_1&amp;=S_2-S_1,\\
+          S_2&amp;=a_0+a_1, &amp; a_2&amp;=S_3-S_2,\\
+          S_3&amp;=a_0+a_1+a_2. &amp;&amp;
+          \end{aligned}
+        \]</div>
+        <p>因此，任意一项都可以替换成相邻两个前缀和的差：\(a_r=S_{r+1}-S_r\)。Abel 变换的第一步只有这个替换，没有用到近似。</p>
+
+        <h3>B.3 三项展开：每一个负号从哪里来</h3>
+        <p><strong>① 代入前缀和之差。</strong></p>
+        <div class="math-block">\[
+          \begin{aligned}
+          Z&amp;=h_0a_0+h_1a_1+h_2a_2\\
+          &amp;=h_0(S_1-S_0)+h_1(S_2-S_1)+h_2(S_3-S_2).
+          \end{aligned}\tag{B3}
+        \]</div>
+        <p><strong>② 去掉括号。</strong>每个括号贡献一个正项和一个负项；由于 S₀=0，只有 h₀S₀ 消失。</p>
+        <div class="math-block">\[
+          \begin{aligned}
+          Z&amp;=h_0S_1-h_0S_0+h_1S_2-h_1S_1+h_2S_3-h_2S_2\\
+          &amp;=h_0S_1+h_1S_2-h_1S_1+h_2S_3-h_2S_2.
+          \end{aligned}
+        \]</div>
+        <p><strong>③ 按相同的 S 合并。</strong>把含 S₁ 的项放在一起，接着是 S₂，最后保留边界项 S₃h₂。</p>
+        <div class="math-block">\[
+          \begin{aligned}
+          Z&amp;=(h_0S_1-h_1S_1)+(h_1S_2-h_2S_2)+h_2S_3\\
+          &amp;=S_1(h_0-h_1)+S_2(h_1-h_2)+S_3h_2.
+          \end{aligned}\tag{B4}
+        \]</div>
+        <p><strong>④ 补一个零，让边界写法统一。</strong>原来只有 h₀、h₁、h₂，现在额外定义 h₃=0，于是 h₂=h₂−h₃：</p>
+        <div class="math-block">\[
+          Z=S_1(h_0-h_1)+S_2(h_1-h_2)+S_3(h_2-h_3).
+        \]</div>
+        <p><strong>⑤ 若希望差分写成「后项减前项」，就在整体前面补负号。</strong></p>
+        <div class="math-block">\[
+          Z=-\left[S_1(h_1-h_0)+S_2(h_2-h_1)+S_3(h_3-h_2)\right].
+          \tag{B5}
+        \]</div>
+        <aside class="aside-card"><strong>h₃=0 不是让最后一对通道归零。</strong>真实内容项最后一个是 h₂。新增 h₃ 只用于表达边界。即使真实 h₀=h₁=h₂，最后的差 h₃−h₂ 仍然不为零，不能漏掉它，否则会错误地把整个和算成零。</aside>
+
+        <h3>B.4 任意 N 项：显式保留边界，再压缩记号</h3>
+        <p>将两组求和拆开，第二组把索引从 r 换成 j，再把重叠范围对齐：</p>
+        <div class="math-block">\[
+          \begin{aligned}
+          Z&amp;=\sum_{r=0}^{N-1}h_r(S_{r+1}-S_r)\\
+          &amp;=\sum_{j=1}^{N}h_{j-1}S_j-\sum_{j=0}^{N-1}h_jS_j\\
+          &amp;=h_{N-1}S_N-h_0S_0+\sum_{j=1}^{N-1}S_j(h_{j-1}-h_j)\\
+          &amp;=h_{N-1}S_N+\sum_{j=1}^{N-1}S_j(h_{j-1}-h_j).
+          \end{aligned}\tag{B6}
+        \]</div>
+        <p>额外定义 \(h_N=0\)，其中 N 是通道对总数，就可以把边界并入求和：</p>
+        <div class="math-block">\[
+          \boxed{Z=\sum_{r=0}^{N-1}S_{r+1}(h_r-h_{r+1})
+          =-\sum_{r=0}^{N-1}S_{r+1}(h_{r+1}-h_r)},\qquad h_N=0.
+          \tag{B7}
+        \]</div>
+        <p>这就是这里使用的 Abel 变换，也叫离散分部求和。它把「内容系数乘原始相位项」改写为「相位前缀和乘内容差分」。实数、复数都满足这里的分配律，所以没有因复数而增加额外假设。</p>
+        <p>用普通数字检验下标：取 a=(2,3,5)、h=(4,6,8)，则 S=(0,2,5,10)，并补 h₃=0。这里的 a 只是代数核对，不要求它们是 RoPE 的单位复数：</p>
+        <div class="math-block">\[
+          \begin{aligned}
+          Z_{\mathrm{original}}&amp;=4\times2+6\times3+8\times5=66,\\
+          Z_{\mathrm{Abel}}&amp;=2(4-6)+5(6-8)+10(8-0)\\
+          &amp;=-4-10+80=66.
+          \end{aligned}
+        \]</div>
+
+        <h3>B.5 从恒等式到上界：每一步用什么不等式</h3>
+        <p>到 B7 为止，全部是严格相等。接下来才开始估计大小：实部绝对值不超过复数的模；和的模不超过各项模的和；乘积的模等于模的乘积。</p>
+        <div class="math-block">\[
+          \begin{aligned}
+          |\operatorname{Re}Z|
+          &amp;\le |Z|\\
+          &amp;=\left|\sum_{r=0}^{N-1}S_{r+1}(h_r-h_{r+1})\right|\\
+          &amp;\le\sum_{r=0}^{N-1}|S_{r+1}|\,|h_r-h_{r+1}|.
+          \end{aligned}\tag{B8}
+        \]</div>
+        <p>把所有内容差分统一放大为最大值，可得到正文第四章使用的上界。定义最大差分 C 与平均前缀和模长 A：</p>
+        <div class="math-block">\[
+          C=\max_{0\le r&lt;N}|h_{r+1}-h_r|,\qquad
+          A(\delta)=\frac1N\sum_{j=1}^{N}|S_j(\delta)|.
+        \]</div>
+        <div class="math-block">\[
+          \boxed{|\operatorname{Re}Z(\delta)|\le CN A(\delta)},\qquad
+          \left|\frac{\operatorname{Re}Z(\delta)}{\sqrt d}\right|
+          \le\frac{CN}{\sqrt d}A(\delta).\tag{B9}
+        \]</div>
+        <p>也可以提取最大的前缀和，保留内容差分之和，得到另一种同样正确的界：</p>
+        <div class="math-block">\[
+          |\operatorname{Re}Z|
+          \le\left(\max_{1\le j\le N}|S_j|\right)
+          \sum_{r=0}^{N-1}|h_{r+1}-h_r|.\tag{B10}
+        \]</div>
+        <p>两种界强调的对象不同，不能把其中的最大值、求和与平均值随意互换。原论文图中考察的频率量对应 A，而不是 B10 中的最大前缀和。正文与本附录的相位符号相反，S 互为共轭，模长完全相同，因此上界分析一致。</p>
+
+        <h3>B.6 能推出什么，不能推出什么</h3>
+        <p>每个 aᵣ 都是复平面上长度为 1 的箭头。当 δ=0 时，它们全部朝向实轴正方向，所以 Sⱼ=j；当 δ 改变，不同频率的箭头可能错开方向，前缀和中就可能出现抵消。这使 A 成为研究频率组合的一个合理量。</p>
+        <div class="math-block">\[
+          A(0)=\frac1N\sum_{j=1}^{N}j=\frac{N+1}{2}.
+        \]</div>
+        <p>但三角不等式没有证明 A 随距离单调下降，更没有证明实际 attention 权重必然衰减。有限频率会振荡，内容系数会变化，softmax 还会引入同一行其他 key 的竞争。即便一个上界在某段距离上下降，也只限制实际值的可能范围，不保证实际值本身随之单调下降。</p>
+        <table class="decision-table"><thead><tr><th>结论</th><th>性质</th><th>前提或限制</th></tr></thead><tbody>
+          <tr><td>RoPE 点积显式依赖相对位移</td><td>严格恒等式</td><td>Q/K 使用一致的固定频率与旋转规则；内容仍参与计算</td></tr>
+          <tr><td>Abel 改写与 B8～B10 上界</td><td>严格代数与不等式</td><td>保留边界项；比较频率作用时固定内容系数</td></tr>
+          <tr><td>论文频率量的远程变化趋势</td><td>给定频率、维度、距离范围的数值分析</td><td>不是任意内容的 attention 权重曲线</td></tr>
+          <tr><td>长上下文质量更好</td><td>需要模型实验评估</td><td>取决于训练分布、频率设计、任务与缓存位置对齐</td></tr>
+        </tbody></table>
+        <div class="callout"><strong>把证明与直觉分开，才能正确使用结论。</strong>旋转与复数解释相对位移为什么严格出现；Abel 变换帮助把频率抵消与内容变化分离；距离偏置与长度泛化则还需要数值分析和训练证据。RoPE 提供位置结构，不强制模型把远处的重要信息判成不相关。</div>
 
         <div class="essay-ending">RoPE 把每个 token 的绝对位置变成旋转角度，再利用点积中的逆旋转，把两个角度化成相对位移。二维旋转解释了相对位置，多频率解释了尺度，缓存对齐解释了工程约束。真正值得记住的是这条推导链：位置的差值结构 → 旋转的复合规律 → Q/K 的相对匹配；而远程衰减与长度外推，都必须在这条恒等式之外继续讨论内容与训练分布。</div>
 

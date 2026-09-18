@@ -1980,6 +1980,19 @@ body {
   margin-bottom: 0;
 }
 
+/* Keep numbered derivations together when a narrow screen scrolls the formula. */
+.rope-article .math-block .katex-display > .katex > .katex-html:has(> .tag) {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+}
+
+.rope-article .math-block .katex-display > .katex > .katex-html > .tag {
+  position: static;
+  flex-shrink: 0;
+  margin-left: 1.5em;
+}
+
 .katex {
   color: var(--text);
   font-size: 1.05em;
