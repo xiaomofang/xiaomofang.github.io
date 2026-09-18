@@ -16,6 +16,7 @@
     determinism: "确定性",
     hardware: "硬件与 Kernel",
     pytorch: "PyTorch",
+    rope: "RoPE · 位置编码",
   };
 
   function initTheme() {

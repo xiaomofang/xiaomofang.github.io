@@ -99,12 +99,27 @@
           <button class="keyword-pill" data-keyword="determinism" type="button">确定性</button>
           <button class="keyword-pill" data-keyword="hardware" type="button">硬件与 Kernel</button>
           <button class="keyword-pill" data-keyword="pytorch" type="button">PyTorch</button>
+          <button class="keyword-pill" data-keyword="rope" type="button">RoPE · 位置编码</button>
         </nav>
       </div>
     </div>
 
     <section id="blog" class="section">
       <div class="post-list" id="post-list">
+        <article class="post-card" data-category="basic" data-keywords="rope pytorch training" data-date="2026-09-18" data-title="RoPE 旋转位置编码：从二维旋转到相对位置与长上下文">
+          <a href="posts/basic/rope-rotary-position-embedding.html" class="post-card-link">
+            <div class="post-meta-row"><span class="post-tag">Basic Knowledge</span></div>
+            <h3 class="post-title">RoPE 旋转位置编码：从二维旋转到相对位置与长上下文</h3>
+            <p class="post-excerpt">从二维旋转手推相对位置恒等式，结合 RoFormer 论文原图与可手算的例子，讲清多频率、远程衰减、PyTorch 实现、KV cache 对齐与长度外推的边界。</p>
+            <p class="post-card-stats">2026年9月18日 · 25 分钟 · 3791 字 · MOFANG</p>
+          </a>
+          <div class="post-card-keywords">
+            <button class="post-keyword-chip" data-keyword="rope" type="button">RoPE · 位置编码</button>
+            <button class="post-keyword-chip" data-keyword="pytorch" type="button">PyTorch</button>
+            <button class="post-keyword-chip" data-keyword="training" type="button">训练</button>
+          </div>
+        </article>
+
         <article class="post-card" data-category="inference" data-keywords="pd-disagg inference-systems hardware" data-date="2026-08-18" data-title="LLM 推理性能怎么分析：从 Prefill、Decode 到 PD 分离与并行策略">
           <a href="posts/inference/llm-inference-prefill-decode-bottleneck-analysis.html" class="post-card-link">
             <div class="post-meta-row">
@@ -282,7 +297,7 @@
              <div class="post-meta-row"><span class="post-tag">Basic Knowledge</span></div>
              <h3 class="post-title">注意力机制如何演变：从 MHA 到 MQA、GQA 与 MLA</h3>
              <p class="post-excerpt">从 MHA 的独立 K/V，到 MQA 全共享、GQA 分组共享，再到 MLA 的 latent KV 压缩：用原论文解释 KV cache、表达能力与推理带宽的结构性权衡。</p>
-             <p class="post-card-stats">2026年9月5日 · 24 分钟 · 2816 字 · MOFANG</p>
+             <p class="post-card-stats">2026年9月5日 · 24 分钟 · 2848 字 · MOFANG</p>
            </a>
            <div class="post-card-keywords">
              <button class="post-keyword-chip" data-keyword="attention" type="button">Attention 加速</button>

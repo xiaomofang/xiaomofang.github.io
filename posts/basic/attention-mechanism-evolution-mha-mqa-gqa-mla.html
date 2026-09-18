@@ -169,7 +169,7 @@
           k_t^C=W^{UK}c_t^{KV},\qquad v_t^C=W^{UV}c_t^{KV}
           \]
         </div>
-        <p>这里 \(W^{DKV}\) 是下投影，\(W^{UK},W^{UV}\) 是上投影。关键空间复杂度从“每个 token 存所有 KV head”变成“每个 token 存一个共享的低维 code”。在 RoPE 存在时，MLA 还需要仔细处理位置编码：论文将可吸收的内容部分与解耦的 RoPE 部分分开，使压缩后的表示仍能表达相对位置关系。</p>
+        <p>这里 \(W^{DKV}\) 是下投影，\(W^{UK},W^{UV}\) 是上投影。关键空间复杂度从“每个 token 存所有 KV head”变成“每个 token 存一个共享的低维 code”。在 RoPE 存在时，MLA 还需要仔细处理位置编码：论文将可吸收的内容部分与解耦的 RoPE 部分分开，使压缩后的表示仍能表达相对位置关系。旋转为什么会引入相对位置，以及缓存如何对齐，可参见<a href="rope-rotary-position-embedding.html">RoPE 旋转位置编码详解</a>。</p>
         <figure class="diagram-figure diagram-figure--wide">
           <img src="https://arxiv.org/html/2405.04434/x2.png" alt="DeepSeek-V2 原论文 MLA 结构图" loading="lazy" />
           <figcaption>原论文中的 MLA 结构：KV compression 与 decoupled RoPE 共同构成低缓存开销的注意力。</figcaption>

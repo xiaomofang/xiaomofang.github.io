@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="night">
+<head>
+  <meta charset="UTF-8" />
+  <script>
+    (function () {
+      try {
+        var saved = localStorage.getItem("yichuan-theme");
+        var theme = saved || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "night" : "day");
+        document.documentElement.setAttribute("data-theme", theme);
+      } catch (e) {}
+    })();
+  </script>
+  <link rel="stylesheet" href="../../styles.css?v=70" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous" />
+  <title>RoPE 旋转位置编码：从二维旋转到相对位置与长上下文</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="description" content="从注意力的位置需求出发，手推 RoPE 的旋转矩阵、复数表达与相对位置恒等式，用两个小例子理解多频率、远程衰减和长度外推，最后实现 PyTorch RoPE 并解释 KV cache 的位置对齐。" />
+</head>
+<body>
+  <div class="ambient" aria-hidden="true"><span class="orb orb-a"></span><span class="orb orb-b"></span></div>
+  <canvas id="star-canvas"></canvas>
+  <header class="site-header">
+    <div class="header-inner">
+      <a href="../../index.html" class="logo"><span class="logo-dot"></span><span class="logo-text">MOFANG</span></a>
+      <div class="header-actions">
+        <nav class="site-nav"><a href="../../index.html">← Back</a></nav>
+        <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle theme"><span class="icon-sun">☀️</span><span class="icon-moon">🌙</span></button>
+      </div>
+    </div>
+  </header>
+  <main class="site-main">
+    <article class="post-page">
+      <header class="post-page-header">
+        <p class="post-page-category">Basic Knowledge</p>
+        <h1 class="post-page-title">RoPE 旋转位置编码：<br />从二维旋转到相对位置与长上下文</h1>
+        <p class="post-lead">给每个位置一个旋转角度，为什么两个向量的点积就能读出相对距离？RoPE 的关键是让「位置相减」成为旋转矩阵相乘的自然结果。本文沿着苏剑林在<a href="https://kexue.fm/archives/8265" target="_blank" rel="noopener noreferrer">科学空间的 RoPE 文章</a>与 <a href="https://arxiv.org/abs/2104.09864" target="_blank" rel="noopener noreferrer">RoFormer 原论文</a>所讨论的问题，从几何、代数一路走到实现与长度外推。</p>
+        <div class="post-page-keywords" aria-label="Keywords">
+          <a class="post-keyword-chip" href="../../index.html?keyword=rope">RoPE · 位置编码</a>
+          <a class="post-keyword-chip" href="../../index.html?keyword=pytorch">PyTorch</a>
+          <a class="post-keyword-chip" href="../../index.html?keyword=training">训练</a>
+        </div>
+        <p class="post-page-meta" data-date="2026-09-18" data-author="MOFANG" data-minutes="25">2026年9月18日 · 25 分钟 · MOFANG</p>
+      </header>
+
+      <div class="logic-map" aria-label="RoPE 推导逻辑地图">
+        <div class="map-node map-node--start"><span>1</span><strong>位置需求</strong><p>内容决定相关性，距离决定如何比较。</p></div>
+        <div class="map-arrow">→</div>
+        <div class="map-node map-node--ar"><span>2</span><strong>旋转恒等式</strong><p>分别旋转 Q/K，点积只留下角度差。</p></div>
+        <div class="map-arrow">→</div>
+        <div class="map-node map-node--par"><span>3</span><strong>多尺度频率</strong><p>快慢不同的旋转，共同描述位置。</p></div>
+        <div class="map-arrow">→</div>
+        <div class="map-node map-node--conv"><span>4</span><strong>工程与边界</strong><p>实现、缓存对齐，以及长上下文的限制。</p></div>
+      </div>
+
+      <section class="post-page-content">
+        <aside class="aside-card"><strong>阅读路线。</strong>想理解原理，重点看第二、三章；想读模型代码，直接接第五章；想知道「用了 RoPE 为什么还要做长上下文训练」，看第四、六章。本文全部技术配图引用 RoFormer 论文原图，图下注明图号、作者与来源，可点击查看。</aside>
+
+        <h2 id="position">一、位置编码要解决的，到底是什么问题</h2>
+        <h3>1.1 内容相似，不等于关系相同</h3>
+        <p>「小猫追小狗」和「小狗追小猫」包含相同的词，关系却相反。对一个单独的 query 而言，如果 key/value 成对换序，而没有位置编码或相应掩码提供额外结构，注意力的加权结果不会因此改变。更一般地，无位置编码的全连接 self-attention 对输入置换是等变的：输入换序，输出也跟着换序。</p>
+        <p>因果掩码会打破这种任意置换对称性，但它直接规定的是「哪些位置可见」，并没有显式告诉点积「相隔一个词」与「相隔一百个词」该如何区别。位置编码要做的，就是为内容匹配提供这样的坐标结构。</p>
+        <div class="math-block">\[
+          q_m=W_Qx_m,\quad k_n=W_Kx_n,\quad
+          s_{m,n}=\frac{q_m^{\mathsf T}k_n}{\sqrt{d}}.
+        \]</div>
+        <p>下文把向量写成列向量，位置从 0 开始，\(d\) 表示一个 attention head 的维度。\(q_m,k_n\) 是当前层尚未应用 RoPE 的表示；它们可能已经通过前面的层包含上下文信息。「没有应用本层旋转」不意味着它们完全没有位置信息。</p>
+
+        <h3>1.2 从加法位置编码走向相对位置</h3>
+        <p>绝对位置编码通常把 \(p_m\) 加到输入上。暂时省略投影，展开点积就能看到内容与位置怎样混合：</p>
+        <div class="math-block">\[
+          (x_m+p_m)^{\mathsf T}(x_n+p_n)
+          =x_m^{\mathsf T}x_n+x_m^{\mathsf T}p_n
+          +p_m^{\mathsf T}x_n+p_m^{\mathsf T}p_n.
+        \]</div>
+        <p>正弦位置向量之间的点积可以具有相对位移结构，但加入内容交叉项与一般的可学习投影后，整个分数并不自动只通过距离依赖位置。RoPE 换了一个设计目标：能否分别处理 query 和 key，同时保证它们比较时的位置因子只依赖 \(n-m\)？</p>
+        <div class="callout"><strong>目标：用绝对位置执行变换，用相对位置控制匹配。</strong>这不是要求分数只取决于距离；内容仍然决定相关性。要求的是，固定内容向量后，显式位置依赖可以合并成一个相对位移。</div>
+
+        <h2 id="rotation">二、二维旋转：把位置差写进点积</h2>
+        <h3>2.1 为什么角度要随位置线性增长</h3>
+        <p>先考虑一个二维平面。把 query 转过 \(\phi(m)\)，key 转过 \(\phi(n)\)，它们的夹角变化就是 \(\phi(n)-\phi(m)\)。若希望这个变化只取决于位置差，那么相隔一步的角度差必须处处一样：</p>
+        <div class="math-block">\[
+          \phi(m+1)-\phi(m)=\theta
+          \quad\Longrightarrow\quad
+          \phi(m)=m\theta+\phi(0).
+        \]</div>
+        <p>把位置 0 设为不旋转，即 \(\phi(0)=0\)，就得到 \(m\theta\)。这里 \(\theta\) 是每前进一步转过的弧度。这个推导是在「用平面旋转编码位置」的假设下进行的，角度按模 \(2\pi\) 理解；它没有声称所有位置编码都只能采用 RoPE。</p>
+
+        <h3>2.2 核心恒等式，逐步推一遍</h3>
+        <p>二维逆时针旋转矩阵为：</p>
+        <div class="math-block">\[
+          R(\alpha)=\begin{pmatrix}
+          \cos\alpha&amp;-\sin\alpha\\
+          \sin\alpha&amp;\cos\alpha
+          \end{pmatrix}.
+        \]</div>
+        <p>旋转不改变长度，因此 \(R(\alpha)^{\mathsf T}=R(-\alpha)\)；连续旋转则把角度相加，因此 \(R(\alpha)R(\beta)=R(\alpha+\beta)\)。定义 \(\tilde q_m=R(m\theta)q_m\)、\(\tilde k_n=R(n\theta)k_n\)，于是：</p>
+        <div class="math-block">\[
+          \begin{aligned}
+          \tilde q_m^{\mathsf T}\tilde k_n
+          &amp;=q_m^{\mathsf T}R(m\theta)^{\mathsf T}R(n\theta)k_n\\
+          &amp;=q_m^{\mathsf T}R(-m\theta+n\theta)k_n\\
+          &amp;=\boxed{q_m^{\mathsf T}R((n-m)\theta)k_n}.
+          \end{aligned}
+        \]</div>
+        <p>这就是 RoPE 的核心。位置在 Q/K 两侧分别进入，点积却把它们合并成差值。若同时把两者位置平移 \(c\)，就有 \((n+c)-(m+c)=n-m\)，所以在内容向量不变的前提下分数不变。</p>
+        <aside class="aside-card"><strong>旋转保长度，为何还能改变注意力？</strong>保长度只意味着每个向量的模不变。两个向量转过不同角度时，夹角会变，点积自然会变；只有它们经历同一个旋转时，点积才保持不变。</aside>
+
+        <h3>2.3 手算例子：平移位置，分数仍然一样</h3>
+        <p>取 \(q=(1,0)^{\mathsf T}\)、\(k=(1,1)^{\mathsf T}\)，为了便于手算，临时令 \(\theta=\pi/2\)。这是教学频率，并非标准 RoPE 第一组使用的 1 弧度。</p>
+        <table class="calc-table">
+          <thead><tr><th>位置 (m, n)</th><th>旋转后的 query</th><th>旋转后的 key</th><th>点积</th></tr></thead>
+          <tbody>
+            <tr><td>(0, 1)</td><td>(1, 0)</td><td>(−1, 1)</td><td>−1</td></tr>
+            <tr><td>(1, 2)</td><td>(0, 1)</td><td>(−1, −1)</td><td>−1</td></tr>
+            <tr><td>(0, 0)</td><td>(1, 0)</td><td>(1, 1)</td><td>1</td></tr>
+          </tbody>
+        </table>
+        <p>前两行都是 key 比 query 多走一步，尽管绝对位置不同，点积一致。第三行没有相对旋转，恢复原来的内容点积。表中省略了 attention 的 \(1/\sqrt d\) 缩放；加回它并不会改变结论。</p>
+
+        <h3>2.4 复数只是同一件事的紧凑写法</h3>
+        <p>把二维向量 \((a,b)\) 对应为复数 \(z=a+ib\)，乘以 \(e^{i\alpha}\) 就是在平面上旋转。利用实向量点积等于复数共轭乘积的实部：</p>
+        <div class="math-block">\[
+          \operatorname{Re}\!\left[
+          \overline{z_qe^{im\theta}}\,z_ke^{in\theta}
+          \right]
+          =\operatorname{Re}\!\left[
+          \overline{z_q}z_ke^{i(n-m)\theta}\right].
+        \]</div>
+        <p>某些资料使用 \(z_q\overline{z_k}\)，对应指数写成 \(m-n\)；两式互为共轭，实部相同。真正需要检查的是共轭对象、旋转方向与位置差的符号是否一致。</p>
+
+        <h2 id="frequencies">三、高维 RoPE：许多个不同转速的二维平面</h2>
+        <h3>3.1 每两个通道组成一个旋转平面</h3>
+        <p>一个 head 通常有几十到几百维。对偶数维 \(d\)，将相邻通道配对为 \((0,1),(2,3),\ldots\)，每一对使用一个频率：</p>
+        <div class="math-block">\[
+          \theta_j=b^{-2j/d},\qquad j=0,\ldots,d/2-1,
+          \qquad b=10000\ \text{（原论文设置）}.
+        \]</div>
+        <div class="math-block">\[
+          R_m=\operatorname{diag}\!\bigl(R(m\theta_0),\ldots,R(m\theta_{d/2-1})\bigr),
+          \qquad R_m^{\mathsf T}R_n=R_{n-m}.
+        \]</div>
+        <p>内积等于各二维子空间内积之和，所以二维结论直接推广到高维。注意公式分母是参与旋转的维度；全维 RoPE 时它就是 head dimension，不能随手替换为整个模型的 hidden size。</p>
+        <figure class="diagram-figure diagram-figure--wide">
+          <a href="https://arxiv.org/html/2104.09864v5/roformer_RoPE_v2.svg" target="_blank" rel="noopener noreferrer"><img src="https://arxiv.org/html/2104.09864v5/roformer_RoPE_v2.svg" width="812" height="454" alt="RoFormer 原论文 Figure 1：将 query 和 key 的通道两两分组，以位置乘频率为角度进行旋转" loading="lazy" decoding="async" /></a>
+          <figcaption>Figure 1 · 看图时抓住两件事：旋转发生在 Q/K 上；每一对通道有自己的转速。</figcaption>
+          <span class="fig-source">原图：Su et al., <a href="https://arxiv.org/html/2104.09864v5#S3.F1" target="_blank" rel="noopener noreferrer">RoFormer（v5），Figure 1</a> · 原样引用 · <a href="https://creativecommons.org/licenses/by-nc-nd/4.0/" target="_blank" rel="noopener noreferrer">CC BY-NC-ND 4.0</a></span>
+        </figure>
+
+        <h3>3.2 手算例子：四维向量里的快、慢时钟</h3>
+        <p>取 \(d=4,b=10000\)，则 \(\theta_0=1\)、\(\theta_1=0.01\)。同样前进一个位置，第一对通道转 1 弧度，第二对只转 0.01 弧度。对 \(q=k=(1,0,1,0)^{\mathsf T}\)，记 \(\Delta=n-m\)，未缩放的匹配分数为：</p>
+        <div class="math-block">\[
+          S(\Delta)=\cos\Delta+\cos(0.01\Delta).
+        \]</div>
+        <table class="calc-table">
+          <thead><tr><th>相对距离 Δ</th><th>快频率贡献</th><th>慢频率贡献</th><th>总分</th></tr></thead>
+          <tbody>
+            <tr><td>0</td><td>1</td><td>1</td><td>2</td></tr>
+            <tr><td>1</td><td>≈ 0.540302</td><td>≈ 0.999950</td><td>≈ 1.540252</td></tr>
+            <tr><td>3</td><td>≈ −0.989992</td><td>≈ 0.999550</td><td>≈ 0.009558</td></tr>
+            <tr><td>6</td><td>≈ 0.960170</td><td>≈ 0.998201</td><td>≈ 1.958371</td></tr>
+          </tbody>
+        </table>
+        <p>高频对相邻位置更敏感，低频在更长范围内缓慢改变相位。一个二维平面的周期是 \(2\pi/\theta_j\)；在这个例子里，两个周期约为 6.28 和 628.32 个位置。多频率共同提供多尺度描述，模型通过 Q/K 的内容分量学习如何使用它们。</p>
+        <div class="callout"><strong>10000 是频率设计的超参数。</strong>相对位置恒等式对任何固定且 Q/K 一致的频率组都成立。几何级数频率提供多尺度结构，但这个具体底数不是由恒等式唯一推出来的。</div>
+
+        <h2 id="decay">四、「远程衰减」不能理解成距离越远分数越小</h2>
+        <h3>4.1 相位抵消提供趋势，内容决定实际分数</h3>
+        <p>上一张表已经给出反例：距离从 3 增至 6，分数反而大幅回升。单个频率是周期函数；有限个周期分量叠加，也不可能保证所有 query/key 的分数都随距离单调下降。</p>
+        <p>把每一组的内容系数写开，令 \(\Delta=n-m\)，有：</p>
+        <div class="math-block">\[
+          S(\Delta)=\sum_j\left[A_j\cos(\Delta\theta_j)+B_j\sin(\Delta\theta_j)\right],
+        \]</div>
+        <div class="math-block">\[
+          A_j=q_{2j}k_{2j}+q_{2j+1}k_{2j+1},\qquad
+          B_j=q_{2j+1}k_{2j}-q_{2j}k_{2j+1}.
+        \]</div>
+        <p>距离改变的是相位；内容改变的是每个频率的系数。不同频率随距离增长会出现相位错开与抵消，这为远近关系提供一种偏置，但不能替代模型学到的语义匹配。</p>
+
+        <h3>4.2 原论文的衰减图究竟画了什么</h3>
+        <p>原论文 §3.4.3 使用 Abel 变换，把复数系数加权和的绝对值上界与频率部分和联系起来。设 \(D=d/2\)、\(h_j=\overline{z_{q,j}}z_{k,j}\)，并补上 \(h_D=0\)。定义 \(P_r(\Delta)=\sum_{j=0}^{r-1}e^{i\Delta\theta_j}\)，则：</p>
+        <div class="math-block">\[
+          \left|\sum_{j=0}^{D-1}h_je^{i\Delta\theta_j}\right|
+          \le\max_{0\le j&lt;D}|h_{j+1}-h_j|
+          \sum_{r=1}^{D}|P_r(\Delta)|.
+        \]</div>
+        <p>Figure 2 展示的是这个推导中与频率有关的平均部分和模长 \(D^{-1}\sum_r|P_r(\Delta)|\) 的数值趋势。它不是某个模型的 attention 权重曲线，也不是任意内容向量都严格单调衰减的证明；内容系数的变化幅度仍然出现在上界中。</p>
+        <figure class="diagram-figure">
+          <a href="https://arxiv.org/html/2104.09864v5/long-term-decay.svg" target="_blank" rel="noopener noreferrer"><img src="https://arxiv.org/html/2104.09864v5/long-term-decay.svg" width="495" height="257" alt="RoFormer 原论文 Figure 2：不同维度下，频率部分和的平均模长随相对距离变化的曲线" loading="lazy" decoding="async" /></a>
+          <figcaption>Figure 2 · 频率组合呈现带振荡的衰减趋势；实际 attention 还取决于内容、掩码与 softmax。</figcaption>
+          <span class="fig-source">原图：Su et al., <a href="https://arxiv.org/html/2104.09864v5#S3.F2" target="_blank" rel="noopener noreferrer">RoFormer（v5），Figure 2</a> · 原样引用 · <a href="https://creativecommons.org/licenses/by-nc-nd/4.0/" target="_blank" rel="noopener noreferrer">CC BY-NC-ND 4.0</a></span>
+        </figure>
+        <aside class="aside-card"><strong>分清三个对象。</strong>旋转后的点积是匹配分数；原论文画的是分析上界中的频率量；softmax 输出才是归一化后的注意力权重。分数可能为负，权重还取决于同一行其他 key 的竞争。</aside>
+
+        <h2 id="implementation">五、PyTorch 实现：公式如何落到 Tensor</h2>
+        <h3>5.1 只需要逐元素乘法，不需要构造大矩阵</h3>
+        <p>对一对通道 \((a,b)\)，旋转结果是 \((a\cos\alpha-b\sin\alpha,\ a\sin\alpha+b\cos\alpha)\)。因此只需保存 sin/cos 并逐对计算，额外计算量随 token 数和通道数线性增长。</p>
+        <p>下面使用相邻通道配对，输入形状为 <code>[batch, heads, seq, dim]</code>，位置为 <code>[batch, seq]</code>。该函数分别用于 Q 与 K，因此二者的 head 数可以不同，能够容纳 GQA。这里实现全维、固定频率的基础版本。</p>
+        <pre><code class="language-python">import torch
+
+def apply_rope(x, position_ids, base=10000.0):
+    # x: [B, H, T, D], position_ids: [B, T]
+    batch, _, seq, dim = x.shape
+    if dim % 2:
+        raise ValueError("RoPE requires an even rotary dimension")
+    if position_ids.shape != (batch, seq):
+        raise ValueError("position_ids must have shape [B, T]")
+
+    # Keep phase computation in FP32 even under mixed precision.
+    with torch.autocast(device_type=x.device.type, enabled=False):
+        inv_freq = base ** (
+            -torch.arange(0, dim, 2, device=x.device,
+                          dtype=torch.float32) / dim
+        )
+        positions = position_ids.to(device=x.device, dtype=torch.float32)
+        angles = positions[..., None] * inv_freq  # [B, T, D/2]
+        cos = angles.cos()[:, None, :, :]         # [B, 1, T, D/2]
+        sin = angles.sin()[:, None, :, :]
+        even = x[..., 0::2].float()
+        odd = x[..., 1::2].float()
+        rotated = torch.stack(
+            (even * cos - odd * sin, even * sin + odd * cos),
+            dim=-1,
+        ).flatten(-2)
+    return rotated.to(x.dtype)
+
+# Q/K projection and head reshape have already happened.
+# q_rot = apply_rope(q, position_ids)
+# k_rot = apply_rope(k, position_ids)
+# Pass q_rot, k_rot and v to the attention kernel.</code></pre>
+        <p>这里有意用 FP32 算角度和三角函数，再转回输入类型。低精度位置乘法在较长序列上容易丢失相位精度。生产实现通常复用频率表、预计算或缓存 sin/cos，并融合旋转与 cache 写入，避免中间 Tensor 带来的开销。</p>
+
+        <h3>5.2 相邻配对与前后半维配对</h3>
+        <p>阅读模型源码时，常会碰到 <code>rotate_half</code>：把前半维与后半维配对，而不是把相邻两维配对。</p>
+        <table class="decision-table">
+          <thead><tr><th>布局（d = 8）</th><th>配对</th><th>频率展开</th></tr></thead>
+          <tbody>
+            <tr><td>相邻配对</td><td>(0,1), (2,3), (4,5), (6,7)</td><td>每个频率连续重复两次</td></tr>
+            <tr><td>前后半维配对</td><td>(0,4), (1,5), (2,6), (3,7)</td><td>整组频率复制两份</td></tr>
+          </tbody>
+        </table>
+        <p>这两种布局可通过一致的通道置换联系起来，但对于一个固定 checkpoint，不能只换旋转代码。Q/K 投影输出的通道次序、频率展开与旋转实现必须一起对应；否则公式看似一样，实际匹配的坐标已经变了。</p>
+        <aside class="aside-card"><strong>V 通常不旋转。</strong>标准 LLM RoPE 用 Q/K 的相对旋转改变「从哪里读」，V 提供被读取的内容。旋转 V 是另一种模型设计，不是得到相对位置点积的必要步骤。RoPE 也不负责实现因果掩码。</aside>
+
+        <h3>5.3 KV cache：位置编号必须保持连续</h3>
+        <p>在通常缓存已旋转 K 的实现中，prefill 先为位置 0 到 \(T-1\) 生成旋转后的 key，随后写入 cache。decode 的新 token 使用位置 \(T\) 旋转自己的 Q/K，再与历史 K 比较。历史 K 不需要每一步重新旋转。</p>
+        <p>如果 decode 每次把新 token 的位置重置为 0，它与历史 key 的相对角度就错了。左侧 padding、分块 prefill、滑动窗口以及前缀复用都需要区分「缓存中的物理槽位」与「模型的位置编号」。在固定频率下，若要整体变更位置原点，也必须对 Q/K 保持一致，不能只改新 query。</p>
+        <div class="callout"><strong>RoPE 与 KV 压缩是不同层面的问题。</strong>GQA 改变 KV head 的共享方式，RoPE 改变 Q/K 的位置几何；MLA 则还需要处理位置相关旋转对投影吸收的影响。可以继续阅读本站的<a href="attention-mechanism-evolution-mha-mqa-gqa-mla.html">MHA → MQA → GQA → MLA</a>，把位置编码接回缓存结构。</div>
+
+        <h2 id="context">六、能计算更大的位置，不等于能理解更长的文本</h2>
+        <h3>6.1 数学定义没有查表上限，训练分布仍有边界</h3>
+        <p>学习式绝对位置表若只有有限行，超出范围就没有对应参数。RoPE 的 sin/cos 可以在更大的位置求值，从形式上避开了这一限制。然而，模型是在有限距离、有限相位组合和有限长度的注意力竞争中训练的；序列变长后，这些分布都会变化。</p>
+        <p>尤其是训练窗口里变化很慢的低频通道，可能从未走过完整周期。把位置直接拉长，就可能让模型遇到未学习过的角度区间。高频虽然见过周期，也会在更远距离重复相位，单个通道不足以区分全部距离。多频率缓解了歧义，却没有给出任意长度泛化的保证。</p>
+
+        <h3>6.2 插值与改底数，分别改变什么</h3>
+        <p>最容易理解的位置插值（Position Interpolation）把目标位置压回较短的坐标范围。若扩展倍率为 \(s\)，采用：</p>
+        <div class="math-block">\[
+          m'=m/s,\qquad \alpha_j(m)=m\theta_j/s.
+        \]</div>
+        <p>新窗口里的最大角度被压低，但相邻 token 的角度差也从 \(\theta_j\) 变为 \(\theta_j/s\)。因此它在扩大覆盖范围的同时改变了局部距离分辨率，通常需要相应微调与任务评估。</p>
+        <table class="decision-table">
+          <thead><tr><th>策略</th><th>位置相位如何变化</th><th>要验证的代价</th></tr></thead>
+          <tbody>
+            <tr><td>直接外推</td><td>继续使用原位置与原频率</td><td>未见过的相位组合与长距离分布</td></tr>
+            <tr><td>位置插值</td><td>所有频率统一缩小为原来的 1/s</td><td>短距离分辨率改变，通常需要微调</td></tr>
+            <tr><td>增大 RoPE base</td><td>除第 0 组外，各组频率按不同幅度降低</td><td>频谱改变，需要匹配训练与模型配置</td></tr>
+            <tr><td>YaRN 等扩展方法</td><td>按频段调整，并结合注意力缩放等设计</td><td>不能只替换一个常数就假定复现论文效果</td></tr>
+          </tbody>
+        </table>
+        <p>增大底数与统一插值不是一回事：\(\theta_0=b^0=1\) 始终不变，而后面的频率才随底数变化。固定频率重标定仍保留相对旋转恒等式；如果服务过程中动态改变频率，还要保证缓存中的旧 K 与新 Q 使用兼容的频率体系。</p>
+        <aside class="aside-card"><strong>上下文窗口是一项端到端能力。</strong>除了位置相位，还要检查长文本检索与推理质量、训练长度覆盖、KV 容量和注意力计算成本。RoPE 本身不会把标准 attention 的二次计算量变成线性；<a href="../inference/flash-attention-deep-dive.html">FlashAttention</a>解决的是另一层面的 IO 与中间存储问题。</aside>
+
+        <div class="essay-ending">RoPE 把每个 token 的绝对位置变成旋转角度，再利用点积中的逆旋转，把两个角度化成相对位移。二维旋转解释了相对位置，多频率解释了尺度，缓存对齐解释了工程约束。真正值得记住的是这条推导链：位置的差值结构 → 旋转的复合规律 → Q/K 的相对匹配；而远程衰减与长度外推，都必须在这条恒等式之外继续讨论内容与训练分布。</div>
+
+        <section class="references-section" aria-label="参考与扩展阅读">
+          <h2>参考与扩展阅读</h2>
+          <ol class="reference-list">
+            <li><a href="https://kexue.fm/archives/8265" target="_blank" rel="noopener noreferrer">苏剑林，科学空间：Transformer 升级之路：2、博采众长的旋转式位置编码</a><span>RoPE 的中文原始介绍，适合沿着绝对位置与相对位置的联系继续阅读。</span></li>
+            <li><a href="https://arxiv.org/abs/2104.09864" target="_blank" rel="noopener noreferrer">Su et al., RoFormer: Enhanced Transformer with Rotary Position Embedding</a><span>本文公式与两张原图的主要依据；§3.2 给出旋转形式，§3.4 展开实现与衰减分析。</span></li>
+            <li><a href="https://github.com/ZhuiyiTechnology/roformer" target="_blank" rel="noopener noreferrer">ZhuiyiTechnology / roformer</a><span>作者团队开源实现，可对照论文理解旋转位置编码。</span></li>
+            <li><a href="https://arxiv.org/abs/2306.15595" target="_blank" rel="noopener noreferrer">Chen et al., Extending Context Window of Large Language Models via Positional Interpolation</a><span>位置插值的动机、微调方法与长上下文实验。</span></li>
+            <li><a href="https://arxiv.org/abs/2309.00071" target="_blank" rel="noopener noreferrer">Peng et al., YaRN: Efficient Context Window Extension of Large Language Models</a><span>进一步讨论不同频段的扩展与注意力缩放。</span></li>
+            <li><a href="https://zhuanlan.zhihu.com/p/647109286" target="_blank" rel="noopener noreferrer">知乎参考文章（读者提供）</a><span>延伸阅读入口；本次撰写时页面访问受限，技术论证与图片来源以可核验的原论文为准。</span></li>
+            <li><a href="pytorch-api-foundations.html">PyTorch 基础 API：从 Tensor 到大模型训练与推理</a><span>补充本文代码涉及的 Tensor 形状、广播、dtype 与混合精度基础。</span></li>
+          </ol>
+        </section>
+      </section>
+      <section class="comments-section" id="comments" aria-label="Discussion">
+        <div class="comments-header"><h2>Discussion</h2></div>
+        <div id="utterances-container" class="utterances-container"></div>
+        <noscript>请启用 JavaScript 后查看评论区。</noscript>
+      </section>
+    </article>
+  </main>
+  <script src="../../app.js?v=44"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" crossorigin="anonymous"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js" crossorigin="anonymous" onload="renderMathInElement(document.body,{delimiters:[{left:'\\[',right:'\\]',display:true},{left:'\\(',right:'\\)',display:false}]});"></script>
+</body>
+</html>
