@@ -1,0 +1,834 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="night">
+<head>
+  <meta charset="UTF-8" />
+  <script>
+    (function () {
+      try {
+        var saved = localStorage.getItem("yichuan-theme");
+        var theme = saved || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "night" : "day");
+        document.documentElement.setAttribute("data-theme", theme);
+      } catch (e) {}
+    })();
+  </script>
+  <style>
+    html { font-size: 16px; }
+    @media (min-width: 1024px) { html { font-size: 26px; } }
+    @media (min-width: 1200px) { html { font-size: 34px; } }
+    html, body { margin: 0; min-height: 100%; }
+    html[data-theme="night"], html[data-theme="night"] body { background: #0c0c0c; color: #ededed; color-scheme: dark; }
+    html[data-theme="day"], html[data-theme="day"] body { background: #ffffff; color: #1a1a1a; color-scheme: light; }
+  </style>
+  <link rel="stylesheet" href="../../styles.css?v=70" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous" />
+  <title>大模型部署的容器与 Kubernetes：算法工程师必须知道的部分</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="description" content="从算法工程师视角讲部署与调优真正用得上的容器知识：namespace 视图、cgroup 的 CPU/内存账本、/dev/shm、PID 1 与优雅退出、Pod 共享、探针与发布、权重路径与分发 CR，末尾附症状对照表。" />
+</head>
+<body>
+  <div class="ambient" aria-hidden="true"><span class="orb orb-a"></span><span class="orb orb-b"></span></div>
+  <canvas id="star-canvas"></canvas>
+
+  <header class="site-header">
+    <div class="header-inner">
+      <a href="../../index.html" class="logo">
+        <span class="logo-dot"></span>
+        <span class="logo-text">MOFANG</span>
+      </a>
+      <div class="header-actions">
+        <nav class="site-nav">
+          <a href="../../index.html">← Back</a>
+        </nav>
+        <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle theme">
+          <span class="icon-sun">☀️</span>
+          <span class="icon-moon">🌙</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="site-main">
+    <article class="post-page">
+      <header class="post-page-header">
+        <p class="post-page-category">Basic Knowledge</p>
+        <h1 class="post-page-title">大模型部署的容器与 Kubernetes：算法工程师必须知道的部分</h1>
+        <p class="post-lead">
+          部署失败很少来自模型代码，而来自容器给的资源边界与调度器假设之间的缝隙：
+          CPU 被配额节流、内存账本把 page cache 也算进去、<code>/dev/shm</code> 只有 64MB、发布窗口里新实例还没加载完权重。
+          本文只讲会直接改变推理延迟、吞吐与稳定性的那部分容器与编排机制，以及对应症状该看的指标、该改的参数；
+          Ascend 的设备链路与多机 RDMA 单独成节，它们是「能部署」与「能调优」的分界。
+        </p>
+        <div class="post-page-keywords" aria-label="Keywords">
+          <a class="post-keyword-chip" href="../../index.html?keyword=kubernetes">容器与 K8s</a>
+          <a class="post-keyword-chip" href="../../index.html?keyword=inference-systems">推理框架</a>
+        </div>
+        <p class="post-page-meta" data-date="2026-11-03" data-author="MOFANG" data-minutes="20">2026年11月3日 · MOFANG</p>
+      </header>
+
+      <section class="post-page-content">
+        <p>
+          文章假设读者能写 YAML、能跑 <code>kubectl</code>，缺的是字段背后的机制，因此不按 K8s 教程的对象顺序讲，
+          而按一个请求从进容器到出 token 要过的几本资源账组织：容器边界、CPU 账本、内存账本、Pod 共享、网络、
+          调度与发布、权重存储、平台层；Ascend 设备链路与多机 RDMA 各成一节。
+          读完应当能判断一段性能问题落在哪本账上，以及要改哪个字段、看哪个指标。
+        </p>
+
+        <p>
+          容器知识本身有边界。下面这张表是本文的取舍依据：「必须」之外的内容在线上排障时用不到，读了也不形成判断。
+        </p>
+
+        <table class="decision-table">
+          <thead>
+            <tr>
+              <th>层级</th>
+              <th>内容</th>
+              <th>为什么在这个位置</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>必须</td>
+              <td>cgroup 的 CPU/内存账本、page cache 记账、<code>/dev/shm</code>、PID 1 与信号、端口与 sysctl、镜像只读层、ulimit</td>
+              <td>直接决定 OOM、节流、启动失败与流被截断，踩到就是线上事故</td>
+            </tr>
+            <tr>
+              <td>需要</td>
+              <td><code>pids.max</code> / <code>io.max</code>、cpuset 与 NUMA、conntrack、设备插件链路、RDMA 与 memlock</td>
+              <td>用来区分「资源不够」与「配置错」，缺了会误判方向</td>
+            </tr>
+            <tr>
+              <td>略过</td>
+              <td>capabilities / seccomp 细项、user namespace、cgroup v1 兼容、CRI 实现差异</td>
+              <td>平台已兜底，知道名字即可，不进入日常判断</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h2>一、容器边界：三个内核对象决定你看到什么、能用多少</h2>
+
+        <p>
+          容器没有自己的内核。它让一组进程看到一套新的文件系统与网络，同时给这组进程记一本资源账。
+          这件事由三个互相独立的内核对象完成，混在一起记就会永远分不清「看不到」和「不够用」：
+        </p>
+
+        <table class="decision-table">
+          <thead>
+            <tr>
+              <th>对象</th>
+              <th>决定</th>
+              <th>部署时的具体后果</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>namespace</td>
+              <td>进程「看得见什么」：挂载点、网卡与端口、进程号、主机名、IPC</td>
+              <td>权重路径在容器里不存在；同 Pod 端口冲突；sysctl 只对 Pod 生效</td>
+            </tr>
+            <tr>
+              <td>cgroup</td>
+              <td>进程「能用多少」：CPU 时间、内存、PID 数、IO</td>
+              <td>CPU 被节流、内存被 OOMKill、线程数开得比配额大</td>
+            </tr>
+            <tr>
+              <td>device cgroup + capabilities</td>
+              <td>进程「能碰什么设备、有哪些特权」</td>
+              <td>看不到 <code>/dev/davinci*</code>；默认丢掉特权后需要显式声明的能力</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <p>
+          先看 namespace，因为「看不到」最容易被误判成「文件丢了」。
+          <code>mnt</code> 决定根文件系统与挂载点，只读挂载除了防误写，还能让多个容器共享同一份 page cache；
+          <code>net</code> 不只是隔离网卡，<strong>内核网络参数也是 per-netns 的</strong>——
+          <code>somaxconn</code>、<code>tcp_max_syn_backlog</code>、<code>tcp_tw_reuse</code> 都跟着 Pod 走。
+          高并发短连接下 SYN 队列溢出，表现为「服务端 CPU 不高、客户端连不上」，在宿主上改 sysctl 却不见效。
+          <code>pid</code> 决定你在容器里看不到宿主进程，也决定谁负责回收孤儿进程——这个下面还会踩一次。
+        </p>
+
+        <p>
+          再看镜像。镜像是只读层叠，容器在最上面加一个可写层；读命中下层，写只在最上层留脏页（copy-on-write）。
+          两个直接结论：<strong>同镜像的多个副本在节点上共享只读层</strong>，
+          所以 8 个引擎容器不会各自把 Python 解释器和 <code>.so</code> 读进内存一份；
+          而<strong>写日志到容器层会同时造成层膨胀和 IO 放大</strong>；日志走 stdout 或挂载目录可以避开这两者。
+          镜像体积本身也是启动时间的一部分：20GB 镜像首次拉取受节点带宽限制，滚动更新时这段时间会被计算进「启动」，不是「加载」。
+        </p>
+
+        <aside class="aside-card">
+          <strong>统计口径。</strong>
+          判断容器内存时看 cgroup 的 <code>memory.current</code> 与 <code>memory.stat</code>，
+          统计口径以 cgroup 的 <code>memory.current</code> 为准：页缓存按 cgroup 记账，<code>ps</code> 的 RSS 只反映匿名页。
+          同一个权重文件被多个容器 <code>mmap</code>，节点上只有一份物理页，但各自的账本里都可能计入，
+          用 RSS 相加会得出「内存早就爆了」的错误结论。</aside>
+
+        <h2>二、CPU 账本：配额、节流与线程数</h2>
+
+        <p>
+          CPU 配额在 cgroup v2 里就是一行 <code>cpu.max</code>：<code>quota period</code>。
+          <code>limits.cpu: 1.6</code> 换算成 <code>160000 100000</code>，意思是每个 100ms 周期最多用 160ms 的 CPU 时间。
+          超出不会报错，只会<strong>被推迟到下一个周期</strong>——这就是「平均 CPU 不高，但 P99 周期性抖动」的机制来源：
+          抖动的周期就是配额周期，通常是 100ms。
+        </p>
+
+        <p>
+          验证不需要特殊工具，容器里直接读账本：
+        </p>
+
+        <pre><code>cat /sys/fs/cgroup/cpu.max          # quota period，例如 160000 100000
+cat /sys/fs/cgroup/cpu.stat         # nr_throttled / throttled_usec 是累计节流次数与时长
+cat /sys/fs/cgroup/cpu.pressure     # 有 PSI 时可以直接看 CPU 争抢</code></pre>
+
+        <aside class="aside-card">
+          <strong>路径不同不代表机制不同。</strong>
+          cgroup v2 的账本集中在 <code>/sys/fs/cgroup/</code>（<code>cpu.max</code>、<code>memory.max</code>）；
+          v1 按子系统分目录（<code>/sys/fs/cgroup/cpu/</code>、<code>/sys/fs/cgroup/memory/</code>）。
+          K8s 1.25 之后默认 v2，但在老集群里 exec 进去找不到文件时，先确认版本，再怀疑命令。</aside>
+
+        <p>
+          <code>nr_throttled</code> 持续增长而 <code>throttled_usec</code> 占比不低，说明配额就是瓶颈，加并发没有意义。
+          此时有两条路：提高配额，或者<strong>只设 requests 不设 CPU limit</strong>。
+          后者不节流，但会和其他 Pod 抢；在专用推理节点上，这通常比被硬限流更划算。
+        </p>
+
+        <p>
+          配额和亲和是两件事，经常被混为一谈。<code>cpu.max</code> 只限总量，
+          <code>cpuset</code> 才决定实际跑在哪些核上。绑核之所以对推理有意义，是因为跨 NUMA 访问内存带宽会掉，
+          而 NPU 的 PCIe 传输、网卡中断也有 NUMA 归属；同一张卡上的请求如果跨 NUMA，拷贝延迟会比预期高。
+          排查这类问题看的是节点拓扑与 <code>lscpu</code>，不是配额。
+        </p>
+
+        <p>
+          线程数是算法侧最常出错的地方，因为它由<strong>框架而不是你</strong>决定。
+          Python 的 <code>os.cpu_count()</code> 返回宿主核数，<code>len(os.sched_getaffinity(0))</code>
+          才是当前进程可用的核；OpenMP、MKL、部分 tokenizer 实现默认按前者建线程池。
+          在「限了 16 核、宿主 160 核」的容器里，这会开出十几倍于配额的线程，结果不是更快，而是上下文切换与节流叠加。
+          部署时显式设置 <code>OMP_NUM_THREADS</code>、<code>MKL_NUM_THREADS</code>，
+          并把 tokenizer 的并行度单独当作一个参数来调，而不是交给默认值。
+        </p>
+
+        <table class="decision-table">
+          <thead>
+            <tr>
+              <th>字段</th>
+              <th>机制</th>
+              <th>调法</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>requests.cpu</code></td>
+              <td>调度依据：节点剩余可分配 CPU 够不够</td>
+              <td>按稳态负载给，别按峰值；GPU 节点上 CPU 常是瓶颈</td>
+            </tr>
+            <tr>
+              <td><code>limits.cpu</code></td>
+              <td>运行期 CFS 配额，超出即节流</td>
+              <td>延迟敏感服务建议不设或给足，避免 100ms 级抖动</td>
+            </tr>
+            <tr>
+              <td><code>cpuset</code> / affinity</td>
+              <td>决定跑哪些核，影响 NUMA 与缓存</td>
+              <td>大 EP 实例按 NUMA 绑核，与 NPU 同一侧</td>
+            </tr>
+            <tr>
+              <td>OMP 线程数</td>
+              <td>数值库默认按宿主核数建池</td>
+              <td>显式赋值，通常等于 cpuset 核数或更小</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <p>
+          CPU 之外还有三条限制会直接出现在推理里。<code>pids.max</code> 限制容器内进程数，
+          dataloader 或多进程 worker 起不来时报 <code>Resource temporarily unavailable</code>；
+          <code>io.max</code> 按字节率与 IOPS 限盘，权重加载会被静默限速；
+          <code>ulimit -l</code>（memlock，属于 rlimit 而不是 cgroup）决定能锁多少页，
+          RDMA 与共享内存注册都要锁页，太小会让 HCCL/NCCL 初始化直接失败。
+          这三处分别对应「起不来」「加载慢」「通信初始化失败」三类现象。
+        </p>
+
+        <h2>三、内存账本：limit、page cache 与 /dev/shm</h2>
+
+        <p>
+          <code>memory.max</code> 是硬上限，超了触发 cgroup OOM killer，进程以 137 退出；
+          K8s 里看到的就是 <code>OOMKilled</code>。关键在于<strong>这个账本包含 page cache</strong>，
+          不只是进程的匿名内存。大模型部署几乎必然踩到这一点。
+        </p>
+
+        <p>
+          safetensors 通常以 <code>mmap</code> 方式读取，权重文件页会进入 page cache 并记到容器账上。
+          当 <code>memory.max</code> 小于「权重工作集 + 运行时堆 + 通信缓冲」时，内核会先回收 page cache；
+          下一次读同一个 tensor 又要回磁盘。于是出现一个很反直觉的现象：
+          <strong>加载越来越慢、GPU 长时间空转，但机器整体内存看起来还充足</strong>。
+          判断方法还是读账本：
+        </p>
+
+        <pre><code>cat /sys/fs/cgroup/memory.current     # 当前已用（含 file cache）
+cat /sys/fs/cgroup/memory.stat        # anon / file / slab 的拆分
+cat /sys/fs/cgroup/memory.events      # oom / oom_kill 计数
+cat /sys/fs/cgroup/memory.peak        # 峰值，排查"偶发 OOM"最有用</code></pre>
+
+        <p>
+          <code>memory.stat</code> 里 <code>file</code> 占比高、<code>memory.events</code> 里 <code>oom_kill</code> 增长，
+          基本就是「limit 设得太紧，把权重缓存挤掉了」。
+          实践上有三种处理：给 limit 留出 page cache 余量；把权重放本地盘并让多副本共享同一目录；
+          或者干脆不设内存 limit（只靠节点规格隔离），但要接受故障时影响面更大。
+        </p>
+
+        <p>
+          还有一个固定 64MB 的坑：<code>/dev/shm</code> 是 tmpfs，按内存记账，而 Docker 默认只给 64MB。
+          多进程推理、共享内存张量、部分 dataloader 会在 batch 变大时直接崩，报 <code>Bus error</code>
+          或 <code>No space left on device</code>。K8s 的写法是用内存型 <code>emptyDir</code> 覆盖它：
+        </p>
+
+        <pre><code>volumes:
+  - name: dshm
+    emptyDir:
+      medium: Memory
+      sizeLimit: 8Gi
+volumeMounts:
+  - name: dshm
+    mountPath: /dev/shm</code></pre>
+
+        <p>
+          <code>sizeLimit</code> 计入容器内存账本，所以它和 <code>memory.max</code> 是同一个池子：
+          把 shm 调到 8Gi，就要在 limit 里预留这 8Gi，否则 OOM 会来得更早。
+          大页（2MB/1GB）是另一条线：它对 KV cache、通信缓冲区确实有收益，但需要节点预留，
+          属于「确定性优化项」，不是部署必需。
+        </p>
+
+        <figure class="diagram-figure">
+          <svg viewBox="0 0 840 300" role="img" aria-label="容器的三本账：视图、CPU 配额、内存账本">
+            <defs>
+              <marker id="arrow-a" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+                <polygon points="0 0, 8 3, 0 6" class="d-accent-blue" />
+              </marker>
+            </defs>
+            <rect x="24" y="40" width="230" height="220" rx="12" class="d-zone-blue" />
+            <text x="44" y="66" class="d-tag-blue">VIEW · namespace</text>
+            <text x="44" y="104" class="d-label">mnt</text>
+            <text x="44" y="126" class="d-muted">权重路径在不在</text>
+            <text x="44" y="160" class="d-label">net</text>
+            <text x="44" y="182" class="d-muted">端口与 sysctl</text>
+            <text x="44" y="216" class="d-label">pid</text>
+            <text x="44" y="238" class="d-muted">谁收孤儿进程</text>
+
+            <line x1="254" y1="150" x2="292" y2="150" class="d-arrow-blue" marker-end="url(#arrow-a)" />
+
+            <rect x="296" y="40" width="250" height="220" rx="12" class="d-zone-orange" />
+            <text x="316" y="66" class="d-tag-orange">QUOTA · cgroup</text>
+            <text x="316" y="104" class="d-label">cpu.max</text>
+            <text x="316" y="126" class="d-muted">quota / period，超了推迟</text>
+            <text x="316" y="160" class="d-label">memory.max</text>
+            <text x="316" y="182" class="d-muted">含 page cache 与 shm</text>
+            <text x="316" y="216" class="d-label">pids.max</text>
+            <text x="316" y="238" class="d-muted">进程数上限</text>
+
+            <line x1="546" y1="150" x2="584" y2="150" class="d-arrow-blue" marker-end="url(#arrow-a)" />
+
+            <rect x="588" y="40" width="228" height="220" rx="12" class="d-zone-purple" />
+            <text x="608" y="66" class="d-tag-purple">HOST · 共享</text>
+            <text x="608" y="104" class="d-label">内核</text>
+            <text x="608" y="126" class="d-muted">只有一份</text>
+            <text x="608" y="160" class="d-label">页缓存</text>
+            <text x="608" y="182" class="d-muted">节点级，多副本共享</text>
+            <text x="608" y="216" class="d-label">设备</text>
+            <text x="608" y="238" class="d-muted">/dev/davinci*</text>
+          </svg>
+          <figcaption>
+            三本账互相独立：视图决定「有没有」，配额决定「够不够」，宿主决定「共享什么」；排障时先分清错在哪一本。
+          </figcaption>
+        </figure>
+
+        <h2>四、Pod：共享了什么，代价是什么</h2>
+
+        <p>
+          Pod 是最小调度单位，同 Pod 内共享网络命名空间、IPC 与卷，PID 默认不共享。
+          共享网络的直接后果是<strong>端口全局唯一</strong>：引擎占 1025，指标 sidecar 就不能再用 1025，
+          第二个容器启动时只会得到一句 <code>address already in use</code>，看起来像程序 bug。
+          共享 IPC 的后果是 <code>/dev/shm</code> 对同 Pod 的所有容器可见，
+          sidecar 也能看到引擎的共享内存段——排查内存问题时别只看主容器。
+        </p>
+
+        <p>
+          推理服务的两种打包方式，代价不同：
+          一容器（引擎）+ 指标/日志 sidecar，省机器但共享端口与内存账；
+          引擎独占 Pod，账目干净，适合大 EP 这类每卡都敏感的实例。
+          <code>hostNetwork</code> 能省掉一层 NAT 与 conntrack，降低小包延迟，但端口与节点冲突、
+          且 sysctl 变成节点级——收益只在收发热点路径上明显，默认不打开。
+        </p>
+
+        <h2>五、网络：请求怎么到达，什么时候会被掐断</h2>
+
+        <p>
+          Pod IP 会变，Service 给的是稳定虚拟 IP 加一组就绪端点。链路上真正影响推理的是三个点：
+          就绪判定、连接复用、超时链。
+        </p>
+
+        <p>
+          就绪判定决定了 Pod 在不在端点列表里。<code>readinessProbe</code> 失败只是把 Pod 从列表里摘掉，
+          不重启容器；<code>livenessProbe</code> 失败才会重启。把「端口在监听」当成就绪，
+          是发布期 5xx 的常见来源：进程还没加载完权重就已经在监听端口了。
+        </p>
+
+        <p>
+          连接与超时链的问题在流式输出上最明显：客户端 → 网关 → 协调器 → 引擎，每一跳都有自己的 idle timeout。
+          只要上游比下游先超时，长流就会在中间被切断，表现为「输出到一半停了」或「尾部缺 token」。
+          正确做法是<strong>超时时间沿链路单调递增</strong>，并让 keepalive 小于最上游的空闲阈值。
+          NodePort 这种暴露方式还要注意端口在集群内唯一：两套部署共存时撞号，流量会进错实例。
+        </p>
+
+        <p>
+          规模上来之后还有两笔网络成本：<code>conntrack</code> 表容量与转发规则数量。
+          在 kube-proxy 模式下，ClusterIP 靠 iptables/IPVS 规则转发，规则数随 Service 与端点数量增长，
+          建连时要查表，表现是「高并发下建连变慢」，而带宽和 CPU 都不像瓶颈；
+          NodePort 的 SNAT 还会为每条连接占一个 conntrack 条目，短连接一多表就满，满了直接丢新连接。
+        </p>
+
+        <figure class="diagram-figure">
+          <svg viewBox="0 0 840 260" role="img" aria-label="请求路径与就绪端点">
+            <defs>
+              <marker id="arrow-b" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+                <polygon points="0 0, 8 3, 0 6" class="d-accent-blue" />
+              </marker>
+            </defs>
+            <rect x="24" y="96" width="140" height="60" rx="10" class="d-box-blue" />
+            <text x="94" y="122" text-anchor="middle" class="d-label">客户端</text>
+            <text x="94" y="142" text-anchor="middle" class="d-muted">流式请求</text>
+
+            <line x1="164" y1="126" x2="212" y2="126" class="d-arrow-blue" marker-end="url(#arrow-b)" />
+
+            <rect x="216" y="86" width="170" height="80" rx="10" class="d-box-orange" />
+            <text x="301" y="112" text-anchor="middle" class="d-label">网关 / 协调器</text>
+            <text x="301" y="134" text-anchor="middle" class="d-muted">idle timeout</text>
+            <text x="301" y="152" text-anchor="middle" class="d-muted">keepalive</text>
+
+            <line x1="386" y1="126" x2="434" y2="126" class="d-arrow-blue" marker-end="url(#arrow-b)" />
+
+            <rect x="438" y="74" width="160" height="52" rx="8" class="d-box-purple" />
+            <text x="518" y="98" text-anchor="middle" class="d-label">就绪 Pod</text>
+            <text x="518" y="116" text-anchor="middle" class="d-muted">在 Endpoints 中</text>
+
+            <rect x="438" y="140" width="160" height="52" rx="8" class="d-zone-orange" />
+            <text x="518" y="164" text-anchor="middle" class="d-muted">未就绪 Pod</text>
+            <text x="518" y="182" text-anchor="middle" class="d-muted">摘流量，不重启</text>
+
+            <text x="668" y="106" class="d-muted">超时：下游 ≥ 上游</text>
+            <text x="668" y="130" class="d-muted">否则长流被切断</text>
+            <text x="668" y="154" class="d-muted">就绪：能出 token</text>
+            <text x="668" y="178" class="d-muted">而不是端口通</text>
+
+            <text x="420" y="228" text-anchor="middle" class="d-muted">首 token 的等待可能发生在排队、建连与预热，而不在算力</text>
+          </svg>
+          <figcaption>
+            三条独立的失败路径：就绪判定、连接复用、超时链；它们造成的现象都在「延迟」，但都不在 GPU 上。
+          </figcaption>
+        </figure>
+
+        <h2>六、调度与发布：Pod 被放到哪，什么时候接流量</h2>
+
+        <p>
+          调度器先按 <code>requests</code> 过滤节点，再打分选一个。所以 Pending 的第一层原因是资源账：
+          节点 <code>allocatable</code> 减去已分配，不够就直接出局，与实际空闲率无关。
+          第二层是约束：<code>nodeSelector</code> 标签写错、<code>taints</code> 没声明容忍、<code>affinity</code> 过窄，
+          都会让节点明明有空闲也不参与调度，Events 里只留一句「0/N nodes are available」。
+        </p>
+
+        <p>
+          推理的特殊性在于设备是不可压缩资源：申请一张就独占一张，资源名（如 <code>huawei.com/Ascend910</code>）
+          的 <code>requests</code> 必须等于 <code>limits</code>，数量只能是整数。
+          节点的可分配数来自设备插件——插件异常时卡还在机器上，但节点显示 0 张可分配，Pod 直接 Pending；
+          容器里能看到 <code>/dev/davinci*</code>、<code>/dev/davinci_manager</code>、<code>/dev/devmm_svm</code>，
+          才说明设备与容器运行时都注入成功。
+        </p>
+
+        <p>
+          还有一个只有大 EP 才会暴露的问题：一个实例要 8 个 Pod 同时通信，普通调度器逐个绑定，
+          可能出现「起了 7 个、第 8 个没卡」的半启动状态。Gang scheduling（成组调度，通常由 Volcano 这类调度器提供）
+          要求整组资源同时满足才一起绑定，代价是实现更重，收益是消除这一类死锁。
+        </p>
+
+        <p>
+          探针解决的是三个不同问题，混用会制造两类事故：
+          <code>startupProbe</code> 等启动完成（最长允许 <code>periodSeconds × failureThreshold</code>），
+          通过之前 <code>readiness</code> 与 <code>liveness</code> 都不生效；
+          <code>readiness</code> 判断能不能接流量；<code>liveness</code> 判断要不要重启。
+          加载 850GB 权重可能需要几十分钟，如果只配 <code>liveness</code>，容器会在加载中途被反复重启，
+          现象是「启动日志每次从头开始」——这几乎总是探针问题，不是加载脚本问题。
+        </p>
+
+        <p>
+          还要把 warmup 算进窗口：加载完成不等于可服务，图捕获（CUDA graph、图编译）与首次推理预热常在之后发生，
+          耗时从几十秒到几分钟。startup 的 <code>periodSeconds × failureThreshold</code> 要覆盖「加载 + 预热」，
+          否则容器会在就绪前被判成启动失败。
+        </p>
+
+        <p>
+          第二个容易漏的是优雅退出，它和流式响应直接冲突。收到 <code>SIGTERM</code> 后，
+          进程收到信号后停止接新请求、等在途请求结束再退出；<code>terminationGracePeriodSeconds</code>
+          必须大于最长请求时长，否则会被 <code>SIGKILL</code>，客户端看到的是流被截断。
+          还有一层：如果容器里的 PID 1 是不转发信号的 shell，<code>SIGTERM</code> 根本到不了子进程，
+          优雅退出等于没做。用 <code>exec</code> 形式启动，或加 <code>--init</code> / tini。
+        </p>
+
+        <p>
+          滚动更新还有一个 GPU 特有的约束：<code>maxUnavailable=0</code> 能保证容量，
+          但新副本需要一张空闲卡才能起来；<code>maxSurge</code> 给的余量在 CPU 服务里是「多几个 Pod」，
+          在推理里是「多几张卡」。没有余量时发布会停在中途，旧版本全在、新版本 Pending，
+          看起来像「发布失败」，实际是资源不足。
+        </p>
+
+        <figure class="diagram-figure">
+          <svg viewBox="0 0 840 250" role="img" aria-label="启动与退出的时间线">
+            <defs>
+              <marker id="arrow-c" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+                <polygon points="0 0, 8 3, 0 6" class="d-accent-blue" />
+              </marker>
+            </defs>
+            <line x1="60" y1="120" x2="770" y2="120" class="d-line" marker-end="url(#arrow-c)" />
+            <text x="60" y="150" class="d-muted">创建</text>
+            <text x="300" y="150" class="d-muted">加载权重</text>
+            <text x="520" y="150" class="d-muted">就绪</text>
+            <text x="700" y="150" class="d-muted">退出</text>
+
+            <rect x="60" y="76" width="230" height="30" rx="6" class="d-zone-blue" />
+            <text x="175" y="96" text-anchor="middle" class="d-muted">startupProbe 窗口</text>
+
+            <rect x="300" y="76" width="300" height="30" rx="6" class="d-zone-orange" />
+            <text x="450" y="96" text-anchor="middle" class="d-muted">readiness 为 false：不接流量</text>
+
+            <rect x="610" y="76" width="130" height="30" rx="6" class="d-zone-purple" />
+            <text x="675" y="96" text-anchor="middle" class="d-muted">grace 窗口</text>
+
+            <text x="420" y="200" text-anchor="middle" class="d-muted">startup 没过 → liveness 不生效，避免"加载中被杀"</text>
+            <text x="420" y="224" text-anchor="middle" class="d-muted">grace 太小 → 流式响应被 SIGKILL 截断</text>
+          </svg>
+          <figcaption>
+            三个窗口必须按顺序覆盖：加载窗口、就绪窗口、退出窗口；任何一个配短，故障都会伪装成别的问题。
+          </figcaption>
+        </figure>
+
+        <h2>七、存储：权重从哪来，决定启动时间与稳定性</h2>
+
+        <p>
+          权重进容器的路径只有三条，代价完全不同：
+          对象存储直接下载（首次慢、每次冷启动都慢，但节点无关）；
+          网络盘挂载（节点无关、吞吐受网络限制，随机读尤其差）；
+          本地盘 + 预分发（最快，但绑节点，需要额外的分发与清理流程）。
+          大 EP 部署几乎都走第三条，因为 850GB 量级下「每次从对象存储拉」的时间成本无法进入滚动发布的窗口。
+        </p>
+
+        <table class="decision-table">
+          <thead>
+            <tr>
+              <th>路径</th>
+              <th>首次加载</th>
+              <th>节点无关性</th>
+              <th>适用场景</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>对象存储直下</td>
+              <td>受带宽限制，可能几十分钟</td>
+              <td>是</td>
+              <td>小模型、测试环境、临时验证</td>
+            </tr>
+            <tr>
+              <td>网络盘 PVC</td>
+              <td>取决于网络与随机读性能</td>
+              <td>是</td>
+              <td>多节点共享、更新频繁的权重</td>
+            </tr>
+            <tr>
+              <td>本地盘 + 分发</td>
+              <td>最短，且可预热 page cache</td>
+              <td>否，绑节点</td>
+              <td>生产大模型、固定节点池</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <p>
+          本地盘的边界要写清楚：<code>local</code> 类型的 PV 必须配 <code>nodeAffinity</code>，
+          因为这块盘只在某一台机器上；<code>capacity</code> 只是绑定与调度的声明值，不会真的对目录做配额；
+          <code>Retain</code> 会保留数据，但 PV 会停在 <code>Released</code>，需要手工清掉 <code>claimRef</code> 才能复用。
+          把权重做成只读挂载，既能防止误写，也能让同节点的多个副本共享同一份 page cache。
+        </p>
+
+        <p>
+          分发本身适合做成 CR 而不是脚本：脚本执行完没有状态，失败只能靠退出码；
+          CR 把进度写进 <code>status</code>，可以按节点看 <code>TARGET</code>、<code>READY</code>、<code>FAILED</code>，
+          失败只影响单个节点，且天然可以重放。权重分发 CR 里的 <code>nodeSelector</code> 同时承担了「分发范围」与「调度约束」两个职责，
+          这也是它适合声明式管理的原因。
+        </p>
+
+        <h2>八、平台层：Helm、ArgoCD、CRD 的责任边界</h2>
+
+        <p>
+          读部署问题时，先分清差异发生在哪一层，比逐行看 YAML 有效：
+          <code>helm template</code> 是「模板 + values 的渲染结果」，
+          <code>helm get manifest</code> 是「发布时提交的那一份」，
+          <code>kubectl get -o yaml</code> 是「集群里当前的、可能被 webhook 改过的对象」。
+          三者对不上时，问题分别落在模板层、参数层、集群层。
+        </p>
+
+        <p>
+          CRD 只是把平台自己的领域语言接进 K8s：CRD 定义类型，CR 是实例，controller 负责把实例变成真实动作。
+          <code>kubectl get</code> 输出的那些 <code>PHASE</code>、<code>READY</code>、<code>FAILED</code> 列，
+          来自 CRD 的打印列声明，数据源是 <code>status</code>；所以「看起来像内置资源」不代表它是内置的。
+          排障时 <code>kubectl describe</code> 看 conditions，<code>kubectl explain</code> 看字段语义，
+          比翻文档快。
+        </p>
+
+        <h2>九、Ascend 设备链路：容器里的 /dev/davinci 从哪来</h2>
+
+        <p>
+          容器能看到几张卡，由四段链路决定；任何一段断掉，现象都不是「卡坏了」，而是「卡不见了」：
+          宿主驱动与固件 → device plugin 上报可分配数 → kubelet 分配设备并注入环境变量 → 容器运行时挂载设备节点与驱动目录。
+        </p>
+
+        <table class="decision-table">
+          <thead>
+            <tr>
+              <th>环节</th>
+              <th>正常表现</th>
+              <th>断掉时的现象</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>驱动 / 固件</td>
+              <td>宿主执行 <code>npu-smi info</code> 能看到卡与健康状态</td>
+              <td>节点被标记不可用，或卡报错；容器内任何工具都读不到设备</td>
+            </tr>
+            <tr>
+              <td>device plugin</td>
+              <td>节点 <code>allocatable</code> 中出现 <code>huawei.com/Ascend910</code></td>
+              <td>Pod Pending，Events 只有「0/N nodes are available」</td>
+            </tr>
+            <tr>
+              <td>kubelet 分配</td>
+              <td>Pod 内存在 <code>ASCEND_VISIBLE_DEVICES</code></td>
+              <td>声明了资源却没有可见性变量；多卡实例只看到一张</td>
+            </tr>
+            <tr>
+              <td>运行时注入</td>
+              <td><code>/dev/davinci*</code>、<code>/dev/davinci_manager</code>、<code>/dev/devmm_svm</code> 齐全</td>
+              <td><code>npu-smi</code> 报无设备；框架初始化时报找不到 device</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <p>
+          最容易误判的是后两段：显存访问、驱动库与设备节点是分开注入的。
+          只有 <code>/dev/davinci0</code> 而缺 <code>davinci_manager</code> 与 <code>devmm_svm</code>，说明运行时只挂了部分节点；
+          节点齐全但框架仍报错，多半是镜像里的 CANN 版本与宿主驱动不匹配，或 <code>LD_LIBRARY_PATH</code> 指向了错误的驱动目录。
+          判断顺序因此固定：宿主 <code>npu-smi</code> → 节点 allocatable → Pod 环境变量 → 容器内设备节点 → 框架初始化日志。
+        </p>
+
+        <p>
+          多卡可见性由 <code>ASCEND_VISIBLE_DEVICES</code> 收敛，PID 命名空间隔离并不会隐藏设备，
+          因此「容器里只看到一张卡」不能当作隔离生效的证据；真正起作用的是这个环境变量与设备 cgroup 的允许列表。
+        </p>
+
+        <h2>十、多机 RDMA：memlock、设备与 NUMA 亲和</h2>
+
+        <p>
+          单机多卡走 PCIe，多机大 EP 走 RDMA（RoCE 或 IB）。这一层的失败通常发生在容器边界而不是算法里，
+          集中在三处：设备没进容器、锁页额度不够、网络与拓扑不匹配。
+        </p>
+
+        <p>
+          <strong>锁页额度是第一处。</strong>RDMA 注册内存要把页锁定在物理内存（<code>ibv_reg_mr</code>），
+          而容器默认的 <code>ulimit -l</code> 常在几十 KB 到 64KB 量级，通信库在初始化阶段就会失败，
+          报错形如 <code>ibv_reg_mr failed</code> 或 <code>Failed to initialize HCCL</code>。
+          这类报错看起来像驱动或权限问题，实际是 rlimit；它不在 cgroup 里，调大内存 limit 不会解决，需要单独把 memlock 放开。
+        </p>
+
+        <p>
+          <strong>设备是第二处。</strong>容器需要看到 <code>/dev/infiniband/uverbs*</code> 与 rdma 设备，
+          常见做法是 hostNetwork 加 hostPath 挂载 <code>/dev/infiniband</code>，或由 RDMA device plugin 分配。
+          只给 hostNetwork 却没挂设备时，容器里能看到网卡但没有 verbs 设备，通信库会静默退化到 TCP——
+          不报错，带宽只剩一个数量级，这类配置错误往往到压测才暴露。
+        </p>
+
+        <p>
+          <strong>拓扑是第三处。</strong>NPU 与网卡挂在不同的 PCIe root 上时，跨 NUMA 的内存拷贝会吃掉带宽。
+          宿主侧用 <code>npu-smi info -t topo</code> 与 <code>lspci -tv</code> 可以确认相对位置；
+          容器侧则要求 cpuset、内存分配策略与设备分配落在同一个 NUMA 域，否则 CPU、卡、网卡分属不同侧，
+          调优参数会整体失效。
+        </p>
+
+        <h2>十一、症状对照：从现象回到机制</h2>
+
+        <p>
+          下面这张表是全文的压缩版。左边是你会看到的现象，中间是机制，右边是验证与调整——
+          顺序是固定的：先确认机制，再改参数。
+        </p>
+
+        <table class="decision-table">
+          <thead>
+            <tr>
+              <th>现象</th>
+              <th>机制</th>
+              <th>先看什么</th>
+              <th>调整方向</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>TTFT P99 周期性抖动</td>
+              <td>CPU 配额节流（100ms 周期）</td>
+              <td><code>cpu.stat</code> 的 <code>nr_throttled</code></td>
+              <td>去 CPU limit、给足配额、绑核</td>
+            </tr>
+            <tr>
+              <td>加载慢、GPU 空转</td>
+              <td>page cache 被回收，重复读盘</td>
+              <td><code>memory.stat</code> 的 file、iostat</td>
+              <td>本地盘、提高 limit、只读共享挂载</td>
+            </tr>
+            <tr>
+              <td>OOMKilled 但显存没满</td>
+              <td>内存账本含 page cache 与 shm</td>
+              <td><code>memory.current</code>、<code>memory.peak</code></td>
+              <td>按工作集留余量，或只设 requests</td>
+            </tr>
+            <tr>
+              <td>大 batch 崩溃</td>
+              <td><code>/dev/shm</code> 只有 64MB</td>
+              <td><code>df -h /dev/shm</code></td>
+              <td>内存型 emptyDir，并计入 limit</td>
+            </tr>
+            <tr>
+              <td>发布期 502</td>
+              <td>readiness 过早通过、优雅退出缺失</td>
+              <td>Endpoints、退出日志</td>
+              <td>就绪查「能出 token」，加 preStop 与 grace</td>
+            </tr>
+            <tr>
+              <td>流式输出被截断</td>
+              <td>超时链不单调、grace 小于请求时长</td>
+              <td>各跳 idle timeout 配置</td>
+              <td>下游超时 ≥ 上游，grace 覆盖最长请求</td>
+            </tr>
+            <tr>
+              <td>容器里没有 NPU</td>
+              <td>设备未注入 / 资源未声明</td>
+              <td><code>ls /dev/davinci*</code>、节点 allocatable</td>
+              <td>设备插件、<code>huawei.com/Ascend910</code> 声明</td>
+            </tr>
+            <tr>
+              <td>通信初始化失败</td>
+              <td>memlock 不足或 RDMA 设备未注入</td>
+              <td><code>ulimit -l</code>、<code>/dev/infiniband</code></td>
+              <td>放开 memlock、挂载设备或交给 RDMA 插件</td>
+            </tr>
+            <tr>
+              <td>线程数远超配额</td>
+              <td>默认按宿主核数建池</td>
+              <td>进程线程数、<code>OMP_NUM_THREADS</code></td>
+              <td>显式设置线程数或绑核</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h2>十二、需要能给出数字的项</h2>
+
+        <p>
+          下面每一项都应当能给出具体数字或结论，而不是「大概是」：
+          CPU 配额与实际节流次数；内存 limit 里为 page cache 留出的余量；
+          <code>/dev/shm</code> 的大小以及它是否计入 limit；启动窗口与就绪判定的时长；
+          在途请求的最长时长；权重的存放位置、分发方式与失败影响面；
+          线程数的来源；容器内可见的卡数与设备节点；RDMA 的锁页额度与 NUMA 归属。
+          这些项对应机制而不是平台方言，换一套平台，数值会变，判断方式不变。
+        </p>
+
+        <div class="essay-ending">
+          容器的价值不是「打包」，而是把 CPU、内存、设备这些资源变成可计量、可约束的账本；
+          调优的起点，是知道自己的账本记在哪、什么时候会被扣款。
+        </div>
+
+        <section class="references-section" aria-label="参考与扩展阅读">
+          <h2>参考与扩展阅读</h2>
+          <ol class="reference-list">
+            <li>
+              <a href="https://docs.kernel.org/admin-guide/cgroup-v2.html" target="_blank" rel="noopener noreferrer">
+                Control Group v2 — Linux Kernel Documentation
+              </a>
+              <span><code>cpu.max</code>、<code>memory.max</code>、<code>memory.stat</code> 与 PSI 的权威定义，本文所有账本都以此为准。</span>
+            </li>
+            <li>
+              <a href="https://kubernetes.io/zh-cn/docs/concepts/configuration/manage-resources-containers/" target="_blank" rel="noopener noreferrer">
+                Kubernetes 文档 · 容器资源管理
+              </a>
+              <span>requests 与 limits 的调度／运行期语义，以及扩展资源必须相等的原因。</span>
+            </li>
+            <li>
+              <a href="https://kubernetes.io/zh-cn/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/" target="_blank" rel="noopener noreferrer">
+                Kubernetes 文档 · 配置探针
+              </a>
+              <span>三种探针的生效顺序与 <code>periodSeconds × failureThreshold</code> 的窗口计算。</span>
+            </li>
+            <li>
+              <a href="https://kubernetes.io/zh-cn/docs/concepts/storage/persistent-volumes/" target="_blank" rel="noopener noreferrer">
+                Kubernetes 文档 · 持久卷
+              </a>
+              <span>绑定条件、访问模式、回收策略，以及本地卷为什么必须节点亲和。</span>
+            </li>
+            <li>
+              <a href="https://kubernetes.io/zh-cn/docs/concepts/extend-kubernetes/api-extension/custom-resources/" target="_blank" rel="noopener noreferrer">
+                Kubernetes 文档 · 自定义资源
+              </a>
+              <span>CRD 的打印列、status 子资源与 controller 的职责划分。</span>
+            </li>
+            <li>
+              <a href="https://github.com/opencontainers/image-spec" target="_blank" rel="noopener noreferrer">
+                OCI Image Specification
+              </a>
+              <span>镜像层、manifest 与 digest 的规范；解释「层共享」与「按 digest 固定版本」的底层依据。</span>
+            </li>
+          </ol>
+        </section>
+      </section>
+
+      <section class="comments-section" id="comments" aria-label="Discussion">
+        <div class="comments-header">
+          <h2>Discussion</h2>
+        </div>
+        <div id="utterances-container" class="utterances-container"></div>
+        <noscript>请启用 JavaScript 后查看评论区。</noscript>
+      </section>
+    </article>
+  </main>
+
+  <footer class="site-footer">
+    <span class="footer-credit">
+      <span class="footer-prefix">© 2026 by</span>
+      <a href="../../index.html" class="footer-brand">
+        <span class="brand-mascot-frame brand-mascot-frame--inline" aria-hidden="true">
+          <picture>
+            <source srcset="../../assets/avatar-mascot.webp" type="image/webp" />
+            <img src="../../assets/avatar-mascot.png" alt="" class="brand-mascot" width="27" height="27" decoding="async" />
+          </picture>
+        </span>
+        <span>MOFANG</span>
+      </a>
+    </span>
+  </footer>
+
+  <script src="../../app.js?v=45"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" crossorigin="anonymous"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js" crossorigin="anonymous"
+    onload="renderMathInElement(document.body, {
+      delimiters: [
+        {left: '\\[', right: '\\]', display: true},
+        {left: '\\(', right: '\\)', display: false}
+      ],
+      ignoredTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code', 'option', 'svg'],
+      throwOnError: false
+    });"></script>
+</body>
+</html>

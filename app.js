@@ -9,6 +9,7 @@
     speculative: "投机推理",
     attention: "Attention 加速",
     "inference-systems": "推理框架",
+    kubernetes: "容器与 K8s",
     "pd-disagg": "PD 分离",
     mooncake: "Mooncake",
     training: "训练",

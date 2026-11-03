@@ -96,6 +96,7 @@
           <button class="keyword-pill" data-keyword="mooncake" type="button">Mooncake</button>
           <button class="keyword-pill" data-keyword="training" type="button">训练</button>
           <button class="keyword-pill" data-keyword="llm-gateway" type="button">LLM Gateway</button>
+          <button class="keyword-pill" data-keyword="kubernetes" type="button">容器与 K8s</button>
           <button class="keyword-pill" data-keyword="determinism" type="button">确定性</button>
           <button class="keyword-pill" data-keyword="hardware" type="button">硬件与 Kernel</button>
           <button class="keyword-pill" data-keyword="pytorch" type="button">PyTorch</button>
@@ -106,6 +107,19 @@
 
     <section id="blog" class="section">
       <div class="post-list" id="post-list">
+        <article class="post-card" data-category="basic" data-keywords="kubernetes inference-systems" data-date="2026-11-03" data-title="大模型部署的容器与 Kubernetes：算法工程师必须知道的部分">
+          <a href="posts/basic/containers-kubernetes-llm-deployment.html" class="post-card-link">
+            <div class="post-meta-row"><span class="post-tag">Basic Knowledge</span></div>
+            <h3 class="post-title">大模型部署的容器与 Kubernetes：算法工程师必须知道的部分</h3>
+            <p class="post-excerpt">不铺概念，只讲会改变延迟、吞吐与稳定性的那部分：cgroup 的 CPU/内存账本与节流、/dev/shm 与 memlock、Pod 共享、探针与优雅退出、权重路径，以及 Ascend 设备链路与多机 RDMA 的常见坑，末尾给一张症状对照表。</p>
+            <p class="post-card-stats">2026年11月3日 · 20 分钟 · 5833 字 · MOFANG</p>
+          </a>
+          <div class="post-card-keywords">
+            <button class="post-keyword-chip" data-keyword="kubernetes" type="button">容器与 K8s</button>
+            <button class="post-keyword-chip" data-keyword="inference-systems" type="button">推理框架</button>
+          </div>
+        </article>
+
         <article class="post-card" data-category="basic" data-keywords="rope pytorch training" data-date="2026-09-18" data-title="RoPE 旋转位置编码：从二维旋转到相对位置与长上下文">
           <a href="posts/basic/rope-rotary-position-embedding.html" class="post-card-link">
             <div class="post-meta-row"><span class="post-tag">Basic Knowledge</span></div>
@@ -365,6 +379,6 @@
     </span>
   </footer>
 
-  <script src="app.js?v=44"></script>
+  <script src="app.js?v=45"></script>
 </body>
 </html>
