@@ -6,6 +6,7 @@
   let searchQuery = "";
 
   const KEYWORD_LABELS = {
+    pymotor: "PyMotor",
     speculative: "投机推理",
     attention: "Attention 加速",
     "inference-systems": "推理框架",

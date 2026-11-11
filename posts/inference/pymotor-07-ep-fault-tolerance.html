@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="night">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <script>(function(){try{var s=localStorage.getItem("yichuan-theme");document.documentElement.setAttribute("data-theme",s||(matchMedia("(prefers-color-scheme: dark)").matches?"night":"day"));}catch(e){}})();</script>
+  <link rel="stylesheet" href="../../styles.css?v=64" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous" />
+  <title>PyMotor 源码阅读（7）｜大 EP 实例的故障恢复</title>
+  <meta name="description" content="从硬件与软件证据进入恢复规划，逐步分析 DP 缩容的 guard、status、apply、finalize，解释幸存端点视图、退役管理和主备恢复。" />
+</head>
+<body class="pymotor-post">
+  <div class="ambient" aria-hidden="true"><span class="orb orb-a"></span><span class="orb orb-b"></span></div><canvas id="star-canvas"></canvas>
+  <header class="site-header"><div class="header-inner"><a href="../../index.html" class="logo"><span class="logo-dot"></span><span class="logo-text">MOFANG</span></a><div class="header-actions"><nav class="site-nav"><a href="../../index.html">← 首页</a></nav><button id="theme-toggle" class="theme-toggle" type="button" aria-label="切换主题"><span class="icon-sun">☀️</span><span class="icon-moon">🌙</span></button></div></div></header>
+  <main class="site-main"><article class="post-page">
+    <header class="post-page-header">
+      <p class="post-page-category">Inference · PyMotor 源码阅读 07</p>
+      <h1 class="post-page-title">PyMotor 源码阅读（7）｜大 EP 实例的故障恢复</h1>
+      <p class="post-lead">从硬件与软件证据进入恢复规划，逐步分析 DP 缩容的 guard、status、apply、finalize，解释幸存端点视图、退役管理和主备恢复。本文对照 <a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/README.md" target="_blank" rel="noopener noreferrer">MindIE-PyMotor 841e50df 源码</a>。</p>
+      <div class="post-page-keywords" aria-label="关键词"><a class="post-keyword-chip" href="../../index.html?keyword=pymotor">PyMotor</a><a class="post-keyword-chip" href="../../index.html?keyword=inference-systems">推理框架</a><a class="post-keyword-chip" href="../../index.html?keyword=pd-disagg">PD 分离</a></div>
+      <p class="post-page-meta" data-date="2026-11-11" data-author="MOFANG" data-minutes=""></p>
+    </header>
+    <details class="pymotor-series-menu"><summary>PyMotor 源码阅读系列 · 8 / 9</summary><ol><li><a href="pymotor-00-overview.html"><span>00</span> 系统全景与源码阅读路线</a></li>
+<li><a href="pymotor-01-startup.html"><span>01</span> 配置、注册与实例上线</a></li>
+<li><a href="pymotor-02-request.html"><span>02</span> 一次请求的完整执行链</a></li>
+<li><a href="pymotor-03-scheduler-shm.html"><span>03</span> 调度策略与共享内存并发记账</a></li>
+<li><a href="pymotor-04-kv-affinity.html"><span>04</span> 缓存亲和与分层前缀索引</a></li>
+<li><a href="pymotor-05-stream-recovery.html"><span>05</span> 流式响应、重调度与精度探测</a></li>
+<li><a href="pymotor-06-node-manager.html"><span>06</span> NodeManager 与原生引擎运行时</a></li>
+<li><a href="pymotor-07-ep-fault-tolerance.html" aria-current="page"><span>07</span> 大 EP 实例的故障恢复</a></li>
+<li><a href="pymotor-08-observability.html"><span>08</span> 观测、验证与项目复盘</a></li></ol></details>
+    <div class="logic-map" aria-label="本文逻辑路线"><div class="map-node map-node--start"><span>1</span><strong>故障证据</strong></div><div class="map-arrow" aria-hidden="true">→</div><div class="map-node map-node--ar"><span>2</span><strong>恢复计划</strong></div><div class="map-arrow" aria-hidden="true">→</div><div class="map-node map-node--par"><span>3</span><strong>缩容事务</strong></div><div class="map-arrow" aria-hidden="true">→</div><div class="map-node map-node--conv"><span>4</span><strong>服务重发</strong></div></div>
+    <nav class="pymotor-toc" aria-label="本文目录"><strong>本文目录</strong><ol><li><a href="#controller-lifecycle">一、常态路径由实例状态机和观察者连接</a></li><li><a href="#controller-fault-evidence">二、先归并故障证据，再选择恢复计划</a></li><li><a href="#controller-recovery-strategies">三、恢复策略各自控制什么资源</a></li><li><a href="#controller-scale-down">四、大 EP 场景中的 DP 缩容事务</a></li><li><a href="#controller-serving-overlay">五、幸存者投影、退役 Pod 和重复故障</a></li><li><a href="#controller-ha-exercises">六、主备持久化与可复述的恢复实验</a></li></ol></nav>
+    <section class="post-page-content">
+<p class="lead">一个分布式推理实例由多个节点、端点和设备共同组成。某个端点异常时，系统需要先停止把新请求送到不可靠的服务，再判断证据是否足以支持局部恢复，最后让所有组件看到同一份新拓扑。Controller 的代码把这三个过程连接起来。本章先阅读常态生命周期，再用一个四 DP 实例的故障贯穿证据收集、恢复计划、引擎指令和幸存端点发布。</p>
+
+<h2 id="controller-lifecycle">一、常态路径由实例状态机和观察者连接</h2>
+<h3>1.1 Controller 的模块组装</h3>
+<p>
+<code>Controller.init_modules()</code> 建立 <code>InstanceAssembler</code>、<code>EventPusher</code>、可选 <code>FaultManager</code>、<code>InstanceManager</code>、可选观测门面以及管理 API，然后把相关观察者绑定到 InstanceManager。Assembler 管理节点如何组成逻辑实例，Manager 管理这个实例当前的生命周期，Pusher 负责把变化传播到 Coordinator。恢复逻辑可以观察同一份只读实例快照，减少模块间直接修改共享对象带来的耦合。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/controller/controller.py">源码 · Controller 组装与角色切换</a>
+</p>
+<p>
+<code>InstanceManager.transitions</code> 明确写出状态与条件事件的对应关系。正常启动常沿 INITIAL 到 ACTIVE，ACTIVE 收到异常或心跳超时后进入 INACTIVE，恢复正常又可能回到 ACTIVE，持续超时最终进入 DELETED。PAUSED 另有暂停、恢复和异常分支。学习时先为“注册成功、端点正常、端点异常、主动暂停、长期失联”五个触发条件各画一条路径，再对照完整转移表补边界。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/controller/core/instance_manager.py">源码 · 实例生命周期状态机</a>
+</p>
+<h3>1.2 从状态变化走到可调度变化</h3>
+<p>InstanceManager 通过 <code>notify()</code> 给观察者传递 <code>ReadOnlyInstance</code>。EventPusher 将 INSTANCE_READY、INSTANCE_SEPARATED 等事件转换成 ADD、DEL、PAUSE、RESUME 等成员操作，排队后向 Coordinator 发送。增量失败可以触发 SET 全量对账，周期同步、Coordinator 心跳与切主通知也参与收敛。阅读时应区分 ACTIVE 这样的生命周期状态和 INSTANCE_READY 这样的观察事件，前者保存在实例对象里，后者表示一次变化。当前 SET 对控制器内存为空有专门跳过分支，分析全量同步时仍需读到实际条件。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/controller/core/observer.py">源码 · 观察事件</a> <a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/controller/core/event_pusher.py">源码 · 实例变化传播</a>
+</p>
+<aside class="aside-card">
+<strong>贯穿本章的例子</strong>
+<p>设某个逻辑实例最初包含 DP0、DP1、DP2、DP3。第一轮 DP2 被确认死亡，恢复后服务端点为 0、1、3。第二轮 DP0 再发生故障，系统需要记得 DP2 已经退役，并把累计移除集合交给引擎，同时选择存活 rank 中的新 master。以下数字仅用于说明事务和集合关系。</p>
+</aside>
+
+<h2 id="controller-fault-evidence">二、先归并故障证据，再选择恢复计划</h2>
+<h3>2.1 软件事实与硬件事实的来源</h3>
+<p>软件路径来自 NodeManager 对原生引擎 FT、进程死亡和运行异常的汇报。硬件路径通过 K8s Node 与相关故障 ConfigMap 进入 <code>resource_monitor.py</code>，再由 <code>configmap_parser.py</code> 和 <code>fault_types.py</code> 解析等级、故障码和设备归属。<code>mixin/resource_manager.py</code> 维护节点与实例的关联，<code>mixin/persistence.py</code> 管理故障状态保存。FaultManager 汇总这些事实，为各实例维护故障快照和策略运行生命周期。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/controller/fault_tolerance/fault_manager.py">源码 · 故障汇总与策略中心</a> <a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/controller/fault_tolerance/fault_types.py">源码 · 故障分类与设备归属</a>
+</p>
+<p>
+<code>FaultNormalizer</code> 将证据映射回 Motor 保存的原始 DP 坐标。明确 DEAD 的引擎 rank 可以成为移除候选，UNHEALTHY 还可能出现在受集体通信故障影响的幸存者身上。硬件证据需要结合 Pod 与设备拥有关系映射到 endpoint。对于设备归属信息不完整的历史注册，代码保留较保守的节点级处理。这一层决定了“哪些 rank 确实可移除”，因此应先读证据归一化，再读真正执行 scale-down 的函数。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/controller/fault_tolerance/dp_scale_down.py">源码 · 故障归一化与运行态</a>
+</p>
+<h3>2.2 RecoveryPlan 保留决策理由和回退来源</h3>
+<p>
+<code>build_recovery_plan()</code> 接收实例身份、配置、<code>ScaleDownContext</code>、原等级策略与故障码，返回不可变的 <code>RecoveryPlan</code>。计划里包含来源、选中策略、上下文、fallback 和证据。代码检查实例是否适合引擎恢复、硬件映射是否完整、是否还在等待 FT 证据、所有 DP 是否都受影响，以及收集是否超时。某些情况下计划暂时不分配策略，继续等待证据。完整证据到达且存在待移除 rank 时，才进入启用的 DP 缩容路径。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/controller/fault_tolerance/recovery_planner.py">源码 · 恢复计划选择</a>
+</p>
+<p>这个设计让“先收到哪种证据”和“最终依据什么决策”可以分别表达。例如先收到硬件故障时，会有相关性等待窗口，稍后完整引擎快照仍可参与最终判断。另一个值得跟踪的分支是单 DP 的纯软件死亡，若原策略允许原地重拉且条件满足，计划保留这条恢复路径。读规划器时，为每个 return 写下事实前提，比直接背策略名称更容易掌握边界。</p>
+
+<h2 id="controller-recovery-strategies">三、恢复策略各自控制什么资源</h2>
+<h3>3.1 从等级映射走到有生命周期的执行</h3>
+<p>
+<code>strategy/strategy.py</code> 建立故障等级和初始策略映射，硬件类别、角色和配置开关都会影响选择。<code>StrategyBase</code> 管理执行、停止、完成和失败的公共状态，FaultManager 再跟踪运行结果，决定清理证据、继续等待或使用回退。策略中出现的线程和事件说明它们可能跨多个观察周期运行，API 接受一次请求与恢复最终完成之间还有一段生命周期。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/controller/fault_tolerance/strategy/strategy.py">源码 · 等级策略映射</a> <a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/controller/fault_tolerance/strategy/base.py">源码 · 策略生命周期</a>
+</p>
+<table class="decision-table">
+<thead>
+<tr>
+<th>策略或辅助模块</th>
+<th>核心动作</th>
+<th>阅读时的完成条件</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>
+<code>engine_relaunch.py</code>
+</td>
+<td>通过 NM 在原节点重新拉起引擎</td>
+<td>本地启动、健康和后续服务发布衔接</td>
+</tr>
+<tr>
+<td>
+<code>nm_suicide.py</code>
+</td>
+<td>请求 NM 退出，交由部署系统继续处理</td>
+<td>代理停止与资源系统接管分开追踪</td>
+</tr>
+<tr>
+<td>
+<code>reconfiguration.py</code>
+</td>
+<td>隔离并组织整实例重配置</td>
+<td>旧实例身份、停止与新实例组装</td>
+</tr>
+<tr>
+<td>
+<code>scale_p2d.py</code>
+</td>
+<td>按 D 恢复需求评估 P 资源调整</td>
+<td>角色、job 身份和新旧实例边界</td>
+</tr>
+<tr>
+<td>
+<code>dp_scale_down.py</code>
+</td>
+<td>累计移除故障 DP，协调幸存引擎恢复</td>
+<td>引擎恢复提交与幸存服务视图发布</td>
+</tr>
+<tr>
+<td>
+<code>serving_overlay.py</code>
+</td>
+<td>从原始拓扑投影当前可服务端点</td>
+<td>后续 ADD、RESUME、SET 保持相同投影</td>
+</tr>
+</tbody>
+</table>
+<h3>3.2 两个必须对照执行入口的扩展点</h3>
+<p>当前版本的 <code>TokenReinferenceStrategy.execute()</code> 是等待停止事件的占位循环，尚未展开完整 token 重推流程。<code>EngineFastRecoveryStrategy</code> 虽有 retry 执行代码，<code>is_applicable()</code> 当前直接返回 False，因此默认规划器不会通过这一适用性检查选中它。面试介绍应分别描述现有 Coordinator token replay、引擎内部恢复，以及这些 Controller 扩展点的实现程度。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/controller/fault_tolerance/strategy/token_reinference.py">源码 · TokenReinference 当前实现</a> <a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/controller/fault_tolerance/strategy/fast_recovery.py">源码 · FastRecovery 适用性</a>
+</p>
+
+<h2 id="controller-scale-down">四、大 EP 场景中的 DP 缩容事务</h2>
+<h3>4.1 能力门槛和原始 rank 坐标</h3>
+<p>
+<code>DpScaleDownStrategy._gate()</code> 检查功能开关、引擎 FT、external LB、scale-down 支持、EPLB 和冗余专家，并要求原生 auto-recovery 与外部控制路径没有冲突。门槛结果保存成带 reason codes 的 <code>GateSnapshot</code>。冗余专家数量是可行性检查输入，专家布局及通信恢复最终还要由引擎执行。通过门槛后，策略解析原始 DP rank，拒绝不属于原拓扑的候选，再构造本轮移除集合与幸存者。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/controller/fault_tolerance/strategy/dp_scale_down.py">源码 · DP 缩容事务</a>
+</p>
+<p>运行态 <code>FtRuntime</code> 保存 <code>original_dp_ranks</code>、<code>dead_committed</code>、<code>pending_removed_ranks</code>、request id、阶段、能力快照、引擎状态以及服务是否已发布。第一轮移除 DP2 后，dead_committed 为集合 {2}。第二轮发现 DP0 时，发送给引擎的累计移除集合为 {0,2}，幸存者为 {1,3}，新 master 取最小存活 rank 1。累计坐标避免连续恢复把旧退役 rank 当作仍然可用的通信成员。</p>
+<figure class="diagram-figure">
+<svg viewBox="0 0 840 360" role="img" aria-labelledby="p7-title p7-desc">
+<title id="p7-title">DP 缩容恢复的提交顺序</title>
+<desc id="p7-desc">故障证据经计划和能力门槛进入恢复，先保护 NodeManager 并等待幸存者就绪，确认撤流后应用引擎指令，轮询成功后提交退役集合，再发布幸存者。失败进入回退。</desc>
+<defs>
+<marker id="arrowhead" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
+<path class="d-accent" d="M0 0 L10 4 L0 8 Z"/>
+</marker>
+</defs>
+<rect class="d-box-purple" x="20" y="30" width="170" height="70" rx="10"/>
+<text class="d-label" x="105" y="58" text-anchor="middle">证据 / Plan / Gate</text>
+<text class="d-muted" x="105" y="82" text-anchor="middle">确认移除候选与能力</text>
+<rect class="d-box-blue" x="230" y="30" width="170" height="70" rx="10"/>
+<text class="d-label" x="315" y="58" text-anchor="middle">guard + status</text>
+<text class="d-muted" x="315" y="82" text-anchor="middle">保护本地仲裁并等待</text>
+<rect class="d-box-blue" x="440" y="30" width="170" height="70" rx="10"/>
+<text class="d-label" x="525" y="58" text-anchor="middle">withdraw</text>
+<text class="d-muted" x="525" y="82" text-anchor="middle">确认 Coordinator 撤流</text>
+<rect class="d-box-orange" x="650" y="30" width="170" height="70" rx="10"/>
+<text class="d-label" x="735" y="58" text-anchor="middle">apply scale_down</text>
+<text class="d-muted" x="735" y="82" text-anchor="middle">发往幸存引擎</text>
+<path class="d-arrow" d="M190 65 H230 M400 65 H440 M610 65 H650" fill="none" marker-end="url(#arrowhead)"/>
+<rect class="d-box-orange" x="650" y="160" width="170" height="70" rx="10"/>
+<text class="d-label" x="735" y="188" text-anchor="middle">轮询引擎结果</text>
+<text class="d-muted" x="735" y="212" text-anchor="middle">healthy / recovering</text>
+<rect class="d-box-purple" x="440" y="160" width="170" height="70" rx="10"/>
+<text class="d-label" x="525" y="188" text-anchor="middle">finalize commit</text>
+<text class="d-muted" x="525" y="212" text-anchor="middle">NM 过滤退役端点</text>
+<rect class="d-box-purple" x="230" y="160" width="170" height="70" rx="10"/>
+<text class="d-label" x="315" y="188" text-anchor="middle">dead_committed</text>
+<text class="d-muted" x="315" y="212" text-anchor="middle">提交累计退役集合</text>
+<rect class="d-box-blue" x="20" y="160" width="170" height="70" rx="10"/>
+<text class="d-label" x="105" y="188" text-anchor="middle">publish survivors</text>
+<text class="d-muted" x="105" y="212" text-anchor="middle">恢复可服务视图</text>
+<path class="d-arrow" d="M735 100 V160 M650 195 H610 M440 195 H400 M230 195 H190" fill="none" marker-end="url(#arrowhead)"/>
+<rect class="d-box-orange" x="230" y="285" width="380" height="52" rx="10"/>
+<text class="d-label" x="420" y="317" text-anchor="middle">阶段失败 → finalize abort → 原恢复回退</text>
+<path class="d-arrow" d="M525 100 V130 H630 V260 H420 V285" fill="none" marker-end="url(#arrowhead)"/>
+</svg>
+<figcaption>引擎恢复完成和服务视图成功发布分别记录，便于处理中间失败与后续对账。</figcaption>
+</figure>
+<h3>4.2 guard 与 status 建立可执行窗口</h3>
+<p>策略为本轮生成 request id，再按 NM 分组。guard 在各 NM 建立有期限的退出保护，避免全局恢复期间本地代理因暂时不健康自行退出。随后只对幸存端点收集 FT 状态，等待它们观察到故障并进入允许外部 scale-down 的状态。当前 readiness 分类把 unhealthy 且没有 recovering 子状态视为可执行，把 healthy 或 unhealthy/recovering 视为仍需等待。等待中若又收到明确 DEAD 的幸存 rank，会扩展本轮移除集合并重新计算分组。这个阶段把证据收敛与真正 apply 分开。</p>
+<h3>4.3 撤流、apply 和 finalize 的先后关系</h3>
+<p>就绪后，策略先通过 <code>ServingOverlay.withdraw()</code> 确认 Coordinator 已撤下服务视图，再将阶段推进到 SCALING_DOWN。随后向幸存 NM 扇出一次 apply，传递累计 removed ranks 和新 master 信息。代码轮询异步结果，healthy 表示本轮成功，recovering 继续等待，终态失败或截止时间耗尽则进入回退。测试覆盖阶段失败时停止推进以及避免盲目重复 apply 的行为。</p>
+<p>引擎成功后，策略先向 NM finalize commit，提交本地退役端点，再更新 dead_committed，进入清理阶段，最后发布幸存服务视图。如果引擎已经提交而 Coordinator 发布失败，运行态仍保留已提交结果，并把 serving_published 置为未完成，等待后续发布收敛。引擎提交之前失败的路径会在 finally 中发出 finalize abort。这个区分让恢复事务能够表达“底层已经恢复、对外发布仍待完成”的中间状态。</p>
+
+<h2 id="controller-serving-overlay">五、幸存者投影、退役 Pod 和重复故障</h2>
+<h3>5.1 为什么同时保存原始拓扑与服务视图</h3>
+<p>Controller 需要原始拓扑解释故障设备、历史 rank 和连续恢复，同时 Coordinator 只应收到当前可以调度的端点。<code>ServingOverlay.project()</code> 从实例生成分离的副本，恢复中的多个阶段返回无可服务视图，进入 SCALED_DOWN_RUNNING 后过滤 dead_committed。后续 ADD、RESUME、SET 都可以经过同一投影，因此退役 DP 不会仅仅因为一次正常心跳或周期性全量同步再次出现。<code>fingerprint()</code> 用实例及端点集合描述发布视图，<code>mark_published()</code> 在确认收敛后更新运行态。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/controller/fault_tolerance/serving_overlay.py">源码 · 服务拓扑投影</a>
+</p>
+<h3>5.2 退役集合怎样影响节点和 Pod</h3>
+<p>NM 的 finalize 会把已退役端点从心跳、异常判断和 FT 监控等出口过滤。Controller 的 TopologyResolver 再根据节点拥有的端点判断哪些 Pod 已完全退役。当前 <code>enable_dp_scale_up</code> 关联这类可回收 Pod 的停止触发，<code>PodLifecycle.stop_recyclable_pods()</code> 通过已有 NM stop 合同停止选中的代理，后续 Pod 回收由资源系统接管。阅读到这个开关时，应继续跟调用方和实际资源动作，按已经实现的行为描述能力。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/controller/fault_tolerance/pod_lifecycle.py">源码 · 退役 Pod 生命周期</a>
+</p>
+<p>重复证据还需要事务去重。若待移除 rank 已经属于 dead_committed，策略根据当前阶段判断这是一条已处理故障，或一个需要回退的阶段冲突。实例重建后还会出现新的运行身份，因此旧 job 的迟到事件必须结合实例 id 处理。这里的难点来自时间顺序，故障、心跳、成员通知和恢复结果都可能跨线程或跨进程到达，单独修改某一个列表不足以表达整次提交。</p>
+
+<h2 id="controller-ha-exercises">六、主备持久化与可复述的恢复实验</h2>
+<h3>6.1 主备切换需要恢复什么</h3>
+<p>开启主备时，Controller 先运行管理 API 和 StandbyManager，成为 master 后启动实例组装、生命周期、事件推送和故障管理，退为 standby 时逆序停止相关模块。etcd 同时承担锁与租约相关协调、版本化状态保存等职责。InstanceManager 的持久化包含版本、时间戳和校验信息，恢复后还要重新协调心跳时效与成员发布。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/common/standby/standby_manager.py">源码 · 主备管理</a> <a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/common/etcd/persistent_state.py">源码 · 版本化持久状态</a>
+</p>
+<p>FT 运行态只持久化恢复所需的最小字段。已经提交的缩容阶段恢复成 SCALED_DOWN_RUNNING，仍需确认服务重新发布。处于 DECIDING、WAITING_ENGINE_FAULT、SCALING_DOWN 等未完成阶段的记录在恢复后转向原回退。这样控制器重启不会依赖一份丢失的进程内 future 继续假定事务仍在执行。阅读 <code>restore_persistent_data()</code> 时，可以把每个旧阶段映射到恢复阶段，并写下 dead_committed 与 serving_published 分别如何处理。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/controller/fault_tolerance/dp_scale_down.py">源码 · FT 状态持久化与恢复</a>
+</p>
+<p>可以把两轮缩容写成一份手工事务账本。初始原始 rank 为 {0,1,2,3}，已提交退役集合为空。第一轮证据确认 DP2 死亡，本轮 pending 为 {2}，引擎成功以后 dead_committed 才更新为 {2}。第二轮确认 DP0 死亡，本轮 pending 为 {0}，累计移除集合为 {0,2}，服务投影成为 {1,3}。若第二轮 apply 前失败，账本仍需保留上一轮已经提交的 {2}，同时记录本轮失败及回退原因。这个练习能够直接检验自己是否分清原始坐标、待提交动作和已提交历史。</p>
+<p>另一个练习是在成功恢复后让成员发布暂时失败。此时引擎已经确认新通信拓扑，NM 也已经过滤退役端点，Controller 不能因为发布失败就把已提交 rank 从历史集合中抹去。应继续观察保存的恢复阶段、发布标志、错误信息以及下一轮 EventPusher 对账。对应地，如果控制器恰在 apply 进行中重启，恢复代码会依据保存阶段选择回退，避免凭空假设旧线程已经完成。这两个时刻的处理差异体现了事务提交边界，也是解释代码设计时可以具体展开的工程问题。</p>
+<h3>6.2 先用 mock 测试重建四 DP 的故事</h3>
+<p>第一步阅读 <code>test_instance_manager.py</code>，用一次异常心跳解释 ACTIVE 如何进入 INACTIVE，再读 <code>test_event_pusher.py</code> 追 DEL 与后续 SET。第二步读缩容测试中的 <code>test_non_ready_survivor_is_polled_before_single_apply</code>、<code>test_withdraw_failure_falls_back_without_applying_scale_down</code> 和 <code>test_duplicate_committed_fault_preserves_existing_runtime</code>，分别画出等待、撤流失败和重复故障的序列。第三步用 <code>test_serving_overlay.py</code> 检查原始四端点实例怎样投影成三个端点，再人为设想下一次 SET，验证 DP2 仍然被过滤。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/tests/controller/fault_tolerance/strategy/test_dp_scale_down.py">测试 · DP 缩容阶段与失败</a> <a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/tests/controller/fault_tolerance/test_serving_overlay.py">测试 · 幸存者投影</a>
+</p>
+<p>完成这些练习后，再在受控集群实验中观察故障证据到达、撤流确认、apply 发出、引擎完成、发布成功几个时间点。实验记录应同时保存能力开关、原始 rank、累计移除集合、幸存者、request id 和错误分支。项目介绍可以围绕“多层状态怎样随着一轮恢复事务收敛”展开，个人经历则根据实际参与的开发、部署或验证范围描述。</p>
+
+      <div class="essay-ending">接下来沿着观测、验证与项目复盘继续追踪对象和状态。</div>
+      <section class="references-section" aria-label="源码与延伸阅读"><h2>源码与延伸阅读</h2><ol class="reference-list"><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/controller/controller.py" target="_blank" rel="noopener noreferrer">motor/controller/controller.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/controller/core/instance_manager.py" target="_blank" rel="noopener noreferrer">motor/controller/core/instance_manager.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/controller/core/observer.py" target="_blank" rel="noopener noreferrer">motor/controller/core/observer.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/controller/core/event_pusher.py" target="_blank" rel="noopener noreferrer">motor/controller/core/event_pusher.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/controller/fault_tolerance/fault_manager.py" target="_blank" rel="noopener noreferrer">motor/controller/fault_tolerance/fault_manager.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/controller/fault_tolerance/fault_types.py" target="_blank" rel="noopener noreferrer">motor/controller/fault_tolerance/fault_types.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/controller/fault_tolerance/dp_scale_down.py" target="_blank" rel="noopener noreferrer">motor/controller/fault_tolerance/dp_scale_down.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/controller/fault_tolerance/recovery_planner.py" target="_blank" rel="noopener noreferrer">motor/controller/fault_tolerance/recovery_planner.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/controller/fault_tolerance/strategy/strategy.py" target="_blank" rel="noopener noreferrer">motor/controller/fault_tolerance/strategy/strategy.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/controller/fault_tolerance/strategy/base.py" target="_blank" rel="noopener noreferrer">motor/controller/fault_tolerance/strategy/base.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/controller/fault_tolerance/strategy/token_reinference.py" target="_blank" rel="noopener noreferrer">motor/controller/fault_tolerance/strategy/token_reinference.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/controller/fault_tolerance/strategy/fast_recovery.py" target="_blank" rel="noopener noreferrer">motor/controller/fault_tolerance/strategy/fast_recovery.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/controller/fault_tolerance/strategy/dp_scale_down.py" target="_blank" rel="noopener noreferrer">motor/controller/fault_tolerance/strategy/dp_scale_down.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/controller/fault_tolerance/serving_overlay.py" target="_blank" rel="noopener noreferrer">motor/controller/fault_tolerance/serving_overlay.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/controller/fault_tolerance/pod_lifecycle.py" target="_blank" rel="noopener noreferrer">motor/controller/fault_tolerance/pod_lifecycle.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/common/standby/standby_manager.py" target="_blank" rel="noopener noreferrer">motor/common/standby/standby_manager.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/common/etcd/persistent_state.py" target="_blank" rel="noopener noreferrer">motor/common/etcd/persistent_state.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/tests/controller/fault_tolerance/strategy/test_dp_scale_down.py" target="_blank" rel="noopener noreferrer">tests/controller/fault_tolerance/strategy/test_dp_scale_down.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/tests/controller/fault_tolerance/test_serving_overlay.py" target="_blank" rel="noopener noreferrer">tests/controller/fault_tolerance/test_serving_overlay.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="llm-inference-prefill-decode-bottleneck-analysis.html">LLM 推理性能分析</a><span>配合阅读 Prefill、Decode、并行维度与服务指标。</span></li><li><a href="mooncake-architecture-overview.html">Mooncake 架构与源码阅读地图</a><span>继续追踪引擎之外的 KV 存储和传输机制。</span></li></ol></section>
+      <nav class="pymotor-next" aria-label="前后篇"><a href="pymotor-06-node-manager.html">← 上一篇 · NodeManager 与原生引擎运行时</a><a href="pymotor-08-observability.html">下一篇 · 观测、验证与项目复盘 →</a></nav>
+    </section>
+    <section class="comments-section" id="comments" aria-label="Discussion"><div class="comments-header"><h2>Discussion</h2></div><div id="utterances-container" class="utterances-container"></div><noscript>请启用 JavaScript 查看评论。</noscript></section>
+  </article></main>
+  <footer class="site-footer"><span class="footer-credit">© 2026 by <a href="../../index.html">MOFANG</a></span></footer>
+  <script src="../../app.js?v=46"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" crossorigin="anonymous"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js" crossorigin="anonymous" onload="renderMathInElement(document.querySelector('.post-page-content'),{delimiters:[{left:'\\[',right:'\\]',display:true},{left:'\\(',right:'\\)',display:false}],throwOnError:false});"></script>
+</body>
+</html>

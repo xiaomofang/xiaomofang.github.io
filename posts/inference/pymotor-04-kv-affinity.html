@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="night">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <script>(function(){try{var s=localStorage.getItem("yichuan-theme");document.documentElement.setAttribute("data-theme",s||(matchMedia("(prefers-color-scheme: dark)").matches?"night":"day"));}catch(e){}})();</script>
+  <link rel="stylesheet" href="../../styles.css?v=64" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous" />
+  <title>PyMotor 源码阅读（4）｜缓存亲和与分层前缀索引</title>
+  <meta name="description" content="把 KV 事件、连续前缀、NPU/CPU/Disk 覆盖、介质加权、负载评分与回退连成闭环，手算一次选路，并设计可验证收益的对照实验。" />
+</head>
+<body class="pymotor-post">
+  <div class="ambient" aria-hidden="true"><span class="orb orb-a"></span><span class="orb orb-b"></span></div><canvas id="star-canvas"></canvas>
+  <header class="site-header"><div class="header-inner"><a href="../../index.html" class="logo"><span class="logo-dot"></span><span class="logo-text">MOFANG</span></a><div class="header-actions"><nav class="site-nav"><a href="../../index.html">← 首页</a></nav><button id="theme-toggle" class="theme-toggle" type="button" aria-label="切换主题"><span class="icon-sun">☀️</span><span class="icon-moon">🌙</span></button></div></div></header>
+  <main class="site-main"><article class="post-page">
+    <header class="post-page-header">
+      <p class="post-page-category">Inference · PyMotor 源码阅读 04</p>
+      <h1 class="post-page-title">PyMotor 源码阅读（4）｜缓存亲和与分层前缀索引</h1>
+      <p class="post-lead">把 KV 事件、连续前缀、NPU/CPU/Disk 覆盖、介质加权、负载评分与回退连成闭环，手算一次选路，并设计可验证收益的对照实验。本文对照 <a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/README.md" target="_blank" rel="noopener noreferrer">MindIE-PyMotor 841e50df 源码</a>。</p>
+      <div class="post-page-keywords" aria-label="关键词"><a class="post-keyword-chip" href="../../index.html?keyword=pymotor">PyMotor</a><a class="post-keyword-chip" href="../../index.html?keyword=inference-systems">推理框架</a><a class="post-keyword-chip" href="../../index.html?keyword=pd-disagg">PD 分离</a></div>
+      <p class="post-page-meta" data-date="2026-11-11" data-author="MOFANG" data-minutes=""></p>
+    </header>
+    <details class="pymotor-series-menu"><summary>PyMotor 源码阅读系列 · 5 / 9</summary><ol><li><a href="pymotor-00-overview.html"><span>00</span> 系统全景与源码阅读路线</a></li>
+<li><a href="pymotor-01-startup.html"><span>01</span> 配置、注册与实例上线</a></li>
+<li><a href="pymotor-02-request.html"><span>02</span> 一次请求的完整执行链</a></li>
+<li><a href="pymotor-03-scheduler-shm.html"><span>03</span> 调度策略与共享内存并发记账</a></li>
+<li><a href="pymotor-04-kv-affinity.html" aria-current="page"><span>04</span> 缓存亲和与分层前缀索引</a></li>
+<li><a href="pymotor-05-stream-recovery.html"><span>05</span> 流式响应、重调度与精度探测</a></li>
+<li><a href="pymotor-06-node-manager.html"><span>06</span> NodeManager 与原生引擎运行时</a></li>
+<li><a href="pymotor-07-ep-fault-tolerance.html"><span>07</span> 大 EP 实例的故障恢复</a></li>
+<li><a href="pymotor-08-observability.html"><span>08</span> 观测、验证与项目复盘</a></li></ol></details>
+    <div class="logic-map" aria-label="本文逻辑路线"><div class="map-node map-node--start"><span>1</span><strong>缓存事件</strong></div><div class="map-arrow" aria-hidden="true">→</div><div class="map-node map-node--ar"><span>2</span><strong>连续覆盖</strong></div><div class="map-arrow" aria-hidden="true">→</div><div class="map-node map-node--par"><span>3</span><strong>收益评分</strong></div><div class="map-arrow" aria-hidden="true">→</div><div class="map-node map-node--conv"><span>4</span><strong>效果验证</strong></div></div>
+    <nav class="pymotor-toc" aria-label="本文目录"><strong>本文目录</strong><ol><li><a href="#cache-work">一、把缓存位置放进 Prefill 选路</a></li><li><a href="#prefix-index">二、连续前缀怎样变成可查询的索引</a></li><li><a href="#tier-coverage">三、HBM、CPU、Disk 怎样组成分层覆盖</a></li><li><a href="#weighted-score">四、从分层命中推导调度评分</a></li><li><a href="#allocate-fallback">五、从候选走到真实提交，再处理回退</a></li><li><a href="#cache-modules">六、按目录把缓存子系统串起来</a></li><li><a href="#cache-verify">七、怎样证明缓存亲和改善了服务</a></li></ol></nav>
+    <section class="post-page-content">
+<h2 id="cache-work">一、把缓存位置放进 Prefill 选路</h2>
+<h3>1.1 从重复文档请求开始</h3>
+<p>设想一个文档问答服务，每次输入由固定系统提示词、一份长文档和末尾的用户问题组成。第一次请求在 P1 上完成 Prefill，后续请求更换问题，但保留相同文档。此时 P1 可能已经持有数千 token 的 KV，P2 却拥有更低的排队负载。选择 P1 可以省去重复计算，选择 P2 则可能更早开始执行。缓存亲和调度必须把这两种收益放进同一次决策。</p>
+<p>PyMotor 用两类状态支持这个决策。共享内存账本描述端点已经承接的调度负载，KV Conductor 描述各实例、各 DP 拥有哪些可复用前缀。Worker 先结合两者提出候选，再通过 CAS 提交真实分配。引擎接到请求后，才执行缓存加载和模型计算。理解这一先后顺序，才能把“调度器预计命中”与“引擎最终复用”分别测量。</p>
+<h3>1.2 缓存状态来自过去，请求查询发生在现在</h3>
+<figure class="diagram-figure">
+<svg viewBox="0 0 840 260" role="img" aria-label="缓存事件更新索引，新请求查询索引并结合共享负载选择端点">
+<rect x="20" y="50" width="170" height="74" rx="10" class="d-box-blue"/>
+<text x="105" y="80" text-anchor="middle" class="d-label">历史请求与 KV 事件</text>
+<text x="105" y="106" text-anchor="middle" class="d-muted">存入、逐出、下沉</text>
+<line x1="190" y1="87" x2="224" y2="87" class="d-arrow"/>
+<rect x="226" y="50" width="176" height="74" rx="10" class="d-box-orange"/>
+<text x="314" y="80" text-anchor="middle" class="d-label">Conductor 索引</text>
+<text x="314" y="106" text-anchor="middle" class="d-muted">前缀与持有位置</text>
+<line x1="402" y1="87" x2="436" y2="87" class="d-arrow"/>
+<rect x="438" y="50" width="176" height="74" rx="10" class="d-box-blue"/>
+<text x="526" y="80" text-anchor="middle" class="d-label">新请求 token 查询</text>
+<text x="526" y="106" text-anchor="middle" class="d-muted">获得分层覆盖</text>
+<line x1="614" y1="87" x2="648" y2="87" class="d-arrow"/>
+<rect x="650" y="50" width="170" height="74" rx="10" class="d-box-purple"/>
+<text x="735" y="80" text-anchor="middle" class="d-label">评分与 CAS 分配</text>
+<text x="735" y="106" text-anchor="middle" class="d-muted">结合当前负载</text>
+<text x="420" y="182" text-anchor="middle" class="d-label">事件写入与请求查询并发进行，最后由引擎兑现 KV 复用</text>
+<text x="420" y="218" text-anchor="middle" class="d-muted">观察同一 req_id 的覆盖、最终端点、实际复用与客户端延迟</text>
+</svg>
+<figcaption>缓存亲和把历史形成的缓存分布接入当前选路，索引查询与负载提交具有各自的时间边界。</figcaption>
+</figure>
+<aside class="aside-card">
+<strong>阅读入口</strong>
+<p>先读 <code>KvCacheAffinityPolicy.select_endpoint_candidates_from_list()</code>，只追 token、Conductor 响应和候选列表三个变量。角色限制由 Worker 调用方继续检查，当前亲和主要作用于 P/U 路径。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/scheduler/policy/kv_cache_affinity.py">亲和策略源码</a>
+</p>
+</aside>
+
+<h2 id="prefix-index">二、连续前缀怎样变成可查询的索引</h2>
+<h3>2.1 同一块内容需要放回上下文路径</h3>
+<p>因果自回归模型在一个位置上的隐藏状态依赖此前上下文。KV 复用因此需要从相同前缀出发，沿连续路径确认覆盖。用 A、B、C、D 表示 token block，新请求为 A→B→C→D。持有 A→B→C→E 的端点可匹配前三块，持有 A→Q→C→D 的端点只能匹配第一块。后者出现 C、D，并不足以继续前缀。</p>
+<p>
+<code>ConcurrentRadixTree.find_matches_detailed()</code> 从根的第一条边开始遍历，并维护仍然持有这条路径的 worker 集合。走到下一块时，有些 worker 仍在子节点持有集合中，有些已经退出。退出的 worker 在当前深度结算，仍能继续的 worker 再向下走。这使一次查询能够得到多个端点各自的最长前缀，而非仅得到整棵树的一个最大值。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/kv_conductor/src/concurrent_tree.rs">并发前缀树</a>
+</p>
+<h3>2.2 LocalBlockHash 与 SequenceBlockHash 的分工</h3>
+<p>
+<code>hashing.rs</code> 将 token 块的内容转换为 XXH3 哈希，用作本地查询路径中的 <code>LocalBlockHash</code>。事件中的 <code>SequenceBlockHash</code> 则承担引擎块身份与父子上下文关联，参与反向删除、下层缓存续接等操作。同一份内容 hash 可以帮助找到树边，沿哪条父链、哪个实例与 DP 使用这条边，仍由上下文与持有关系约束。</p>
+<p>顺着数据结构读代码时，先找查询如何按模型和租户定位 <code>IndexerEntry</code>，再找 token 如何转成块 hash，最后进入树遍历。Python 当前客户端使用 <code>default</code> 租户。块粒度、模型身份和 tokenize 结果必须与缓存事件保持一致。混合 KV 模型里，事件的 <code>block_size</code> 还可能与引擎某个同名配置具有不同的具体粒度。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/api_client/conductor_api_client.py">Conductor 查询与注册客户端</a>
+</p>
+<aside class="aside-card">
+<strong>手工追踪</strong>
+<p>画三条 worker 路径，分别在第 1、3、4 块中断。读 <code>find_matches_detailed()</code> 时标出每次更新的 active workers 和 results，验证结果是否分别为 1、3、4。这个练习直接对应树节点持有集合的语义。</p>
+</aside>
+
+<h2 id="tier-coverage">三、HBM、CPU、Disk 怎样组成分层覆盖</h2>
+<h3>3.1 两条事件流共同确认下层数据</h3>
+<p>设备 HBM 上的 KV 由引擎事件维护，包含存入、删除和清空等变化。下沉到 CPU 或磁盘时，引擎事件通常提供 token 内容与块身份关联，存储池事件则提供保存完成和介质位置。Conductor 需要把两侧信息匹配，才能建立可以用于查询的下层索引。</p>
+<p>事件允许乱序到达。引擎信息先到时保存内容映射，Pool 确认先到时保存 pending 事件，另一半出现后再完成索引。长期无法配对的信息通过维护任务与 TTL 回收。代码中的 offload、pending、content 缓存各自服务于这条配对过程，读者可以逐一追它们的插入、查询和删除位置。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/kv_conductor/src/events/pool.rs">Pool 事件与配对逻辑</a>
+</p>
+<h3>3.2 续接必须保持实例与 DP 归属</h3>
+<p>
+<code>find_matches_with_coverage()</code> 先查询 HBM，获取匹配深度和最后一个 sequence hash，再以合法断点查询 CPU/Disk。下层也可以拥有从根开始的完整前缀。断点续接需要保持同一实例、同一 DP 与父块身份的连续性，否则可能把其他端点的上半段拼到本端点下半段，产生虚假的完整命中。</p>
+<p>查询内部记录各介质的绝对覆盖终点，最终响应再按优先级切成互斥贡献。若 NPU 覆盖到第 48 块、CPU 到第 56 块、Disk 到第 64 块，则返回的贡献分别为 48、8、8 块。这样同一前缀在多个介质上有副本时，不会重复记入收益。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/kv_conductor/src/indexer/mod.rs">分层查询与 build_response</a>
+</p>
+<div class="math-block">\[
+B_n=E_n,\qquad B_c=\max(0,E_c-E_n),\qquad
+B_d=\max(0,E_d-\max(E_n,E_c)).
+\]</div>
+<aside class="aside-card">
+<strong>变量口径</strong>
+<p>
+<code>E</code> 表示连续覆盖的绝对终点，<code>B</code> 表示去重后的介质贡献。Conductor 的 <code>matched_tokens</code> 使用未加权贡献总和，权重留给 Coordinator 应用。先核对这层口径，再解读调度日志。</p>
+</aside>
+
+<h2 id="weighted-score">四、从分层命中推导调度评分</h2>
+<h3>4.1 五个数值贯穿一次选择</h3>
+<p>输入长度记为 <code>I</code>，每块 token 数记为 <code>b</code>。Conductor 返回原始覆盖 <code>R</code>，Coordinator 按介质权重折算加权命中 <code>M</code>，进而计算剩余 Prefill 成本 <code>C</code>、综合评分 <code>S</code> 和实际负载提交增量 <code>W</code>。这些数值有不同的用途，应当分别记录。</p>
+<div class="math-block">\[
+M=\min\!\left(I,\operatorname{round}\left[b(w_nB_n+w_cB_c+w_dB_d)\right]\right),
+\quad C=\max(0,I-\gamma M),\quad S=aC+\lambda L.
+\]</div>
+<p>其中 <code>γ</code> 对应 <code>overlap_credit</code>，<code>a</code> 对应 <code>prefill_load_scale</code>，<code>λ</code> 对应 <code>load_weight</code>，<code>L</code> 为端点当前调度负载。默认三项评分系数均为 1，介质权重为 NPU=1、CPU=1、Disk=0。权重体现收益折算，配置值与真实加载速度之间需要通过实验校准。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/config/coordinator.py">KvAffinityConfig</a>
+</p>
+<h3>4.2 算一个能够改变直觉的例子</h3>
+<p>设输入 8192 token、每块 128 token。A 的互斥贡献为 48/8/8 块，当前负载 6000。B 为 16/8/0 块，负载 1000。C 暂无缓存且负载为 0。按默认权重计算，得到下表。所有数据都是教学假设。</p>
+<table class="calc-table">
+<thead>
+<tr>
+<th>端点</th>
+<th>原始覆盖 R</th>
+<th>加权命中 M</th>
+<th>剩余成本 C</th>
+<th>当前负载 L</th>
+<th>评分 S</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>A</td>
+<td>8192</td>
+<td>7168</td>
+<td>1024</td>
+<td>6000</td>
+<td>7024</td>
+</tr>
+<tr>
+<td>B</td>
+<td>3072</td>
+<td>3072</td>
+<td>5120</td>
+<td>1000</td>
+<td>6120</td>
+</tr>
+<tr>
+<td>C</td>
+<td>0</td>
+<td>0</td>
+<td>8192</td>
+<td>0</td>
+<td>8192</td>
+</tr>
+</tbody>
+</table>
+<p>B 获得最低评分。A 的缓存更多，已有负载却抵消了部分收益。C 的排队压力最低，需要计算的输入最多。如果 A 的负载下降到 3000，它的评分变成 4024，选择随之转向 A。如果 CPU 权重降为 0.5，则 A 的 M 变为 6656，说明分层加载成本也可以改变排序。</p>
+<h3>4.3 unified 与 load_gated 的取舍</h3>
+<p>
+<code>unified</code> 对所有有效候选计算综合评分，同分初选随机打散。<code>load_gated</code> 则先保留负载最低的 N 个端点，再在集合中优先选择最长加权命中，随后比较负载。<code>load_gate_topn</code> 未设置时采用默认值 2。前一种提供连续折中，后一种在候选形成阶段设置负载边界。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/scheduler/policy/kv_cache_affinity.py">_select_with_load 与 _select_load_gated</a>
+</p>
+<aside class="aside-card">
+<strong>练习</strong>
+<p>保持 A、B 的缓存数据不变，逐步增加 A 的负载，手算两者评分交叉的位置。再将 <code>load_weight</code> 设为 0，解释这时所有请求为什么更倾向最长缓存前缀，以及高并发时可能出现什么分布。</p>
+</aside>
+
+<h2 id="allocate-fallback">五、从候选走到真实提交，再处理回退</h2>
+<h3>5.1 排序成本与账本增量分别计算</h3>
+<p>亲和策略在 <code>req_info.kv_affinity_debug</code> 中保存各候选的命中、负载、剩余成本和分层覆盖，Worker 据此构造分配候选。<code>select_and_allocate()</code> 对目标执行身份、角色、能力、阻断等检查，再向共享内存做 CAS。期间其他 Worker 可能修改同一端点负载，因此初选候选与最终提交端点可能不同。</p>
+<p>当前 P/U 亲和路径的实际提交增量为 <code>max(0, I−M)</code>。例如 A 的 M=7168，即使将 <code>overlap_credit</code> 改为 0.5，使排序剩余成本增加到 4608，实际提交增量仍为 1024。请求账本必须记录最终端点及实际提交量，结束时再按记录释放。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/scheduler/runtime/scheduler_client.py">_committed_workload_for 与 select_and_allocate</a>
+</p>
+<p>初选使用端点负载，CAS 冲突后的全局亲和仲裁会结合更新视图和实例平均压力重新评分。最终 <code>scheduled</code> 日志中的 <code>score</code> 也需按具体路径解释。分析时先看 <code>policy</code>、<code>fast_path</code>、<code>repicked</code> 和最终端点，再对照各阶段公式。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/scheduler/allocate_arbitration.py">竞争后的候选仲裁</a>
+</p>
+<h3>5.2 回退原因决定可观测性</h3>
+<table class="decision-table">
+<thead>
+<tr>
+<th>情况</th>
+<th>当前行为</th>
+<th>阅读注意点</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>最佳加权命中率不超过已开启阈值</td>
+<td>返回空列表，调用方转负载均衡</td>
+<td>阈值要求严格大于，等于也回退</td>
+</tr>
+<tr>
+<td>缺 tenant 或没有任何当前实例数据</td>
+<td>返回 None，记录亲和不可用并转负载均衡</td>
+<td>与低收益主动拒绝区分</td>
+</tr>
+<tr>
+<td>部分实例缺索引</td>
+<td>以零命中参与比较</td>
+<td>保留冷实例凭低负载接请求的机会</td>
+</tr>
+<tr>
+<td>prompt 短于一个配置块</td>
+<td>跳过 Conductor 查询，按零命中进入评分</td>
+<td>后续阈值规则仍然适用</td>
+</tr>
+<tr>
+<td>Conductor 连续查询失败</td>
+<td>客户端进入冷却，查询返回空结果</td>
+<td>当前 3 次失败触发 30 秒冷却</td>
+</tr>
+<tr>
+<td>负载均衡也无候选</td>
+<td>尝试轮转，最终可分配资源仍可能为空</td>
+<td>回退仍受可用拓扑约束</td>
+</tr>
+</tbody>
+</table>
+<p>命中率门槛使用 <code>max(M)/I</code>。上例最佳值为 87.5%，阈值设为 87.5% 或 90% 均会回退，设为 0 则关闭门槛。查询客户端当前配置单次 timeout=3 秒，冷却前的失败尝试仍可能增加延迟。测试回退时，应记录这些等待，而非只检查最后是否返回成功。</p>
+<aside class="aside-card">
+<strong>冷启动的反馈环</strong>
+<p>若零缓存实例被直接移除候选，它会失去积累缓存的请求。源码把部分缺失索引当成零命中参与评分，使低负载新实例仍有机会建立缓存。这是调度策略与缓存分布互相影响的一个例子。</p>
+</aside>
+
+<h2 id="cache-modules">六、按目录把缓存子系统串起来</h2>
+<p>完成公式推导后，可以按下表回到文件级阅读。每个文件先找输入对象，再找它如何改变索引或候选。这样从 Python 跳进 Rust 时仍能保持同一个请求上下文。</p>
+<table class="decision-table">
+<thead>
+<tr>
+<th>模块</th>
+<th>职责</th>
+<th>追踪对象</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>
+<code>render/tokenization_service.py</code>
+</td>
+<td>统一 Render 与本地 tokenize</td>
+<td>tokenized request、物理 token</td>
+</tr>
+<tr>
+<td>
+<code>policy/kv_cache_affinity.py</code>
+</td>
+<td>命中折算、两种排序、阈值</td>
+<td>I、M、C、候选列表</td>
+</tr>
+<tr>
+<td>
+<code>api_client/conductor_api_client.py</code>
+</td>
+<td>注册、查询、编码、查询冷却</td>
+<td>model、DP、token_ids</td>
+</tr>
+<tr>
+<td>
+<code>kv_conductor/src/server.rs</code>
+</td>
+<td>HTTP 路由、请求编解码</td>
+<td>QueryRequest、QueryResponse</td>
+</tr>
+<tr>
+<td>
+<code>protocols.rs</code>
+</td>
+<td>worker、介质、查询与事件模型</td>
+<td>WorkerKey、hash 类型</td>
+</tr>
+<tr>
+<td>
+<code>registry.rs</code>
+</td>
+<td>模型租户索引与订阅生命周期</td>
+<td>IndexerEntry、worker 注册</td>
+</tr>
+<tr>
+<td>
+<code>zmq_subscriber.rs</code>
+</td>
+<td>读取事件、重连与 replay</td>
+<td>事件来源与序列</td>
+</tr>
+<tr>
+<td>
+<code>events/vllm.rs</code>
+</td>
+<td>引擎存入、删除、清空等事件</td>
+<td>块内容与父关系</td>
+</tr>
+<tr>
+<td>
+<code>events/pool.rs</code>
+</td>
+<td>Pool 确认与乱序信息配对</td>
+<td>offload、pending</td>
+</tr>
+<tr>
+<td>
+<code>events/flex_hash.rs、helpers.rs</code>
+</td>
+<td>兼容 wire hash 并解析归属</td>
+<td>hash 表示、介质与 worker</td>
+</tr>
+<tr>
+<td>
+<code>hashing.rs、concurrent_tree.rs</code>
+</td>
+<td>内容哈希与 HBM 连续前缀</td>
+<td>LocalBlockHash、worker 集合</td>
+</tr>
+<tr>
+<td>
+<code>lower_tier.rs、backend.rs</code>
+</td>
+<td>下层连续边及后端差异</td>
+<td>parent sequence、存储位置</td>
+</tr>
+<tr>
+<td>
+<code>indexer/mod.rs</code>
+</td>
+<td>分层查询、互斥响应与维护</td>
+<td>绝对终点与介质贡献</td>
+</tr>
+<tr>
+<td>
+<code>runtime/scheduler_client.py</code>
+</td>
+<td>CAS 提交及实际分配日志</td>
+<td>最终端点、W、generation</td>
+</tr>
+</tbody>
+</table>
+<aside class="aside-card">
+<strong>一个拓扑细节</strong>
+<p>多端点实例通常按 endpoint.id 对应 DP。只有一个业务 HTTP 入口而引擎内部有多个 DP 时，策略会折叠各 DP 的匹配信息，并记录相关的 routed DP rank。理解这层映射后再分析单入口 SGLang 的缓存行为。</p>
+</aside>
+
+<h2 id="cache-verify">七、怎样证明缓存亲和改善了服务</h2>
+<h3>7.1 先给调度留下选择空间</h3>
+<p>选路对照实验需要至少两个合格 P 端点。只有一个 P、且 P 侧 DP1 时，可以测引擎缓存复用，却缺少比较目标端点选择的空间。实验应固定模型、硬件、TP/DP、输入输出长度、采样参数、D 侧容量和请求序列，同时给各策略相同的冷缓存或预热条件。</p>
+<p>建议比较普通负载均衡、<code>load_weight=0</code> 的纯亲和、默认 unified，再按需增加 load_gated。冷缓存负载揭示查询开销，固定长文档加变化短后缀揭示 Prefill 节省，热门前缀加高并发揭示热点折中。受控下沉和查询失败注入分别检查介质权重与故障回退。所有故障实验应在专用测试环境完成。</p>
+<h3>7.2 将同一 req_id 的证据连起来</h3>
+<p>依次记录 tokenize 长度、Conductor 原始覆盖、加权命中、初选候选、最终 <code>scheduled</code> 端点、引擎实际前缀复用及客户端首 token。最终日志中的 <code>matched</code> 和 <code>hit_rate</code> 使用加权口径，<code>hbm/cpu/disk</code> 表示介质 token 数，<code>committed</code> 则用于账本。索引更新和引擎缓存生命周期之间存在时间差，因此链路验证要一直走到实际引擎与客户端。</p>
+<p>性能结果同时报告 TTFT 的 P50/P95/P99、TPOT、成功请求吞吐、token 吞吐、错误率、调度/查询耗时与各 P/DP 分布。固定请求序列并重复运行、交换策略执行顺序，可以降低一次预热和流量波动带来的偏差。分位数应基于合并样本或直方图估计，避免平均各端点的 P99。</p>
+<p>观察到“Conductor 覆盖很高、TTFT 却没有下降”时，可以顺着时间线继续缩小范围。若请求先花很长时间完成 tokenize 或查询，减少的 Prefill 计算可能被入口开销消耗。若请求确实到达命中端点，而该端点已经排了很多工作，问题落到负载折中的权重和账本代理信号。若索引显示覆盖、引擎实际复用却偏低，则进一步核对事件时效、逐出、模板、块粒度和存储加载。每一步都用同一个请求身份关联证据。</p>
+<p>查询开销本身也值得拆开。长上下文意味着更多 token 要编码并经 HTTP 发送，Conductor 再进行哈希、树遍历、下层续接和响应编码。当前客户端默认使用 MessagePack，源码还在查询端记录哈希与匹配相关时长。测量时可以把请求长度分桶，比较查询耗时是否随输入增长，以及收益主要出现在何种前缀复用比例。这样才能判断调度参数适合整个业务，还是只适合某类长文档请求。</p>
+<p>权重扫描应先固定其他变量。保持同一缓存快照和候选负载，单独改变 CPU 权重，观察预测的端点切换。随后在可控下沉条件下测实际加载与首 token 时间，再选择能反映业务代价的参数。再扫描 load_weight，观察热点端点的流量是否减少、冷实例是否获得请求、尾延迟是否改善。将两个维度同时任意变化，会让结果难以归因。</p>
+<p>还可以加入一次删除验证。让一段已知前缀先进入索引，再触发对应块删除或 worker 注销，确认后续查询的覆盖下降。随后让该端点重新承接请求，检查缓存能够再次积累。这个过程检验的是索引生命周期与选路反馈，不依赖吞吐提升的假设，也适合在深入压测之前作为功能验收。</p>
+<h3>7.3 从测试回到实现</h3>
+<p>Python 优先阅读 <code>test_kv_cache_affinity.py</code> 中的 CPU 权重、部分 tenant、短 prompt、阈值边界和 load-gated 测试。Rust 优先阅读 <code>indexer/tests.rs</code> 中的 HBM→CPU 续接、同实例同 DP 约束、Disk 扩展、分层互斥贡献和删除维护测试。先抄出测试输入与断言，再定位实现中保证该行为的分支。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/tests/coordinator/scheduler/test_kv_cache_affinity.py">亲和策略测试</a>、<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/kv_conductor/src/indexer/tests.rs">分层索引测试</a>
+</p>
+<p>一次测试的输入也能转化为面试中的可解释例子。例如，将两个候选的命中设为相同、负载设为不同，检查算法能否偏向低负载端点。将两者负载设为相同、命中设为不同，检查排序是否偏向更长前缀。再构造某个实例完全缺少索引的响应，确认它仍在候选范围。最后把候选的共享内存 generation 改变，解释为什么最早的评分不能授权它继续完成分配。</p>
+<aside class="aside-card">
+<strong>本篇阅读产出</strong>
+<p>画一张“事件→索引→查询→评分→CAS→引擎命中”的图，手算上文 A/B/C 候选，再写出一次热点压测需要收集的指标。能够解释每个量的归属与观测位置，就可以继续进入流式故障与请求恢复。</p>
+</aside>
+
+      <div class="essay-ending">接下来沿着流式响应、重调度与精度探测继续追踪对象和状态。</div>
+      <section class="references-section" aria-label="源码与延伸阅读"><h2>源码与延伸阅读</h2><ol class="reference-list"><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/scheduler/policy/kv_cache_affinity.py" target="_blank" rel="noopener noreferrer">motor/coordinator/scheduler/policy/kv_cache_affinity.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/kv_conductor/src/concurrent_tree.rs" target="_blank" rel="noopener noreferrer">motor/kv_conductor/src/concurrent_tree.rs</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/api_client/conductor_api_client.py" target="_blank" rel="noopener noreferrer">motor/coordinator/api_client/conductor_api_client.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/kv_conductor/src/events/pool.rs" target="_blank" rel="noopener noreferrer">motor/kv_conductor/src/events/pool.rs</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/kv_conductor/src/indexer/mod.rs" target="_blank" rel="noopener noreferrer">motor/kv_conductor/src/indexer/mod.rs</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/config/coordinator.py" target="_blank" rel="noopener noreferrer">motor/config/coordinator.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/scheduler/runtime/scheduler_client.py" target="_blank" rel="noopener noreferrer">motor/coordinator/scheduler/runtime/scheduler_client.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/scheduler/allocate_arbitration.py" target="_blank" rel="noopener noreferrer">motor/coordinator/scheduler/allocate_arbitration.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/tests/coordinator/scheduler/test_kv_cache_affinity.py" target="_blank" rel="noopener noreferrer">tests/coordinator/scheduler/test_kv_cache_affinity.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/kv_conductor/src/indexer/tests.rs" target="_blank" rel="noopener noreferrer">motor/kv_conductor/src/indexer/tests.rs</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="llm-inference-prefill-decode-bottleneck-analysis.html">LLM 推理性能分析</a><span>配合阅读 Prefill、Decode、并行维度与服务指标。</span></li><li><a href="mooncake-architecture-overview.html">Mooncake 架构与源码阅读地图</a><span>继续追踪引擎之外的 KV 存储和传输机制。</span></li></ol></section>
+      <nav class="pymotor-next" aria-label="前后篇"><a href="pymotor-03-scheduler-shm.html">← 上一篇 · 调度策略与共享内存并发记账</a><a href="pymotor-05-stream-recovery.html">下一篇 · 流式响应、重调度与精度探测 →</a></nav>
+    </section>
+    <section class="comments-section" id="comments" aria-label="Discussion"><div class="comments-header"><h2>Discussion</h2></div><div id="utterances-container" class="utterances-container"></div><noscript>请启用 JavaScript 查看评论。</noscript></section>
+  </article></main>
+  <footer class="site-footer"><span class="footer-credit">© 2026 by <a href="../../index.html">MOFANG</a></span></footer>
+  <script src="../../app.js?v=46"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" crossorigin="anonymous"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js" crossorigin="anonymous" onload="renderMathInElement(document.querySelector('.post-page-content'),{delimiters:[{left:'\\[',right:'\\]',display:true},{left:'\\(',right:'\\)',display:false}],throwOnError:false});"></script>
+</body>
+</html>

@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="night">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <script>(function(){try{var s=localStorage.getItem("yichuan-theme");document.documentElement.setAttribute("data-theme",s||(matchMedia("(prefers-color-scheme: dark)").matches?"night":"day"));}catch(e){}})();</script>
+  <link rel="stylesheet" href="../../styles.css?v=64" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous" />
+  <title>PyMotor 源码阅读（2）｜一次请求的完整执行链</title>
+  <meta name="description" content="沿非流式 HANDOFF 请求逐步追踪入口、tokenization、路由策略、P/D 协议适配和响应清理，再对照 TRIGGER、BOOTSTRAP 与混部路径。" />
+</head>
+<body class="pymotor-post">
+  <div class="ambient" aria-hidden="true"><span class="orb orb-a"></span><span class="orb orb-b"></span></div><canvas id="star-canvas"></canvas>
+  <header class="site-header"><div class="header-inner"><a href="../../index.html" class="logo"><span class="logo-dot"></span><span class="logo-text">MOFANG</span></a><div class="header-actions"><nav class="site-nav"><a href="../../index.html">← 首页</a></nav><button id="theme-toggle" class="theme-toggle" type="button" aria-label="切换主题"><span class="icon-sun">☀️</span><span class="icon-moon">🌙</span></button></div></div></header>
+  <main class="site-main"><article class="post-page">
+    <header class="post-page-header">
+      <p class="post-page-category">Inference · PyMotor 源码阅读 02</p>
+      <h1 class="post-page-title">PyMotor 源码阅读（2）｜一次请求的完整执行链</h1>
+      <p class="post-lead">沿非流式 HANDOFF 请求逐步追踪入口、tokenization、路由策略、P/D 协议适配和响应清理，再对照 TRIGGER、BOOTSTRAP 与混部路径。本文对照 <a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/README.md" target="_blank" rel="noopener noreferrer">MindIE-PyMotor 841e50df 源码</a>。</p>
+      <div class="post-page-keywords" aria-label="关键词"><a class="post-keyword-chip" href="../../index.html?keyword=pymotor">PyMotor</a><a class="post-keyword-chip" href="../../index.html?keyword=inference-systems">推理框架</a><a class="post-keyword-chip" href="../../index.html?keyword=pd-disagg">PD 分离</a></div>
+      <p class="post-page-meta" data-date="2026-11-11" data-author="MOFANG" data-minutes=""></p>
+    </header>
+    <details class="pymotor-series-menu"><summary>PyMotor 源码阅读系列 · 3 / 9</summary><ol><li><a href="pymotor-00-overview.html"><span>00</span> 系统全景与源码阅读路线</a></li>
+<li><a href="pymotor-01-startup.html"><span>01</span> 配置、注册与实例上线</a></li>
+<li><a href="pymotor-02-request.html" aria-current="page"><span>02</span> 一次请求的完整执行链</a></li>
+<li><a href="pymotor-03-scheduler-shm.html"><span>03</span> 调度策略与共享内存并发记账</a></li>
+<li><a href="pymotor-04-kv-affinity.html"><span>04</span> 缓存亲和与分层前缀索引</a></li>
+<li><a href="pymotor-05-stream-recovery.html"><span>05</span> 流式响应、重调度与精度探测</a></li>
+<li><a href="pymotor-06-node-manager.html"><span>06</span> NodeManager 与原生引擎运行时</a></li>
+<li><a href="pymotor-07-ep-fault-tolerance.html"><span>07</span> 大 EP 实例的故障恢复</a></li>
+<li><a href="pymotor-08-observability.html"><span>08</span> 观测、验证与项目复盘</a></li></ol></details>
+    <div class="logic-map" aria-label="本文逻辑路线"><div class="map-node map-node--start"><span>1</span><strong>请求上下文</strong></div><div class="map-arrow" aria-hidden="true">→</div><div class="map-node map-node--ar"><span>2</span><strong>资源选择</strong></div><div class="map-arrow" aria-hidden="true">→</div><div class="map-node map-node--par"><span>3</span><strong>P/D 交接</strong></div><div class="map-arrow" aria-hidden="true">→</div><div class="map-node map-node--conv"><span>4</span><strong>响应收尾</strong></div></div>
+    <nav class="pymotor-toc" aria-label="本文目录"><strong>本文目录</strong><ol><li><a href="#processes">一、先把 Coordinator 的进程与状态分清</a></li><li><a href="#ingress">二、HTTP 入口怎样建立统一请求上下文</a></li><li><a href="#render">三、Render 如何连接客户端协议与 token 请求</a></li><li><a href="#handoff">四、HANDOFF 怎样把 P 和 D 串成一次请求</a></li><li><a href="#protocols">五、TRIGGER、BOOTSTRAP 和混部怎样改变控制流</a></li><li><a href="#cleanup">六、请求完成的标志包含资源清理</a></li></ol></nav>
+    <section class="post-page-content">
+<p>上一篇跟踪了引擎怎样进入可服务成员集合。现在假设 P、D 实例已经健康，并且 Coordinator 能看见它们。我们为一条 Chat Completion 起名 R1，沿非流式 HANDOFF 请求继续向下读。阅读目标是准确说明每一阶段传递什么、保存哪些状态、遇到失败由谁收尾。</p>
+<p>这条主线对应 vLLM 与支持交接票据的 KV Connector。TRIGGER 和 SGLang BOOTSTRAP 的阶段顺序各有约束，先读通一种，再比较差异，能够避免在大型 Router 文件中反复迷路。</p>
+
+<h2 id="processes">一、先把 Coordinator 的进程与状态分清</h2>
+<h3>1.1 父进程、Mgmt、Obs 和 Worker</h3>
+<p>
+<code>CoordinatorDaemon.run()</code> 初始化进程管理器，并按 Mgmt、Obs、Inference 的顺序拉起子进程。Mgmt 先准备控制通道和共享内存，后续进程再连接。多个 Inference Worker 处理业务请求，Obs 汇总指标，父 Daemon 组织角色变化和子进程监督。</p>
+<p>启动顺序与状态归属紧密相关。Mgmt 持有成员控制状态和共享内存 owner，Worker 持有本地请求上下文、成员缓存和 SchedulerClient。请求转发时可以在本 Worker 选择目标并提交负载，管理面通过控制消息、成员变更和共享段提供协作。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/daemon/coordinator_daemon.py">Coordinator 进程生命周期</a>
+</p>
+<table class="decision-table">
+<thead>
+<tr>
+<th>子模块</th>
+<th>职责</th>
+<th>与请求的关系</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>
+<code>daemon/coordinator_daemon.py</code>
+</td>
+<td>启动、信号、主备角色与停止顺序</td>
+<td>决定当前服务角色及进程集合</td>
+</tr>
+<tr>
+<td>
+<code>daemon/subprocess_supervisor.py</code>
+</td>
+<td>子进程存活监督</td>
+<td>发现请求处理进程异常</td>
+</tr>
+<tr>
+<td>
+<code>daemon/role_shm_holder.py</code>
+</td>
+<td>共享角色与父进程心跳</td>
+<td>为 readiness 与失效判断提供状态</td>
+</tr>
+<tr>
+<td>
+<code>process/mgmt_manager.py</code>、<code>obs_manager.py</code>
+</td>
+<td>管理与观测子进程入口</td>
+<td>准备运行时控制和指标服务</td>
+</tr>
+<tr>
+<td>
+<code>process/inference_manager.py</code>
+</td>
+<td>Inference Workers 与可选 metaserver</td>
+<td>创建实际接收业务的 Worker</td>
+</tr>
+<tr>
+<td>
+<code>process/base.py</code>、<code>utils.py</code>、<code>constants.py</code>
+</td>
+<td>公共进程、共享 socket 与角色约定</td>
+<td>连接启动机制和业务监听</td>
+</tr>
+</tbody>
+</table>
+<h3>1.2 一个请求由谁记住</h3>
+<p>
+<code>models/request.py</code> 定义 <code>RequestInfo</code>，记录请求身份、请求数据、token、时间状态、追踪和重试相关信息。<code>domain/request_manager.py</code> 管理当前 Worker 的在途请求及实际分配的负载记录。一个根请求可能经历多次内部尝试，<code>PDDispatchSession</code> 和 <code>AttemptContext</code> 为每次尝试保存 P/D 资源、阶段任务与释放状态。</p>
+<aside class="aside-card">给 R1 画两层身份。外层 req_id 表示用户的一次请求，内层 attempt_seq 表示某次执行尝试。将资源分配、错误与释放都标到对应 attempt 上，后续阅读重试和流式恢复会清楚很多。</aside>
+
+<h2 id="ingress">二、HTTP 入口怎样建立统一请求上下文</h2>
+<h3>2.1 从接口注册进入 dispatch</h3>
+<p>入口在 <code>api_server/inference_server.py</code>。路由注册将 Chat Completion 等 API 连接到处理函数，<code>_handle_openai_request()</code> 检查请求内容、必要字段、认证和服务可用条件，并注入调度客户端、配置与 RequestManager。<code>app_builder.py</code> 负责应用和中间件组装，<code>base_server.py</code> 承担通用服务逻辑。</p>
+<p>同目录的 management server 接收成员刷新和运行时控制，observability server 提供观察接口。业务链先跟 inference server 即可，等要解释“这些成员从哪里来”时再回到管理服务。入口中间件中的限流也要结合实际状态作用域理解，字段名称本身无法证明跨 Pod 共享限流。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/api_server/inference_server.py">推理请求入口</a>
+</p>
+<h3>2.2 handle_request 与 RequestInfo</h3>
+<p>
+<code>router/dispatch.py::handle_request()</code> 调用请求信息构造逻辑，接入追踪父上下文，执行 tokenization 和上下文预算处理，再调用 <code>select_router_class()</code>。这里的 <code>req_len</code> 记录原始请求体字节长度，<code>token_ids</code> 才表示编码后的输入序列，两者后续会用于不同负载路径。</p>
+<p>假设 R1 的 JSON 包含长系统提示和短用户问题。原始 JSON 长度还包含字段名、角色和结构符号，token 长度则由模板与 tokenizer 决定。即便两条请求的用户问题相同，只要 chat template、tools 或系统提示不同，输入序列也可能变化。先明确输入的实际表示，才能解释缓存查询和长度估算。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/router/dispatch.py">请求上下文和 Router 选择</a>
+</p>
+<div class="callout">入口层建立用户请求合同，dispatch 建立内部执行上下文。后面的 Router 可以依赖明确的请求身份、输入表示和依赖对象来编排阶段。</div>
+
+<h2 id="render">三、Render 如何连接客户端协议与 token 请求</h2>
+<h3>3.1 为什么 tokenize 要有统一入口</h3>
+<p>
+<code>TokenizationService.tokenize()</code> 优先按配置和 API 合同使用 Render，允许的失败分支再尝试本地 tokenizer。统一结果可以供缓存亲和查询、上下文预算和引擎 token-only 请求复用，减少各阶段独立套模板造成的偏差。服务还处理不同 API 的输出预算字段，以及多 prompt 等输入的标准表示。</p>
+<p>Render 返回的 <code>TokenizedRequest</code> 携带 prompt token 与相应生成元数据。开启 token 混淆时，还需要区分语义 token 与引擎实际使用的物理 token。此时错误回退必须服从混淆合同，代码会在要求 Render 的路径上拒绝无法满足条件的执行。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/render/tokenization_service.py">统一 tokenization 与回退</a>
+</p>
+<table class="decision-table">
+<thead>
+<tr>
+<th>文件</th>
+<th>输入输出关系</th>
+<th>阅读重点</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>
+<code>render/api_spec.py</code>、<code>models.py</code>
+</td>
+<td>API 合同与标准 token 结果</td>
+<td>哪些入口与字段受到支持</td>
+</tr>
+<tr>
+<td>
+<code>vllm_render_client.py</code>
+</td>
+<td>Render/Derender HTTP 调用</td>
+<td>可用性、错误和响应验证</td>
+</tr>
+<tr>
+<td>
+<code>response.py</code>
+</td>
+<td>非流式 token-only 结果还原</td>
+<td>客户端响应形状如何恢复</td>
+</tr>
+<tr>
+<td>
+<code>streaming_response.py</code>
+</td>
+<td>逐个增量结果还原</td>
+<td>请求与 choice 的状态如何保持</td>
+</tr>
+<tr>
+<td>
+<code>token_obfuscation_service.py</code>
+</td>
+<td>可选 token ID 映射</td>
+<td>查询与引擎的 token 身份一致性</td>
+</tr>
+<tr>
+<td>
+<code>image_obfuscation_service.py</code>、<code>obfuscation_library.py</code>
+</td>
+<td>图像特征与外部混淆库</td>
+<td>配置、能力与加载边界</td>
+</tr>
+</tbody>
+</table>
+<h3>3.2 跟踪一次长度预算变化</h3>
+<p>假设模型有效上下文上限为 8,192，Render 得到 6,000 个输入 token，用户请求最多生成 3,000 个。开启相应上下文预算处理后，可用输出空间为 2,192，请求的有效输出预算会被收紧到这个范围。这里先按输入长度与配置上限做预算，接下来 Router 和 Adapter 还会根据 P/D 阶段改写具体请求。示例数字用于说明控制流，真实 token 数应以模板编码结果为准。</p>
+<aside class="aside-card">Render 是协议预处理与还原服务，Encode 角色负责多模态编码阶段。阅读 <code>BaseRouter.do_encode()</code> 时应继续追它的可用角色、请求转换和阶段数据，避免仅凭名称把两条路径合并。</aside>
+
+<h2 id="handoff">四、HANDOFF 怎样把 P 和 D 串成一次请求</h2>
+<h3>4.1 先有合法拓扑，再有一次 attempt</h3>
+<p>
+<code>select_router_class()</code> 按当前可用拓扑、引擎能力和熔断状态选择策略。有兼容 P/D 组合时可以进入 UnifiedPDRouter，其他符合降级条件的组合可能进入 PDHybridRouter。只有 D 可用时还需要相应 decode colocation 能力。缺少合法路线时，入口会得到服务不可用错误。</p>
+<p>
+<code>UnifiedPDRouter._generate_response()</code> 为根请求创建 session，并在受限次数内建立 attempt。HANDOFF 的 <code>_create_attempt()</code> 先申请 P 资源，允许将 D 分配延后。资源申请经 <code>BaseRouter.prepare_resource()</code> 进入 Worker 的 SchedulerClient，选择成功后记录最终端点与负载归属。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/router/strategies/unified_pd.py">P/D attempt 与执行编排</a>
+</p>
+<figure class="diagram-figure">
+<svg viewBox="0 0 840 360" role="img" aria-label="HANDOFF 请求阶段与交接信息">
+<rect x="25" y="28" width="180" height="72" rx="12" class="d-box-blue"/>
+<text x="115" y="58" text-anchor="middle" class="d-label">R1 进入 Worker</text>
+<text x="115" y="83" text-anchor="middle" class="d-muted">RequestInfo / token</text>
+<text x="224" y="69" class="d-label">→</text>
+<rect x="259" y="28" width="180" height="72" rx="12" class="d-box-orange"/>
+<text x="349" y="58" text-anchor="middle" class="d-label">申请 P</text>
+<text x="349" y="83" text-anchor="middle" class="d-muted">选择 + 原子记账</text>
+<text x="458" y="69" class="d-label">→</text>
+<rect x="493" y="28" width="320" height="72" rx="12" class="d-box-purple"/>
+<text x="653" y="58" text-anchor="middle" class="d-label">P 计算与 ticket 返回</text>
+<text x="653" y="83" text-anchor="middle" class="d-muted">PrefillMetadata.handoff_ticket</text>
+<text x="653" y="142" text-anchor="middle" class="d-label">↓</text>
+<rect x="493" y="176" width="320" height="72" rx="12" class="d-box-blue"/>
+<text x="653" y="206" text-anchor="middle" class="d-label">延后申请 D</text>
+<text x="653" y="231" text-anchor="middle" class="d-muted">ticket 注入 → Connector 使用 KV</text>
+<text x="458" y="217" class="d-label">←</text>
+<rect x="259" y="176" width="180" height="72" rx="12" class="d-box-orange"/>
+<text x="349" y="206" text-anchor="middle" class="d-label">D 生成</text>
+<text x="349" y="231" text-anchor="middle" class="d-muted">响应整理 / Derender</text>
+<text x="224" y="217" class="d-label">←</text>
+<rect x="25" y="176" width="180" height="72" rx="12" class="d-box-purple"/>
+<text x="115" y="206" text-anchor="middle" class="d-label">返回并清理</text>
+<text x="115" y="231" text-anchor="middle" class="d-muted">任务 / 负载 / 请求记录</text>
+<text x="420" y="303" text-anchor="middle" class="d-muted">Coordinator 组织阶段并传递交接信息，引擎与 Connector 执行 KV 数据操作</text>
+</svg>
+<figcaption>HANDOFF 将 P 的完成结果作为 D 的请求输入，阶段顺序因此直接写进控制流。</figcaption>
+</figure>
+<h3>4.2 适配器为什么要校验 P 响应</h3>
+<p>
+<code>VllmProtocolAdapter.build_prefill_request()</code> 复制原请求，注入引擎请求身份，设置非流式与短生成预算，并加入远程 Decode 所需的 KV 字段。P 完成后，<code>parse_prefill_response()</code> 检查返回的交接参数和远程 Prefill 标记，再建立 <code>PrefillMetadata</code>。D 请求通过 <code>build_decode_request()</code> 携带这张票据。</p>
+<p>这一步把原生协议的字段约束集中在 Adapter。Router 负责何时申请、发送、等待和释放，Adapter 负责原生消息应满足什么结构。P 的 HTTP 状态成功仍不足以保证 D 能继续执行，交接字段必须满足协议合同。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/router/adapters/pd_protocol.py">原生 P/D 协议适配</a>
+</p>
+<p>可以手工抄三份小字典来跟踪 R1。第一份保存用户的 messages、生成预算 128 和 stream=false。第二份表示 P 请求，保留必要输入，将阶段生成预算收紧到 1，并加入远程 Decode 标记。第三份表示 D 请求，使用交接票据并保留用户要求的生成预算。实际字段还受 API 类型影响，例如 Responses 使用 max_output_tokens。这个练习的重点是每一次修改属于哪个合同。</p>
+<p>继续观察对象隔离。Adapter 会复制传入的数据，再注入原生请求身份和阶段字段。这样 P 阶段对预算的修改不会直接把用户原始请求改成只生成一个 token。若后续还有第二次 attempt 或需要构造 D 请求，原始请求和阶段副本之间的边界便尤为重要。读 deepcopy、数据类和 Mapping 参数时，应将它们放进这个多阶段重用场景理解。</p>
+<h3>4.3 延后选 D 改变了什么</h3>
+<p>
+<code>_run_handoff_nonstream_attempt()</code> 等待 P 完成后发起 P 负载后台释放，再调用 <code>_ensure_handoff_decode_resource()</code> 申请 D，最后发送 D 请求。长 prompt 的 Prefill 期间，D 的负载可能已经变化，延后选择可以使用较新的视图，同时避免把尚未进入 Decode 的请求提前记入 D 账本。</p>
+<p>做一个时间线练习。设 P 执行持续 800 毫秒，D 生成持续 400 毫秒。若一开始便为 D 提交负载，该负载会覆盖约 1,200 毫秒的整个窗口。延后提交时，D 侧分配更贴近实际使用阶段。这个数字例子解释记账窗口，具体收益需要测量调度、排队、传输和引擎执行时间。</p>
+<div class="callout">后台发起释放与释放确认是两个时刻。阅读时把“阶段计算结束”“提交释放任务”“共享账本已更新”分别标在时间线上，才能解释短暂负载和清理等待。</div>
+
+<h2 id="protocols">五、TRIGGER、BOOTSTRAP 和混部怎样改变控制流</h2>
+<h3>5.1 相同 P/D 目标，不同阶段驱动方式</h3>
+<table class="decision-table">
+<thead>
+<tr>
+<th>路线</th>
+<th>典型入口</th>
+<th>阶段关系</th>
+<th>需要追踪的状态</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>HANDOFF</td>
+<td>vLLM 交接型 Connector</td>
+<td>P 返回票据后派发 D</td>
+<td>ticket、延后 D 分配、P/D 释放</td>
+</tr>
+<tr>
+<td>TRIGGER</td>
+<td>vLLM layerwise 路线</td>
+<td>先启动 D，D 回调 metaserver 触发 P</td>
+<td>回调 Worker、attempt 身份、旧回调拒绝</td>
+</tr>
+<tr>
+<td>BOOTSTRAP</td>
+<td>SGLang 原生 PD</td>
+<td>P/D 用 bootstrap 信息协同执行</td>
+<td>bootstrap_host、port、room 与 peer endpoint</td>
+</tr>
+<tr>
+<td>PDHybrid</td>
+<td>可兼任阶段的合法实例</td>
+<td>选一个目标完成请求</td>
+<td>角色能力、降级条件与当前拓扑</td>
+</tr>
+</tbody>
+</table>
+<p>TRIGGER 需要 Worker 的 metaserver 接收回调。请求上下文保存在具体 Worker，所以回调要抵达正确进程，并且携带当前尝试的身份。迟到的旧尝试回调必须被识别，避免给新 attempt 注入错误阶段信息。</p>
+<p>SGLang Adapter 根据 pair 和 attempt 构造稳定 bootstrap room，D 请求还需要知道对应 P 的 bootstrap endpoint。Abort 协议和内部响应字段也由引擎适配器封装。普通 OpenAI 路径与 token-only 路径的 body 又会不同，阅读时先固定一个 API 合同，再对照扩展分支。</p>
+<h3>5.2 domain 层为什么不断出现</h3>
+<p>
+<code>domain/scheduling.py</code> 定义选中资源等结果，<code>instance_provider.py</code> 提供调度依赖接口，<code>instance_manager.py</code> 保存成员视图。<code>agent_hint.py</code>、<code>scheduling_constraint.py</code> 和 <code>scheduling_pin.py</code> 解析或表达定向约束，<code>block_offset_translator.py</code> 连接消息边界与 KV block 坐标，<code>responses_input.py</code> 适配 Responses 输入。</p>
+<p>这些模块帮助 Router 在通用对象上工作。看到字段后还需追踪其消费方，例如一个优先级或会话提示只有被调度或引擎路径使用，才形成完整行为。源代码阅读应从定义继续走到实际调用。</p>
+<p>转发边界还包括 HTTP 客户端。<code>BaseRouter</code> 依据 ScheduledResource 建立请求目标，使用连接池和配置超时发送原生请求。<code>api_client/</code> 中的 Controller、Conductor 和原生引擎客户端则服务于各自的管理、索引或状态查询。相同的 HTTP 技术被用于不同语义，沿调用方确认用途，可以避免将一次 Conductor 查询误画为推理数据转发。</p>
+<p>当 Controller 发布删除事件时，旧端点连接和关联请求也需要收尾。成员缓存、客户端连接池和 RequestManager 因而存在衔接关系。正常请求只看“发送并收到响应”容易忽略这部分，加入“请求执行途中目标被删除”的练习，才会看见领域对象与基础通信层为何需要彼此通知。</p>
+<aside class="aside-card">建议将三种 P/D 协议画成三条独立时序。它们共享资源、请求和错误基础设施，但开始阶段、等待条件及回调边界各有不同。源码中的能力检查决定哪些实例能够配对。</aside>
+
+<h2 id="cleanup">六、请求完成的标志包含资源清理</h2>
+<h3>6.1 响应整理与上下文退出</h3>
+<p>D 返回后，Router 合并必要的使用信息、维持客户端响应形状，并剥离 <code>kv_transfer_params</code> 等内部协议字段。token-only 结果按需经过 Derender。流式请求还要控制何时真正向客户端提交内容，这将在流式与恢复篇展开。</p>
+<p>
+<code>BaseRouter._manage_request_context()</code> 将请求加入 RequestManager，在退出路径中保护清理操作。它先等待相关后台释放，再回收残余负载，最后删除请求记录。资源申请成功但本地账本写入失败时，<code>prepare_resource()</code> 也会尝试补偿回滚。这个流程连接共享账本与进程本地状态。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/router/strategies/base.py">请求上下文与资源回收</a>
+</p>
+<h3>6.2 用测试重走 R1</h3>
+<p>先读 <code>test_pd_protocol_adapter.py</code>，观察 P 请求、P 响应和 D 请求的断言。再读 <code>test_router_native_handoff.py</code> 的成功路径，看 mock P 返回什么、mock D 收到什么。随后对照 <code>test_base_router_prepare_resource.py</code> 和 <code>test_workload_action_handler.py</code>，理解异常和取消如何触发回滚与释放。</p>
+<p>最后自己建立一张执行记录。第一列写 req_id 和 attempt_seq，第二列写当前阶段，第三列写 P/D endpoint，第四列写任务状态，第五列写实际负载记录。模拟 P 成功后 D 分配失败，再模拟 D 返回前客户端取消。能够指出哪些对象仍需清理、由哪个 finally 或上下文处理，就完成了从入口到收尾的一次源码阅读。</p>
+<p>另一个检查方法是为每条跨边界调用标明数据大小。入口传原始 JSON，Render 传协议和 token 元数据，P/D 转发传各阶段原生请求，KV 票据承载交接信息，Connector 处理实际 KV 张量。这个练习把控制信息与大型数据流放回正确位置，也帮助后续分析网络与延迟成本。</p>
+<p>读完之后还应能解释同一个接口为何出现不同执行路线。配置提供允许范围，当前健康成员提供可行拓扑，请求合同提供输入与响应要求，三者共同决定最终 Router。将这三项逐个替换，再观察选择函数的分支，可以比背诵类名更稳固地掌握结构。</p>
+<div class="callout">本篇的阅读产出是一条带状态归属的调用链。HTTP body、RequestInfo、AttemptContext、ScheduledResource、handoff ticket 和最终响应应当各有位置，异常路径也应能沿同一张图返回。</div>
+
+      <div class="essay-ending">接下来沿着调度策略与共享内存并发记账继续追踪对象和状态。</div>
+      <section class="references-section" aria-label="源码与延伸阅读"><h2>源码与延伸阅读</h2><ol class="reference-list"><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/daemon/coordinator_daemon.py" target="_blank" rel="noopener noreferrer">motor/coordinator/daemon/coordinator_daemon.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/api_server/inference_server.py" target="_blank" rel="noopener noreferrer">motor/coordinator/api_server/inference_server.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/router/dispatch.py" target="_blank" rel="noopener noreferrer">motor/coordinator/router/dispatch.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/render/tokenization_service.py" target="_blank" rel="noopener noreferrer">motor/coordinator/render/tokenization_service.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/router/strategies/unified_pd.py" target="_blank" rel="noopener noreferrer">motor/coordinator/router/strategies/unified_pd.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/router/adapters/pd_protocol.py" target="_blank" rel="noopener noreferrer">motor/coordinator/router/adapters/pd_protocol.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/router/strategies/base.py" target="_blank" rel="noopener noreferrer">motor/coordinator/router/strategies/base.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="llm-inference-prefill-decode-bottleneck-analysis.html">LLM 推理性能分析</a><span>配合阅读 Prefill、Decode、并行维度与服务指标。</span></li><li><a href="mooncake-architecture-overview.html">Mooncake 架构与源码阅读地图</a><span>继续追踪引擎之外的 KV 存储和传输机制。</span></li></ol></section>
+      <nav class="pymotor-next" aria-label="前后篇"><a href="pymotor-01-startup.html">← 上一篇 · 配置、注册与实例上线</a><a href="pymotor-03-scheduler-shm.html">下一篇 · 调度策略与共享内存并发记账 →</a></nav>
+    </section>
+    <section class="comments-section" id="comments" aria-label="Discussion"><div class="comments-header"><h2>Discussion</h2></div><div id="utterances-container" class="utterances-container"></div><noscript>请启用 JavaScript 查看评论。</noscript></section>
+  </article></main>
+  <footer class="site-footer"><span class="footer-credit">© 2026 by <a href="../../index.html">MOFANG</a></span></footer>
+  <script src="../../app.js?v=46"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" crossorigin="anonymous"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js" crossorigin="anonymous" onload="renderMathInElement(document.querySelector('.post-page-content'),{delimiters:[{left:'\\[',right:'\\]',display:true},{left:'\\(',right:'\\)',display:false}],throwOnError:false});"></script>
+</body>
+</html>

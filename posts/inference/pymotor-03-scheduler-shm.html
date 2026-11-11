@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="night">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <script>(function(){try{var s=localStorage.getItem("yichuan-theme");document.documentElement.setAttribute("data-theme",s||(matchMedia("(prefers-color-scheme: dark)").matches?"night":"day"));}catch(e){}})();</script>
+  <link rel="stylesheet" href="../../styles.css?v=64" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous" />
+  <title>PyMotor 源码阅读（3）｜调度策略与共享内存并发记账</title>
+  <meta name="description" content="从负载模型和四种调度策略进入 Worker 本地选点、CAS 竞争重选、seqlock 成员快照与 generation 校验，解释分配和释放怎样保持一致。" />
+</head>
+<body class="pymotor-post">
+  <div class="ambient" aria-hidden="true"><span class="orb orb-a"></span><span class="orb orb-b"></span></div><canvas id="star-canvas"></canvas>
+  <header class="site-header"><div class="header-inner"><a href="../../index.html" class="logo"><span class="logo-dot"></span><span class="logo-text">MOFANG</span></a><div class="header-actions"><nav class="site-nav"><a href="../../index.html">← 首页</a></nav><button id="theme-toggle" class="theme-toggle" type="button" aria-label="切换主题"><span class="icon-sun">☀️</span><span class="icon-moon">🌙</span></button></div></div></header>
+  <main class="site-main"><article class="post-page">
+    <header class="post-page-header">
+      <p class="post-page-category">Inference · PyMotor 源码阅读 03</p>
+      <h1 class="post-page-title">PyMotor 源码阅读（3）｜调度策略与共享内存并发记账</h1>
+      <p class="post-lead">从负载模型和四种调度策略进入 Worker 本地选点、CAS 竞争重选、seqlock 成员快照与 generation 校验，解释分配和释放怎样保持一致。本文对照 <a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/README.md" target="_blank" rel="noopener noreferrer">MindIE-PyMotor 841e50df 源码</a>。</p>
+      <div class="post-page-keywords" aria-label="关键词"><a class="post-keyword-chip" href="../../index.html?keyword=pymotor">PyMotor</a><a class="post-keyword-chip" href="../../index.html?keyword=inference-systems">推理框架</a><a class="post-keyword-chip" href="../../index.html?keyword=pd-disagg">PD 分离</a></div>
+      <p class="post-page-meta" data-date="2026-11-11" data-author="MOFANG" data-minutes=""></p>
+    </header>
+    <details class="pymotor-series-menu"><summary>PyMotor 源码阅读系列 · 4 / 9</summary><ol><li><a href="pymotor-00-overview.html"><span>00</span> 系统全景与源码阅读路线</a></li>
+<li><a href="pymotor-01-startup.html"><span>01</span> 配置、注册与实例上线</a></li>
+<li><a href="pymotor-02-request.html"><span>02</span> 一次请求的完整执行链</a></li>
+<li><a href="pymotor-03-scheduler-shm.html" aria-current="page"><span>03</span> 调度策略与共享内存并发记账</a></li>
+<li><a href="pymotor-04-kv-affinity.html"><span>04</span> 缓存亲和与分层前缀索引</a></li>
+<li><a href="pymotor-05-stream-recovery.html"><span>05</span> 流式响应、重调度与精度探测</a></li>
+<li><a href="pymotor-06-node-manager.html"><span>06</span> NodeManager 与原生引擎运行时</a></li>
+<li><a href="pymotor-07-ep-fault-tolerance.html"><span>07</span> 大 EP 实例的故障恢复</a></li>
+<li><a href="pymotor-08-observability.html"><span>08</span> 观测、验证与项目复盘</a></li></ol></details>
+    <div class="logic-map" aria-label="本文逻辑路线"><div class="map-node map-node--start"><span>1</span><strong>负载建模</strong></div><div class="map-arrow" aria-hidden="true">→</div><div class="map-node map-node--ar"><span>2</span><strong>候选评分</strong></div><div class="map-arrow" aria-hidden="true">→</div><div class="map-node map-node--par"><span>3</span><strong>CAS 提交</strong></div><div class="map-arrow" aria-hidden="true">→</div><div class="map-node map-node--conv"><span>4</span><strong>并发收尾</strong></div></div>
+    <nav class="pymotor-toc" aria-label="本文目录"><strong>本文目录</strong><ol><li><a href="#runtime">一、实际请求通过哪个 Scheduler</a></li><li><a href="#policies">二、四种策略各自观察什么</a></li><li><a href="#scores">三、评分、需求和提交量为什么要分别记录</a></li><li><a href="#shm">四、共享内存同时承载成员结构和高频负载</a></li><li><a href="#cas">五、两个 Worker 同时选择同一端点会发生什么</a></li><li><a href="#release">六、分配正确之后，怎样把负载还回去</a></li></ol></nav>
+    <section class="post-page-content">
+<p>请求已经走到 <code>BaseRouter.prepare_resource()</code>，下一步需要选择具体端点。如果系统只有一个 Worker，读取负载、选最小值、加上新请求负载，看起来已经足够。多个 Worker 并行执行时，同一份旧视图可能被反复选中，端点还会在健康变化或恢复过程中被删除。调度因此同时涉及策略与并发状态。</p>
+<p>本篇沿 <code>AsyncSchedulerClient.select_and_allocate()</code> 展开，先解释评分与记账，再进入共享内存布局、CAS 竞争和清理。KV 亲和的索引和分层公式在下一篇展开，这里先把它放回完整的分配机制。</p>
+
+<h2 id="runtime">一、实际请求通过哪个 Scheduler</h2>
+<h3>1.1 Mgmt 管成员，Worker 执行选点</h3>
+<p>当前 Coordinator 使用多进程运行。<code>scheduler/runtime/scheduler_server.py</code> 在 Mgmt 内组织成员、共享内存、控制消息与全局状态。Inference Worker 中的 <code>AsyncSchedulerClient</code> 持有本地缓存，读取共享负载，执行候选选择与分配提交。阅读 <code>scheduler.py</code> 时应结合这个生产调用路径理解它的辅助职责。</p>
+<p>这条设计减少了每次分配和释放都访问中央调度 RPC 的往返。成员控制仍通过 IPC 同步，缓存亲和查询也可能访问 Conductor，因此应明确哪项操作走共享内存、哪项操作仍需要通信。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/scheduler/runtime/scheduler_client.py">Worker 调度主路径</a>
+</p>
+<table class="decision-table">
+<thead>
+<tr>
+<th>模块</th>
+<th>所处位置</th>
+<th>核心责任</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>
+<code>runtime/scheduler_client.py</code>
+</td>
+<td>Inference Worker</td>
+<td>成员缓存、策略调用、CAS 提交、释放和控制消息</td>
+</tr>
+<tr>
+<td>
+<code>runtime/scheduler_server.py</code>
+</td>
+<td>Mgmt</td>
+<td>成员刷新、SHM owner、熔断与精度控制状态</td>
+</tr>
+<tr>
+<td>
+<code>runtime/scheduler_connection_manager.py</code>
+</td>
+<td>Worker/Obs 生命周期</td>
+<td>建立与关闭运行时连接</td>
+</tr>
+<tr>
+<td>
+<code>runtime/zmq_protocol.py</code>
+</td>
+<td>通信边界</td>
+<td>消息类型及序列化合同</td>
+</tr>
+<tr>
+<td>
+<code>allocate_arbitration.py</code>
+</td>
+<td>Worker 内的公共逻辑</td>
+<td>验证候选、竞争后重新读取与选择</td>
+</tr>
+<tr>
+<td>
+<code>runtime/kv_usage.py</code>、<code>dp_stats.py</code>、<code>scheduler_metrics.py</code>
+</td>
+<td>调度观察与辅助</td>
+<td>KV 压力、各 DP 分布和运行时指标</td>
+</tr>
+</tbody>
+</table>
+<h3>1.2 策略之前先建立可行集合</h3>
+<p>角色、引擎类型、协议能力、定向约束和熔断状态先决定哪些实例能够处理请求。一个负载很低的端点，如果无法满足当前 P/D 协议，也不能成为合法目标。算法上的最优应当在可行集合内讨论，否则分数再低也无法完成请求。</p>
+<aside class="aside-card">把分配拆成“可行性过滤、候选排序、并发提交、请求记录”四个阶段。每一阶段对应不同的失败原因，日志与测试也应按这些边界理解。</aside>
+
+<h2 id="policies">二、四种策略各自观察什么</h2>
+<h3>2.1 按角色选择策略</h3>
+<p>
+<code>SchedulerConfig</code> 将 prefill 与 decode 策略分开。P/U/E 按 Prefill 侧配置选择策略，具体亲和能力还受角色分支限制。当前动态分桶正式配置用于 Decode，Decode 也支持负载均衡和轮转，KV 亲和主要用于 P/U。配置字段与实际角色分支要一起阅读。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/config/coordinator.py">调度配置与角色约束</a>
+</p>
+<table class="decision-table">
+<thead>
+<tr>
+<th>策略</th>
+<th>主要信号</th>
+<th>适合解释的问题</th>
+<th>源码入口</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>load_balance</td>
+<td>端点负载、实例平均压力，D 可结合 KV 压力</td>
+<td>怎样避免把流量继续送到繁忙目标</td>
+<td>
+<code>policy/load_balance.py</code>
+</td>
+</tr>
+<tr>
+<td>round_robin</td>
+<td>轮转计数与可用端点</td>
+<td>怎样以简单规则分散请求</td>
+<td>
+<code>policy/round_robin.py</code>
+</td>
+</tr>
+<tr>
+<td>kv_cache_affinity</td>
+<td>缓存覆盖、剩余计算估计、当前负载</td>
+<td>怎样利用重复前缀且避免热点</td>
+<td>
+<code>policy/kv_cache_affinity.py</code>
+</td>
+</tr>
+<tr>
+<td>dynamic_bucket</td>
+<td>输入长度、桶平均负载、长度与负载亲和</td>
+<td>怎样缓解长短请求混合干扰</td>
+<td>
+<code>policy/dynamic_bucket.py</code>
+</td>
+</tr>
+</tbody>
+</table>
+<h3>2.2 轮转与动态分桶的调用方也很重要</h3>
+<p>Round robin 容易帮助建立策略接口概念，但多个 Worker 各自维护计数和偏移，严格的全局串行轮转顺序需要结合实际实现判断。策略的共同分配路径仍然管理在途计数，即便该策略提交的 token 增量可以为零。</p>
+<p>DynamicBucketSelector 先按确定顺序把 endpoint 分成短桶与长桶，更新桶平均负载，再结合输入长度与负载比例，利用 sigmoid 计算是否切换目标桶，最终选择桶内轻负载端点。selector 由 Worker 持有，某些通用策略入口直接回退到负载均衡。因此只看类的默认方法，可能错过真正的动态分桶生产路线。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/scheduler/policy/dynamic_bucket.py">动态分桶和 Worker-owned selector</a>
+</p>
+<div class="callout">策略名称只告诉读者大体思想。完整行为还由角色过滤、Worker 持有的运行状态和分配提交路径共同决定。</div>
+
+<h2 id="scores">三、评分、需求和提交量为什么要分别记录</h2>
+<h3>3.1 先手算一次负载均衡</h3>
+<p>基础负载均衡对端点评分时，既关注该端点的负载，也保留一小部分实例整体压力。实例总负载按可调度端点数归一化，避免大 DP 实例仅因端点多就被额外惩罚。默认实例压力系数为 0.05。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/scheduler/policy/load_balance.py">端点优先的复合评分</a>
+</p>
+<div class="math-block">\[S(e)=L_e+\alpha\frac{L_{\mathrm{instance}}}{N},\qquad \alpha=0.05.\]</div>
+<p>设 A 端点负载 100，所在实例总负载 1,000，有四个可调度端点。B 端点负载 108，所在实例总负载 200，有两个端点。两者评分分别为 112.5 和 113，A 略优。若 A 已接受一个负载 20 的请求，端点负载变为 120、实例总负载变为 1,020，评分便变为 132.75，此时 B 更合适。这个例子同时说明实例项应随提交后的账本变化更新。</p>
+<h3>3.2 active_tokens 是调度模型中的数值</h3>
+<p>
+<code>domain/workload_calculator.py</code> 定义不同角色的需求估计。P/U 在已经获得有效 token IDs 时使用输入 token 数，缺少 token 时使用历史字节长度估计。普通 D 路径当前返回请求体长度的浮点值。E 则根据多模态内容计算相应估计。因此，变量虽然叫 active_tokens，解释指标时仍需说明使用的是哪条路径。</p>
+<p>例如一个 JSON 请求体为 6,000 字节，tokenization 得到 2,048 个输入 token，普通 P 需求可为 2,048，而普通 D 需求代理值为 6,000。两者可以分别用于同角色候选之间的比较，不能据此得出 D 真实计算量是 P 的近三倍。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/domain/workload_calculator.py">角色需求与亲和提交量</a>
+</p>
+<h3>3.3 亲和排序成本与最终提交量</h3>
+<p>亲和策略从输入长度 I 和加权命中 M 估计剩余计算，再结合已有负载排序。选中最终端点之后，P/U 亲和提交量为 <code>max(0, I-M)</code>。排序中的 overlap_credit 和各评分权重有各自用途，不会按同一公式再次乘进提交量。动态分桶与轮转又有自己的需求路径，源码通过 candidate_policy 和角色确定最后采用的数值。</p>
+<aside class="aside-card">建议对每次分配记录五列。输入长度属于请求表示，matched 属于缓存收益模型，score 属于排序，committed 属于共享账本增量，实际延迟属于运行测量。把它们分别放在表里，能够解释“命中提高却没有变快”等现象。</aside>
+
+<h2 id="shm">四、共享内存同时承载成员结构和高频负载</h2>
+<h3>4.1 Python 与 Rust 之间的布局合同</h3>
+<p>Python 端 <code>workload_shm/layout.py</code> 定义结构，writer 管成员和状态标记，reader 读取视图并检查版本和心跳，native 经 ctypes 连接 Rust。Rust crate <code>workload_shm_rs</code> 定义对应布局、错误码和原子操作。</p>
+<p>该版本布局为 schema 5，头部 64 字节，每个端点槽位 32 字节。槽位包含 instance_id、endpoint_id、role、flags、generation、request_count、active_tokens 和 total_requests。头部还保存成员版本、心跳序列及角色相关序列。部分历史函数名仍含 v4，应以实际布局和版本检查为准。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/scheduler/runtime/workload_shm/layout.py">schema 5 共享内存布局</a>
+</p>
+<table class="decision-table">
+<thead>
+<tr>
+<th>机制</th>
+<th>保护的对象</th>
+<th>避免的问题</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>seqlock</td>
+<td>成员结构快照</td>
+<td>读到一半新、一半旧的成员表</td>
+</tr>
+<tr>
+<td>CAS</td>
+<td>高频负载提交</td>
+<td>多个 Worker 基于同一旧值覆盖更新</td>
+</tr>
+<tr>
+<td>generation</td>
+<td>槽位复用后的资源身份</td>
+<td>旧请求继续操作已经分配给新成员的槽位</td>
+</tr>
+<tr>
+<td>VALID / BLOCKED</td>
+<td>当前槽位可分配状态</td>
+<td>成员缓存传播期间仍向失效或隔离目标提交</td>
+</tr>
+<tr>
+<td>heartbeat</td>
+<td>共享段所属 Mgmt 的时效</td>
+<td>长期使用已经陈旧的运行状态</td>
+</tr>
+</tbody>
+</table>
+<h3>4.2 为什么成员快照需要一致读</h3>
+<p>Mgmt 写成员结构时会推进 seqlock 序列。读者在读取前后检查序列，发现写入中或版本发生变化便重新读取。由此可以得到同一版本下的端点身份、数量与状态结构。高频负载仍由槽位原子操作更新，两类机制保护不同频率和粒度的数据。</p>
+<p>共享内存建立在同一 Coordinator 的进程组中。多个 Coordinator Pod 各自拥有自己的运行时，不能把这份共享段解释为全服务所有进程共同访问的分布式全局账本。部署规模变化时，应进一步确认负载视图的作用范围。</p>
+<p>布局可以做一次容量手算。默认最大槽位数为 10,240，若只按头部与槽位主体计算，字节数为 64 加上 10,240 乘以 32，得到 327,744 字节。这个量说明用于选路的紧凑计数结构可以保持较小体积，但成员对象、HTTP 连接和请求缓存另有自己的内存成本。测量进程 RSS 时需要把这些结构分别归因。</p>
+<p>同一槽位里也保存了多个统计量。active_tokens 用于负载估计，request_count 表达当前在途分配数量，total_requests 表达累计分配。一个亲和请求可能因完整命中而提交很小甚至为零的 token 增量，但它仍是一条需要管理生命周期的请求。观察零负载时，配合在途和累计计数，才能区分“没有请求”与“请求的模型增量很小”。</p>
+<div class="callout">可行性检查与最终提交都要识别资源状态。成员通知让 Worker 尽快更新认识，共享段检查在提交边界再次确认目标是否仍可用。</div>
+
+<h2 id="cas">五、两个 Worker 同时选择同一端点会发生什么</h2>
+<h3>5.1 用一个竞争例子理解 CAS</h3>
+<p>假设 A 当前负载为 100。Worker X 和 Y 都读到了这个数，分别希望增加 20。X 用期望旧值 100 提交，成功后 A 变为 120。Y 仍以 100 为期望值提交时，原子比较发现旧值不一致，返回 CHANGED。Y 重新读取负载并进入仲裁，可以继续选择 A，也可以因其他端点更轻而改选。</p>
+<p>若 X、Y 最终都选择 A，两次合法增加得到 140。后续两次请求分别释放 20，账本回到 100。关键条件是每次成功分配记录实际提交量，并在清理时按该记录释放。这个例子没有模拟成员变更，加入 generation、BLOCKED 和 SLOT_INVALID 后，还能覆盖端点被隔离或槽位被替换的情况。</p>
+<figure class="diagram-figure">
+<svg viewBox="0 0 840 340" role="img" aria-label="共享负载 CAS 竞争与重新仲裁">
+<rect x="30" y="25" width="220" height="72" rx="12" class="d-box-blue"/>
+<text x="140" y="55" text-anchor="middle" class="d-label">Worker X 读到 100</text>
+<text x="140" y="80" text-anchor="middle" class="d-muted">希望增加 20</text>
+<rect x="590" y="25" width="220" height="72" rx="12" class="d-box-orange"/>
+<text x="700" y="55" text-anchor="middle" class="d-label">Worker Y 读到 100</text>
+<text x="700" y="80" text-anchor="middle" class="d-muted">希望增加 20</text>
+<text x="278" y="68" class="d-label">→</text>
+<rect x="310" y="25" width="220" height="72" rx="12" class="d-box-purple"/>
+<text x="420" y="55" text-anchor="middle" class="d-label">SHM 端点槽位</text>
+<text x="420" y="80" text-anchor="middle" class="d-muted">身份 / generation / 负载</text>
+<text x="558" y="68" class="d-label">←</text>
+<text x="140" y="139" text-anchor="middle" class="d-label">↓</text>
+<text x="700" y="139" text-anchor="middle" class="d-label">↓</text>
+<rect x="30" y="174" width="220" height="72" rx="12" class="d-box-blue"/>
+<text x="140" y="204" text-anchor="middle" class="d-label">X 提交成功</text>
+<text x="140" y="229" text-anchor="middle" class="d-muted">100 → 120</text>
+<rect x="590" y="174" width="220" height="72" rx="12" class="d-box-orange"/>
+<text x="700" y="204" text-anchor="middle" class="d-label">Y 得到 CHANGED</text>
+<text x="700" y="229" text-anchor="middle" class="d-muted">刷新 → 重选 → 再提交</text>
+<rect x="310" y="174" width="220" height="72" rx="12" class="d-box-purple"/>
+<text x="420" y="204" text-anchor="middle" class="d-label">请求账本记录归属</text>
+<text x="420" y="229" text-anchor="middle" class="d-muted">req / attempt / endpoint / 20</text>
+<text x="278" y="218" class="d-label">→</text>
+<text x="558" y="218" class="d-label">←</text>
+<text x="420" y="298" text-anchor="middle" class="d-muted">成功提交建立负载事实，请求记录连接未来的释放操作</text>
+</svg>
+<figcaption>原子提交保护共享数值，重新仲裁利用更新后的视图修正目标选择。</figcaption>
+</figure>
+<h3>5.2 不同失败码对应不同动作</h3>
+<p>
+<code>select_and_allocate()</code> 处理 OK、CHANGED、BLOCKED、SLOT_INVALID 等返回。OK 后修补本地缓存、记录各 DP 分配并输出最终 scheduled 日志。CHANGED 会刷新后重新仲裁，BLOCKED 与 SLOT_INVALID 会排除候选后继续尝试。重试次数受限，耗尽后返回分配失败。原生动态库未接入时，当前路径也会拒绝分配。</p>
+<p>
+<code>allocate_arbitration.py</code> 将“候选是否仍然有效”与“如何根据新负载重选”封装为公共逻辑。unified 亲和重选可携带各端点 Prefill 成本，配合更新后的复合负载重新评分。快路径与重选路径的日志 score 口径需要结合调用点解释，最终端点以成功提交的 scheduled 记录为准。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/scheduler/allocate_arbitration.py">候选验证与重新仲裁</a>
+</p>
+<p>将这个过程接到性能分析，调度耗时至少包含视图刷新、策略计算、可能的外部索引查询和 CAS 重试。只测评分函数的运行时间，无法完整描述请求在调度阶段停留多久。相反，看到某次调度较慢，也应先区分查询等待、竞争重试和成员同步，才能判断该优化算法、通信还是状态传播。</p>
+<aside class="aside-card">CAS 保障一次比较更新的原子性。请求完整生命周期还需要成员身份检查、提交后的本地记录、异常补偿和释放确认共同完成。</aside>
+
+<h2 id="release">六、分配正确之后，怎样把负载还回去</h2>
+<h3>6.1 两份状态之间的补偿</h3>
+<p>共享账本与 Worker 请求记录是两个状态载体。前者已经增加负载，而后者写入失败时，资源申请代码需要尝试回滚。执行阶段结束后，释放逻辑根据 req、attempt、角色和端点归属找到实际提交量，成功确认后再清理记录。重复释放与遗漏释放都会改变未来选点，因此释放标记和确认顺序值得精读。</p>
+<p>请求退出时，<code>BaseRouter._manage_request_context()</code> 在保护取消的清理范围内等待后台释放，再回收残余记录。先等待在途释放是为了避免同一份记录同时被正常释放和残余回收两次扣减。若等待过程本身失败，源码也有相应保护分支。这个清理保证应在具体运行边界内理解，进程突然消失等故障还需要结合生命周期与恢复机制分析。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/router/strategies/base.py">请求级账本补偿与清理</a>
+</p>
+<h3>6.2 建议阅读的测试与练习</h3>
+<p>先用 <code>test_load_balance_policy.py</code> 核对评分，再读 <code>test_dynamic_bucket.py</code> 观察长度、桶划分和负载边界。随后进入 <code>test_allocate_arbitration.py</code>、<code>test_workload_shm_native.py</code> 与 <code>test_base_router_prepare_resource.py</code>，把竞争、布局、候选失效和补偿连接起来。Rust 测试与 Python 原生桥接测试还能够检查 ABI 和结构版本。</p>
+<p>练习分三轮。第一轮手算 A/B 的复合评分，改变实例端点数观察结果。第二轮在纸上模拟 X/Y 同时提交，让 Y 经历一次 CHANGED。第三轮在 Y 重试前删除 A，解释旧 generation 与 SLOT_INVALID 怎样影响选择。每一轮都追加正常结束、客户端取消和资源记录失败三种清理分支。</p>
+<p>完成后用自己的话分别说明一个算法决策和一个并发保证。前者解释候选为什么更优，后者解释其他 Worker 和成员变化发生时结果怎样提交。两方面都能对应到函数、输入和测试断言，才能把调度机制讲完整。</p>
+<div class="callout">本篇应留下两张图。第一张是过滤、评分、提交、记录、释放的执行链，第二张是两个 Worker 的竞争时序。它们共同说明调度的性能路径和正确性边界。</div>
+
+      <div class="essay-ending">接下来沿着缓存亲和与分层前缀索引继续追踪对象和状态。</div>
+      <section class="references-section" aria-label="源码与延伸阅读"><h2>源码与延伸阅读</h2><ol class="reference-list"><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/scheduler/runtime/scheduler_client.py" target="_blank" rel="noopener noreferrer">motor/coordinator/scheduler/runtime/scheduler_client.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/config/coordinator.py" target="_blank" rel="noopener noreferrer">motor/config/coordinator.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/scheduler/policy/dynamic_bucket.py" target="_blank" rel="noopener noreferrer">motor/coordinator/scheduler/policy/dynamic_bucket.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/scheduler/policy/load_balance.py" target="_blank" rel="noopener noreferrer">motor/coordinator/scheduler/policy/load_balance.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/domain/workload_calculator.py" target="_blank" rel="noopener noreferrer">motor/coordinator/domain/workload_calculator.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/scheduler/runtime/workload_shm/layout.py" target="_blank" rel="noopener noreferrer">motor/coordinator/scheduler/runtime/workload_shm/layout.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/scheduler/allocate_arbitration.py" target="_blank" rel="noopener noreferrer">motor/coordinator/scheduler/allocate_arbitration.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/router/strategies/base.py" target="_blank" rel="noopener noreferrer">motor/coordinator/router/strategies/base.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="llm-inference-prefill-decode-bottleneck-analysis.html">LLM 推理性能分析</a><span>配合阅读 Prefill、Decode、并行维度与服务指标。</span></li><li><a href="mooncake-architecture-overview.html">Mooncake 架构与源码阅读地图</a><span>继续追踪引擎之外的 KV 存储和传输机制。</span></li></ol></section>
+      <nav class="pymotor-next" aria-label="前后篇"><a href="pymotor-02-request.html">← 上一篇 · 一次请求的完整执行链</a><a href="pymotor-04-kv-affinity.html">下一篇 · 缓存亲和与分层前缀索引 →</a></nav>
+    </section>
+    <section class="comments-section" id="comments" aria-label="Discussion"><div class="comments-header"><h2>Discussion</h2></div><div id="utterances-container" class="utterances-container"></div><noscript>请启用 JavaScript 查看评论。</noscript></section>
+  </article></main>
+  <footer class="site-footer"><span class="footer-credit">© 2026 by <a href="../../index.html">MOFANG</a></span></footer>
+  <script src="../../app.js?v=46"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" crossorigin="anonymous"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js" crossorigin="anonymous" onload="renderMathInElement(document.querySelector('.post-page-content'),{delimiters:[{left:'\\[',right:'\\]',display:true},{left:'\\(',right:'\\)',display:false}],throwOnError:false});"></script>
+</body>
+</html>

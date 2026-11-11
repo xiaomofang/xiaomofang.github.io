@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="night">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <script>(function(){try{var s=localStorage.getItem("yichuan-theme");document.documentElement.setAttribute("data-theme",s||(matchMedia("(prefers-color-scheme: dark)").matches?"night":"day"));}catch(e){}})();</script>
+  <link rel="stylesheet" href="../../styles.css?v=64" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous" />
+  <title>PyMotor 源码阅读（8）｜观测、验证与项目复盘</title>
+  <meta name="description" content="沿引擎指标、语义聚合、容量规划和 Trace 建立验证体系，补齐公共设施、构建与测试地图，再将源码理解组织成有证据的技术表达。" />
+</head>
+<body class="pymotor-post">
+  <div class="ambient" aria-hidden="true"><span class="orb orb-a"></span><span class="orb orb-b"></span></div><canvas id="star-canvas"></canvas>
+  <header class="site-header"><div class="header-inner"><a href="../../index.html" class="logo"><span class="logo-dot"></span><span class="logo-text">MOFANG</span></a><div class="header-actions"><nav class="site-nav"><a href="../../index.html">← 首页</a></nav><button id="theme-toggle" class="theme-toggle" type="button" aria-label="切换主题"><span class="icon-sun">☀️</span><span class="icon-moon">🌙</span></button></div></div></header>
+  <main class="site-main"><article class="post-page">
+    <header class="post-page-header">
+      <p class="post-page-category">Inference · PyMotor 源码阅读 08</p>
+      <h1 class="post-page-title">PyMotor 源码阅读（8）｜观测、验证与项目复盘</h1>
+      <p class="post-lead">沿引擎指标、语义聚合、容量规划和 Trace 建立验证体系，补齐公共设施、构建与测试地图，再将源码理解组织成有证据的技术表达。本文对照 <a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/README.md" target="_blank" rel="noopener noreferrer">MindIE-PyMotor 841e50df 源码</a>。</p>
+      <div class="post-page-keywords" aria-label="关键词"><a class="post-keyword-chip" href="../../index.html?keyword=pymotor">PyMotor</a><a class="post-keyword-chip" href="../../index.html?keyword=inference-systems">推理框架</a><a class="post-keyword-chip" href="../../index.html?keyword=pd-disagg">PD 分离</a></div>
+      <p class="post-page-meta" data-date="2026-11-11" data-author="MOFANG" data-minutes=""></p>
+    </header>
+    <details class="pymotor-series-menu"><summary>PyMotor 源码阅读系列 · 9 / 9</summary><ol><li><a href="pymotor-00-overview.html"><span>00</span> 系统全景与源码阅读路线</a></li>
+<li><a href="pymotor-01-startup.html"><span>01</span> 配置、注册与实例上线</a></li>
+<li><a href="pymotor-02-request.html"><span>02</span> 一次请求的完整执行链</a></li>
+<li><a href="pymotor-03-scheduler-shm.html"><span>03</span> 调度策略与共享内存并发记账</a></li>
+<li><a href="pymotor-04-kv-affinity.html"><span>04</span> 缓存亲和与分层前缀索引</a></li>
+<li><a href="pymotor-05-stream-recovery.html"><span>05</span> 流式响应、重调度与精度探测</a></li>
+<li><a href="pymotor-06-node-manager.html"><span>06</span> NodeManager 与原生引擎运行时</a></li>
+<li><a href="pymotor-07-ep-fault-tolerance.html"><span>07</span> 大 EP 实例的故障恢复</a></li>
+<li><a href="pymotor-08-observability.html" aria-current="page"><span>08</span> 观测、验证与项目复盘</a></li></ol></details>
+    <div class="logic-map" aria-label="本文逻辑路线"><div class="map-node map-node--start"><span>1</span><strong>指标采集</strong></div><div class="map-arrow" aria-hidden="true">→</div><div class="map-node map-node--ar"><span>2</span><strong>语义聚合</strong></div><div class="map-arrow" aria-hidden="true">→</div><div class="map-node map-node--par"><span>3</span><strong>实验验证</strong></div><div class="map-arrow" aria-hidden="true">→</div><div class="map-node map-node--conv"><span>4</span><strong>技术表达</strong></div></div>
+    <nav class="pymotor-toc" aria-label="本文目录"><strong>本文目录</strong><ol><li><a href="#metrics-pipeline">一、从原生端点到服务视图</a></li><li><a href="#metric-semantics">二、聚合方式决定数字的含义</a></li><li><a href="#capacity-planning">三、从累计计数到容量建议</a></li><li><a href="#trace-and-events">四、把整体变化还原成一次请求</a></li><li><a href="#common-and-build">五、公共基础设施怎样支撑这些链路</a></li><li><a href="#experiments-and-resume">六、用实验把源码理解变成可复核的经历</a></li></ol></nav>
+    <section class="post-page-content">
+<p class="lead">前面几篇已经跟踪了请求、缓存、进程和恢复事务。接下来要回答的，是怎样从运行证据判断系统是否按设计工作。一次请求变慢，可能发生在 tokenization、调度、Prefill 排队、KV 加载或 Decode。一个吞吐数字下降，也可能来自请求长度变化、实例退役或计数器重置。读懂 PyMotor 的可观测性代码，需要把采集边界、聚合语义和请求时间线放在同一张图上。</p>
+
+<h2 id="metrics-pipeline">一、从原生端点到服务视图</h2>
+<h3 id="metrics-pipeline-route">1.1 把一份指标沿调用链送出去</h3>
+<p>指标链路从原生引擎的 <code>/metrics</code> 开始。Coordinator 的 <code>NativeEngineApiClient</code> 获取文本，<code>MetricsCollector</code> 定期采集和解析，把结果关联到实例与端点，再通过语义聚合引擎生成实例、角色和服务视图。<code>MotorMetricComputer</code> 追加速率、实例计数及容量信号，Obs 服务把结果输出给外部监控。这里要同时记住数据从哪里来，以及经过了几次变换。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/metrics/metrics_collector.py">阅读 MetricsCollector</a>
+</p>
+<figure class="diagram-figure">
+  <svg viewBox="0 0 840 322" role="img" aria-labelledby="obs08-title obs08-desc">
+    <title id="obs08-title">PyMotor 指标采集、语义聚合与外部消费链路</title>
+    <desc id="obs08-desc">原生引擎指标先进入采集器，再依据注册的语义聚合，由派生计算和容量规划产生服务指标，最终经 Obs 输出。请求追踪与日志为这些聚合数值补充单次执行证据。</desc>
+    <defs>
+<marker id="arrowhead" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+<path d="M0 0 L8 4 L0 8 Z" class="d-accent"/>
+</marker>
+</defs>
+    <rect x="24" y="30" width="170" height="76" rx="10" class="d-box-blue"/>
+    <text x="109" y="61" text-anchor="middle" class="d-label">Engine /metrics</text>
+<text x="109" y="83" text-anchor="middle" class="d-muted">端点原生计数与直方图</text>
+    <rect x="231" y="30" width="170" height="76" rx="10" class="d-box-blue"/>
+    <text x="316" y="61" text-anchor="middle" class="d-label">MetricsCollector</text>
+<text x="316" y="83" text-anchor="middle" class="d-muted">采集、解析、缓存、失效</text>
+    <rect x="438" y="30" width="170" height="76" rx="10" class="d-box-orange"/>
+    <text x="523" y="61" text-anchor="middle" class="d-label">Registry + Aggregate</text>
+<text x="523" y="83" text-anchor="middle" class="d-muted">按指标语义合并</text>
+    <rect x="645" y="30" width="170" height="76" rx="10" class="d-box-purple"/>
+    <text x="730" y="61" text-anchor="middle" class="d-label">Computer + Planner</text>
+<text x="730" y="83" text-anchor="middle" class="d-muted">速率、容量与副本需求</text>
+    <path d="M194 68 H225" class="d-arrow"/>
+<path d="M401 68 H432" class="d-arrow"/>
+<path d="M608 68 H639" class="d-arrow"/>
+    <rect x="438" y="183" width="170" height="76" rx="10" class="d-box-purple"/>
+    <text x="523" y="215" text-anchor="middle" class="d-label">Obs 指标接口</text>
+<text x="523" y="237" text-anchor="middle" class="d-muted">Prometheus / OTLP 视图</text>
+    <rect x="645" y="183" width="170" height="76" rx="10" class="d-box"/>
+    <text x="730" y="215" text-anchor="middle" class="d-label">外部监控与控制链</text>
+<text x="730" y="237" text-anchor="middle" class="d-muted">看板、告警、扩缩容消费方</text>
+    <path d="M730 106 V145 H523 V177" class="d-arrow"/>
+<path d="M608 221 H639" class="d-arrow"/>
+    <rect x="24" y="183" width="377" height="76" rx="10" class="d-box-orange"/>
+    <text x="212" y="215" text-anchor="middle" class="d-label">Trace 与日志</text>
+<text x="212" y="237" text-anchor="middle" class="d-muted">按请求身份解释阶段耗时与状态变化</text>
+    <path d="M401 221 H432" class="d-arrow"/>
+    <text x="24" y="301" class="d-muted">指标解释整体分布，Trace 与日志连接具体请求和生命周期事件。</text>
+  </svg>
+  <figcaption>同一条服务行为留下多种证据。排查时沿着数据来源逐层确认统计边界。</figcaption>
+</figure>
+<p>采集线程会在本轮获得有效结果时更新缓存和版本，并复用这些结果向调度侧发布 KV 使用率，避免为了相同信息再抓取一次引擎指标。服务处于备用等不应提供指标的状态时，采集器会清理旧结果。数据有效性与进程角色因此共同决定对外观察到什么。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/metrics/metrics_collector.py">阅读采集线程与服务门控</a>
+</p>
+<h3 id="metrics-pipeline-files">1.2 先认识七个文件的分工</h3>
+<div class="table-wrap">
+<table class="decision-table">
+<thead>
+<tr>
+<th>子模块</th>
+<th>负责的变换</th>
+<th>阅读时追问</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>
+<code>metric_types.py</code>
+</td>
+<td>定义 Metric、类型、聚合范围与上下文</td>
+<td>一个值连同哪些标签才构成一条序列</td>
+</tr>
+<tr>
+<td>
+<code>metric_registry.py</code>
+</td>
+<td>指标名映射到语义、角色范围和派生提示</td>
+<td>它应求和、取最大值还是合并分布</td>
+</tr>
+<tr>
+<td>
+<code>aggregation_engine.py</code>
+</td>
+<td>标签级归约、直方图合并、分位数和比例</td>
+<td>合并后的数学意义能否保持</td>
+</tr>
+<tr>
+<td>
+<code>metrics_collector.py</code>
+</td>
+<td>采集、解析、缓存、失效和视图输出</td>
+<td>端点退役后旧值如何处理</td>
+</tr>
+<tr>
+<td>
+<code>metric_computer.py</code>
+</td>
+<td>计数器修正、TPS、实例数和 P/D 比例</td>
+<td>引擎重启怎样影响增量</td>
+</tr>
+<tr>
+<td>
+<code>capacity_planner.py</code>
+</td>
+<td>估计需求、容量和吞吐/KV 约束下的副本需求</td>
+<td>建议的依据是否已校准</td>
+</tr>
+<tr>
+<td>
+<code>hpa_contract.py</code>
+</td>
+<td>向外部指标消费方提供命名合同与别名</td>
+<td>哪些名称会被扩缩容链路消费</td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>
+<code>get_metrics()</code> 支持 full、instance、role、dp、node，以及只输出 Motor 指标的 motor 视图，格式可选择 Prometheus 文本或 OpenTelemetry 兼容对象。端点调度状态等附加指标主要跟随 full 与 motor 视图输出。学习时应先选择问题对应的视图，研究 DP 倾斜就先保留 DP 维度，研究整体需求则观察服务和角色维度。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/metrics/metric_types.py">阅读聚合范围定义</a>、<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/metrics/metrics_collector.py">阅读指标视图输出</a>
+</p>
+
+<h2 id="metric-semantics">二、聚合方式决定数字的含义</h2>
+<h3 id="metric-semantics-reduce">2.1 从名字、类型继续走到语义</h3>
+<p>
+<code>Metric</code> 保存名称、帮助文本、类型以及标签和值的列表。<code>MetricRegistry</code> 进一步给已知指标标记语义。累计请求、运行请求数和队列深度通常求和，热点资源指标取最大值，资源利用率和缓存指标按当前实现求算术平均，元信息选取一份。未知指标根据类型走默认路径，直方图合并，其余类型通常求和。研究一个新指标时，先查注册表，再追输出视图，才能解释聚合结果。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/metrics/metric_registry.py">阅读指标语义注册表</a>、<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/metrics/aggregation_engine.py">阅读语义归约</a>
+</p>
+<p>假设端点甲报告 90 次命中、100 次查询，端点乙报告 1 次命中、10 次查询。服务级命中率应先汇总命中数与查询数，再得到 91÷110，约为 82.7%。如果先计算两个局部比例再平均，会得到 50%，因为它给只处理少量查询的端点分配了同样权重。源码使用 <code>RatioPair</code> 描述分子分母关系，再从聚合结果派生比例。这个算例是统计口径演示。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/metrics/aggregation_engine.py">阅读 _derive_ratio()</a>
+</p>
+<h3 id="metric-semantics-histogram">2.2 分位数从合并后的分布推导</h3>
+<p>延迟直方图由 bucket、count 和 sum 共同描述。聚合引擎先按相同标签与桶边界累加，再从合并后的累计桶估计 P50、P95、P99，并由总和除以数量计算均值。它的分位数函数采用桶内线性插值。这样一个流量大的端点会按它实际贡献的样本影响分布。直接平均各节点已经算好的 P99，会丢失样本量和分布形状。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/metrics/aggregation_engine.py">阅读直方图合并与分位数计算</a>
+</p>
+<p>标签仍然重要。模型、角色或其他保留标签不同的桶应分别处理。聚合上下文还会影响角色过滤，当前服务范围会按注册的 role_scope 选择来源，DP 视图本身保留细粒度数据。阅读测试时，可以手工构造两个端点、三个桶，先计算每桶合计再对照实现，观察某条标签出现或缺失时结果如何变化。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/tests/coordinator/core/test_semantic_metrics.py">阅读聚合与分位数测试</a>
+</p>
+<aside class="aside-card">
+<p class="aside-card__label">一次口径检查</p>
+<p>看到平均 KV 利用率下降时，再查看最大值和 DP 分布。看到服务 TTFT 下降时，再检查样本量、请求长度和统计起点。当前部分利用率采用算术平均，异构端点容量不同时，还需要结合各端点容量解释整体资源状态。</p>
+</aside>
+
+<h2 id="capacity-planning">三、从累计计数到容量建议</h2>
+<h3 id="capacity-planning-rate">3.1 两次采样之间才有速率</h3>
+<p>累计 token 数表示截至采样时已经完成的工作。TPS 来自相邻采样的差值与时间间隔。<code>MotorMetricComputer</code> 按 job、DP rank 和具体标签序列保存基线，识别实例身份变化或计数器显著下降引起的重启，并修正后续累计值。每个标签各有基线，避免把一个标签的历史迁移到另一个标签。第一次采样建立基线，尚不能提供完整的采样区间。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/metrics/metric_computer.py">阅读计数器修正与速率计算</a>
+</p>
+<p>可以用一个小练习理解状态的价值。第一次采样看到累计 10,000 token，五秒后看到 12,000 token，这个区间为每秒 400 token。若引擎随后重启，原始计数变为 200，直接相减会产生负吞吐。实际代码通过序列状态处理这类情况，再把有效增量交给派生指标。这个练习还应加入同一指标的两个不同标签，检查它们是否保持独立历史。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/metrics/metric_computer.py">阅读 _compute_effective_and_rate()</a>
+</p>
+<h3 id="capacity-planning-demand">3.2 需求、供给与 KV 约束</h3>
+<p>
+<code>CapacityPlanner</code> 的需求侧从请求增量、token 增量和时间间隔估计请求到达率与平均长度，再使用指数移动平均减少抖动。零增量和负增量有保持旧样本等处理。供给侧通过观测样本及可选先验维护 P/D 容量估计。只有把需求和容量放在同一单位下，副本需求才有可解释性。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/metrics/capacity_planner.py">阅读需求跟踪与容量估计</a>
+</p>
+<div class="math-block">\[
+D=\operatorname{EMA}(\lambda)\operatorname{EMA}(\bar L),\qquad
+N_{\mathrm{throughput}}=\left\lceil\frac{D}{C\rho}\right\rceil
+\]</div>
+<p>其中 D 是 token 每秒的需求，C 是每实例容量，ρ 是目标利用率。假设平滑需求为每秒 24,000 token，每实例容量为每秒 10,000 token，目标利用率 0.8，吞吐约束要求三个实例。D 侧还会比较 KV 容量约束，若后者要求四个实例，最终选择四个。实际规划器使用到达率、KV 驻留相关时间以及平均输入输出长度估计 KV 需求，并在有有效容量信息时计算该约束。以上数字用于演算。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/metrics/capacity_planner.py">阅读 compute()</a>
+</p>
+<p>规划器输出所需副本、利用率、容量校准状态和有条件的 P/D 比例。<code>metric_computer.py</code> 对建议比例进一步平滑与限制范围，缺少有效校准或需求时可使用当前比例。<code>hpa_contract.py</code> 为约定指标生成将冒号替换为下划线的别名，便于外部指标适配器消费。Pod 的创建与缩减由外部部署和控制链执行，学习时应沿着指标消费方继续追踪。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/metrics/hpa_contract.py">阅读 HPA 命名合同</a>、<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/tests/coordinator/core/test_capacity_planner.py">阅读容量规划测试</a>
+</p>
+
+<h2 id="trace-and-events">四、把整体变化还原成一次请求</h2>
+<h3 id="trace-and-events-spans">4.1 Trace 保存阶段与关联关系</h3>
+<p>
+<code>TracerManager</code> 配置 OpenTelemetry provider、采样器和 OTLP exporter，提取与传播 traceparent、tracestate。<code>TraceObj</code> 保存当前请求的 span、事件、错误、首 token 时间及 token 计数。Provider 支持在配置变化时更新，并在退出时进行 shutdown。读这部分时，要继续寻找 Router 在哪里创建 span、在哪里设置首 token，才能确定每个数字覆盖的执行范围。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/tracer/tracing.py">阅读 TracerManager 与 TraceObj</a>
+</p>
+<p>同一条用户请求可以画出到达、tokenize、选 P、发 P、P 完成、选 D、首个可见输出和结束几个时间点。若总 TTFT 增加，逐段比较这些边界能帮助定位新增等待。引擎本地的延迟直方图与客户端端到端延迟各有起止范围，报表应明确采样位置。当前 <code>TraceObj</code> 依据被调用方设置的首 token 时间计算 TTFT，并用自身的 token 计数计算 TPOT，复核时还要追该计数怎样累计。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/tracer/tracing.py">阅读 set_end_and_ttft_tpot()</a>
+</p>
+<h3 id="trace-and-events-logs">4.2 日志、告警和资源清单连接状态变化</h3>
+<p>
+<code>common/logger</code> 负责 logger 构建、formatter、handler、轮转压缩与限频。多进程日志可以经 ZMQ handler 汇聚到主进程的 <code>LogCollector</code>，再写入统一文件。分析一次恢复时，应沿请求身份、实例身份、endpoint 和恢复事务身份关联记录，把“检测到异常”“开始撤流”“apply 成功”“幸存者发布”排成时间序列。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/common/logger/log_collector.py">阅读日志汇聚</a>、<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/common/logger/rate_limited_logger.py">阅读限频日志</a>
+</p>
+<p>
+<code>common/alarm</code> 则定义 Record、Alarm、Event、严重程度、发生与清除时间以及序列化协议。实例异常、精度异常、拥塞、主备切换等对象把不同来源的事实转换为可消费的运维事件。Controller 的 <code>alarm_store</code> 保存查询状态，<code>inventory_collector</code> 汇总资源清单。日志适合追过程，告警对象和清单适合表达当前运维状态，三者可以用同一实例身份相互定位。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/common/alarm/record.py">阅读告警记录合同</a>、<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/controller/observability/observability.py">阅读 Controller 观测门面</a>
+</p>
+
+<h2 id="common-and-build">五、公共基础设施怎样支撑这些链路</h2>
+<h3 id="common-and-build-modules">5.1 从公共能力追到具体调用方</h3>
+<div class="table-wrap">
+<table class="decision-table">
+<thead>
+<tr>
+<th>目录或文件组</th>
+<th>职责</th>
+<th>与前文的连接</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>
+<code>common/app/application.py</code>
+</td>
+<td>模块注册、信号、配置传播、daemon loop、逆序停止</td>
+<td>Controller 与 NM 的应用骨架</td>
+</tr>
+<tr>
+<td>
+<code>common/http</code>
+</td>
+<td>连接复用、超时、TLS、证书与 FT 协议客户端</td>
+<td>推理与管理调用的边界处理</td>
+</tr>
+<tr>
+<td>
+<code>common/etcd</code>
+</td>
+<td>客户端、锁、版本化持久状态及 protobuf</td>
+<td>控制状态恢复和主备所需存储</td>
+</tr>
+<tr>
+<td>
+<code>common/standby</code>
+</td>
+<td>主备角色循环、租约续期和角色回调</td>
+<td>哪些进程当前应对外提供服务</td>
+</tr>
+<tr>
+<td>
+<code>utils/config_watcher.py</code>、<code>config_runtime.py</code>
+</td>
+<td>监听变化并传播配置</td>
+<td>组件能否使用新的运行参数</td>
+</tr>
+<tr>
+<td>
+<code>utils/port_allocator.py</code>、<code>env.py</code>
+</td>
+<td>端口与环境参数</td>
+<td>部署参数到组件入口</td>
+</tr>
+<tr>
+<td>
+<code>utils/process_utils.py</code>、<code>snapshot_utils.py</code>
+</td>
+<td>进程与快照辅助</td>
+<td>本地执行及恢复准备</td>
+</tr>
+<tr>
+<td>
+<code>utils/ip.py</code>、<code>net.py</code>、<code>validators.py</code>
+</td>
+<td>地址、网络和输入校验</td>
+<td>跨组件协议的可用性</td>
+</tr>
+<tr>
+<td>
+<code>utils/singleton.py</code>、<code>consecutive_counter.py</code>
+</td>
+<td>线程安全单例与连续计数</td>
+<td>单进程状态复用及异常判定</td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>
+<code>Application</code> 以逆序停止模块，遇到异步 stop 会等待协程完成。默认启动钩子保留给具体应用覆盖，因为部分模块在构造时启动，另一些模块等待端点配置或外部命令。配置监听发生变化时，再逐模块调用支持的 update_config。阅读基类时，把这些生命周期约束与 Controller、NM 的覆盖方法对照起来，能理解为什么不能仅凭一个 start 方法的存在决定调用时机。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/common/app/application.py">阅读应用生命周期</a>
+</p>
+<p>持久状态模型保存 data、version、timestamp 和 checksum，读取时验证完整性。锁与租约控制主备竞争，状态快照用于恢复数据，这两种用途应沿各自调用者学习。普通 Python 单例在当前进程内复用对象，跨 Worker 的负载一致性还要通过前文的共享内存机制。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/common/etcd/persistent_state.py">阅读持久状态模型</a>、<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/common/standby/standby_manager.py">阅读主备运行循环</a>
+</p>
+<h3 id="common-and-build-artifacts">5.2 构建产物也是运行前提</h3>
+<p>
+<code>setup.py</code> 声明 Python 版本至少为 3.11，并把运行依赖安装与 wheel 安装分开组织。<code>build.sh</code> 串联 protobuf、Rust 和 Python 打包，共享负载的 <code>libmindie_workload_shm.so</code> 是必需产物，脚本会在构建和归档验收时检查它。KV Conductor 的二进制则按构建条件作为可选组件打包。Python 源码阅读完成后，还需要核对运行镜像包含哪些原生产物及其 ABI。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/setup.py">阅读 Python 打包</a>、<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/build.sh">阅读构建与归档验收</a>
+</p>
+<p>
+<code>scripts</code> 提供 Rust 工具链和 protobuf 等辅助，<code>docker</code> 组织镜像，<code>model_configs</code> 保存典配，<code>examples</code> 连接部署和功能示例，<code>docs</code> 保存设计说明。<code>pre-commit</code> 与流水线配置承接格式、类型风格、日志和静态检查。遇到“源码有这个功能，但运行环境没有”时，应该顺着这些目录检查源码版本、wheel、镜像和启动参数如何关联。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/AGENTS.md">阅读构建与工程约定</a>
+</p>
+
+<h2 id="experiments-and-resume">六、用实验把源码理解变成可复核的经历</h2>
+<h3 id="experiments-and-resume-tests">6.1 先把测试当成输入输出教材</h3>
+<p>第一轮实验可以完全围绕现有 mock 测试。先读 <code>test_semantic_metrics.py</code> 的直方图和比例断言，再读 <code>test_capacity_planner.py</code> 中请求增量、零增量、负增量、吞吐约束和 KV 约束的样本，最后读 <code>test_tracing.py</code> 的上下文传播、事件和安全请求结构。每次只改变一个输入，预先写下期望结果，再沿实现寻找保障它的分支。执行 Python 测试时使用项目的 <code>tests/run_tests.sh</code> 入口，并检查 passed、failed 与 skipped 的具体含义。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/tests/coordinator/core/test_semantic_metrics.py">阅读语义测试</a>、<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/tests/coordinator/core/test_capacity_planner.py">阅读规划测试</a>、<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/tests/coordinator/tracer/test_tracing.py">阅读追踪测试</a>
+</p>
+<p>第二轮再进入隔离测试环境，选一个可复现的现象。缓存亲和实验可以固定请求序列，控制预热条件，同时记录最终调度端点、分层命中、引擎实际复用、客户端 TTFT 和成功吞吐。故障恢复实验可以从异常证据出现开始计时，记录撤流、apply、finalize 与 survivor 发布。对应的进程内测试为协议与状态边界提供基础，真实集群实验补充设备、通信与部署行为。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/tests/coordinator/router/test_router_native_handoff.py">阅读请求实验基线</a>、<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/tests/controller/fault_tolerance/strategy/test_dp_scale_down.py">阅读恢复实验基线</a>
+</p>
+<h3 id="experiments-and-resume-evidence">6.2 简历中的每个动作都能找到证据</h3>
+<p>项目介绍可以先交代系统范围，再说明自己实际负责的部分。源码学习阶段可以记录完成了哪些链路分析和实验复现，部署排障阶段可以记录拓扑、问题、定位依据及处理结果，代码开发阶段则进一步指向变更、测试和验收。叙述顺序保持为场景、问题、负责范围、技术方法、验证条件与结果。这样面试官追问某个函数、指标或故障分支时，你能回到具体证据继续展开。</p>
+<p>性能结果需要同时保存模型、硬件、引擎版本、并行配置、输入输出长度、并发、缓存预热、失败率和统计口径。若优化对象是调度耗时，就给出该阶段的观测边界。若结果是端到端 TTFT，就使用客户端样本并结合 Trace 解释变化来自哪里。吞吐增加也要与正确性和成功率共同报告。单个数字背后的实验合同，决定别人能否复核这段经历。</p>
+<div class="callout">
+<p>
+<strong>本章阅读练习</strong>
+</p>
+<p>画出一条 metric 从端点到 full 视图的路径，再画出同一请求的 Trace。选两个标签分别发生计数器重置，手算修正后的 TPS。最后构造一个吞吐需要三个 D 实例、KV 约束需要四个的样本，解释规划输出与外部扩缩容动作之间的接口。所有示例数字均用于学习，运行性能结论应由自己的实验提供。</p>
+</div>
+
+      <div class="essay-ending">复盘时，把每项结论连接到源码符号、测试断言和实验记录，再说明自己实际完成的工作。</div>
+      <section class="references-section" aria-label="源码与延伸阅读"><h2>源码与延伸阅读</h2><ol class="reference-list"><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/metrics/metrics_collector.py" target="_blank" rel="noopener noreferrer">motor/coordinator/metrics/metrics_collector.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/metrics/metric_types.py" target="_blank" rel="noopener noreferrer">motor/coordinator/metrics/metric_types.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/metrics/metric_registry.py" target="_blank" rel="noopener noreferrer">motor/coordinator/metrics/metric_registry.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/metrics/aggregation_engine.py" target="_blank" rel="noopener noreferrer">motor/coordinator/metrics/aggregation_engine.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/tests/coordinator/core/test_semantic_metrics.py" target="_blank" rel="noopener noreferrer">tests/coordinator/core/test_semantic_metrics.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/metrics/metric_computer.py" target="_blank" rel="noopener noreferrer">motor/coordinator/metrics/metric_computer.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/metrics/capacity_planner.py" target="_blank" rel="noopener noreferrer">motor/coordinator/metrics/capacity_planner.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/metrics/hpa_contract.py" target="_blank" rel="noopener noreferrer">motor/coordinator/metrics/hpa_contract.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/tests/coordinator/core/test_capacity_planner.py" target="_blank" rel="noopener noreferrer">tests/coordinator/core/test_capacity_planner.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/tracer/tracing.py" target="_blank" rel="noopener noreferrer">motor/coordinator/tracer/tracing.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/common/logger/log_collector.py" target="_blank" rel="noopener noreferrer">motor/common/logger/log_collector.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/common/logger/rate_limited_logger.py" target="_blank" rel="noopener noreferrer">motor/common/logger/rate_limited_logger.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/common/alarm/record.py" target="_blank" rel="noopener noreferrer">motor/common/alarm/record.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/controller/observability/observability.py" target="_blank" rel="noopener noreferrer">motor/controller/observability/observability.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/common/app/application.py" target="_blank" rel="noopener noreferrer">motor/common/app/application.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/common/etcd/persistent_state.py" target="_blank" rel="noopener noreferrer">motor/common/etcd/persistent_state.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/common/standby/standby_manager.py" target="_blank" rel="noopener noreferrer">motor/common/standby/standby_manager.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/setup.py" target="_blank" rel="noopener noreferrer">setup.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/build.sh" target="_blank" rel="noopener noreferrer">build.sh</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/AGENTS.md" target="_blank" rel="noopener noreferrer">AGENTS.md</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/tests/coordinator/tracer/test_tracing.py" target="_blank" rel="noopener noreferrer">tests/coordinator/tracer/test_tracing.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/tests/coordinator/router/test_router_native_handoff.py" target="_blank" rel="noopener noreferrer">tests/coordinator/router/test_router_native_handoff.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/tests/controller/fault_tolerance/strategy/test_dp_scale_down.py" target="_blank" rel="noopener noreferrer">tests/controller/fault_tolerance/strategy/test_dp_scale_down.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="llm-inference-prefill-decode-bottleneck-analysis.html">LLM 推理性能分析</a><span>配合阅读 Prefill、Decode、并行维度与服务指标。</span></li><li><a href="mooncake-architecture-overview.html">Mooncake 架构与源码阅读地图</a><span>继续追踪引擎之外的 KV 存储和传输机制。</span></li></ol></section>
+      <nav class="pymotor-next" aria-label="前后篇"><a href="pymotor-07-ep-fault-tolerance.html">← 上一篇 · 大 EP 实例的故障恢复</a></nav>
+    </section>
+    <section class="comments-section" id="comments" aria-label="Discussion"><div class="comments-header"><h2>Discussion</h2></div><div id="utterances-container" class="utterances-container"></div><noscript>请启用 JavaScript 查看评论。</noscript></section>
+  </article></main>
+  <footer class="site-footer"><span class="footer-credit">© 2026 by <a href="../../index.html">MOFANG</a></span></footer>
+  <script src="../../app.js?v=46"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" crossorigin="anonymous"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js" crossorigin="anonymous" onload="renderMathInElement(document.querySelector('.post-page-content'),{delimiters:[{left:'\\[',right:'\\]',display:true},{left:'\\(',right:'\\)',display:false}],throwOnError:false});"></script>
+</body>
+</html>

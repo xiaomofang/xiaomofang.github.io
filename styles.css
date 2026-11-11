@@ -1344,6 +1344,106 @@ body {
   border-bottom: 1px solid var(--border);
 }
 
+/* PyMotor series navigation and chapter index. */
+.pymotor-series-menu {
+  margin: 24px 0;
+  padding: 14px 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-muted);
+  font-size: 0.85rem;
+}
+
+.pymotor-series-menu summary {
+  cursor: pointer;
+  color: var(--text);
+  font-weight: 600;
+}
+
+.pymotor-series-menu ol,
+.pymotor-toc ol {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 24px;
+  padding: 0;
+  list-style: none;
+}
+
+.pymotor-series-menu a,
+.pymotor-toc a,
+.pymotor-next a {
+  color: var(--text-soft);
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+.pymotor-series-menu a[aria-current="page"],
+.pymotor-series-menu a:hover,
+.pymotor-toc a:hover,
+.pymotor-next a:hover {
+  color: var(--accent);
+}
+
+.pymotor-series-menu a > span {
+  margin-right: 6px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-faint);
+}
+
+.pymotor-toc {
+  margin: 28px 0;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.85rem;
+}
+
+.pymotor-toc > strong {
+  color: var(--text);
+  font-weight: 500;
+}
+
+.pymotor-next {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 14px 24px;
+  margin-top: 30px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
+  font-size: 0.85rem;
+}
+
+.pymotor-post .post-page-content code,
+.pymotor-post .reference-list a,
+.pymotor-post .decision-table td {
+  overflow-wrap: anywhere;
+}
+
+.pymotor-post .post-lead a,
+.pymotor-post .post-page-content p a,
+.pymotor-post .post-page-content li > a {
+  color: var(--accent);
+  text-underline-offset: 0.15em;
+}
+
+.pymotor-post .decision-table,
+.pymotor-post .calc-table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.pymotor-post .diagram-figure svg {
+  min-width: 700px;
+}
+
+@media (max-width: 680px) {
+  .pymotor-series-menu ol,
+  .pymotor-toc ol {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 .post-page-category {
   margin: 0 0 10px;
   font-size: 0.7rem;
