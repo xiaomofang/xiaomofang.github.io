@@ -33,12 +33,6 @@
 .engine-post .post-page-content pre code { font-size:inherit; overflow-wrap:normal; }
 .engine-post .math-block { font-size:17px; padding:14px 12px; max-width:100%; overflow-x:auto; }
 .engine-post .math-block .katex { font-size:1.05em; }
-.engine-post .logic-map { gap:8px; margin:28px 0; }
-.engine-post .map-node { padding:12px; }
-.engine-post .map-node strong { font-size:14px; }
-.engine-post .map-node p { font-size:12px; line-height:1.6; }
-.engine-post .map-node > span:first-of-type { font-size:12px; width:22px; height:22px; }
-.engine-post .map-arrow { font-size:17px; width:12px; }
 .engine-post .callout, .engine-post .aside-card { font-size:15px; line-height:1.85; padding:15px 18px; margin:24px 0; text-align:left; }
 .engine-post .aside-card > p:last-child, .engine-post .callout > p:last-child { margin-bottom:0; }
 .engine-post .decision-table, .engine-post .calc-table { font-size:14px; line-height:1.75; width:100%; margin:24px 0; }
@@ -52,7 +46,6 @@
 .engine-post .diagram-figure .d-label { font-size:17px; }
 .engine-post .diagram-figure .d-muted { font-size:14px; }
 .engine-post .diagram-figure .d-title { font-size:20px; }
-.engine-post .essay-ending { font-size:17px; line-height:1.95; margin:36px 0; padding:20px 0; }
 .engine-post .reference-list { font-size:14px; line-height:1.85; overflow-wrap:anywhere; }
 .engine-post .reference-list span { font-size:13px; }
 .engine-post .comments-header h2 { font-size:22px; }
@@ -97,11 +90,6 @@
 .ve-series-list > li { padding:22px 0; border-top:1px solid var(--border); }
 .ve-series-list h3 { margin-top:0 !important; }
 .ve-series-list p { margin:10px 0 !important; }
-.ve-status { font-size:12px; color:var(--text-soft); }
-.ve-status.published { color:var(--accent); }
-.ve-faq details { border-top:1px solid var(--border); padding:14px 0; }
-.ve-faq summary { cursor:pointer; color:var(--text); font-size:16px; font-weight:600; }
-.ve-faq details p { margin:12px 0 0; font-size:15px; }
 @media(max-width:1050px) {
   .ve-layout { grid-template-columns:minmax(0,1fr); gap:26px; max-width:860px; margin:0 auto; padding-top:28px; }
   .ve-rail { position:static; border-bottom:1px solid var(--border); padding-bottom:15px; }
@@ -116,8 +104,6 @@
   .engine-post .post-lead { font-size:16px; }
   .engine-post .post-page-content h2 { font-size:22px; margin-top:38px; }
   .engine-post .post-page-content h3 { font-size:18px; }
-  .engine-post .logic-map { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
-  .engine-post .map-arrow { display:none; }
   .engine-post .post-keyword-chip { font-size:11px; }
   .ve-toc ol { grid-template-columns:1fr; }
   .ve-ranks { grid-template-columns:minmax(0,1fr); gap:12px; }
@@ -127,3 +113,5 @@
   .ve-lab { padding:18px 0; }
   .ve-button { min-height:40px; }
 }
+.ve-topic-links { font-size:13px; line-height:1.9; }
+.ve-source-note a { color:var(--accent); text-underline-offset:3px; }

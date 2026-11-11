@@ -12,21 +12,22 @@ https://xiaomofang.github.io （仓库 `xiaomofang/xiaomofang.github.io`）。
 - `deploy.ps1` — 一键提交并推送（`git add .` + commit + push main）
 - `tools/` — 临时/工具文件
 
-## 文章结构（新文章必须遵守）
+## 页面外壳与正文组织
 
 1. `<head>` 引用 `../../styles.css` 与 KaTeX 0.16.11（cdn.jsdelivr.net），含主题初始化 inline script
 2. 页面底部脚本顺序：`../../app.js` → KaTeX + auto-render（delimiters: `\[ \]` 块级、`\( \)` 行内）
 3. `<article class="post-page">`：
    - 头部：`post-page-category` → `h1.post-page-title` → `p.post-lead`（核心论断 + 引用来源链接）→ 关键词 chip（链接到 `../../index.html?keyword=xxx`）→ `p.post-page-meta`（`data-date` / `data-author` / `data-minutes`，不写死字数）
-   - `div.logic-map` 逻辑地图（4 节点：start→ar→par→conv，灰→蓝→橙→绿，表达推理递进）
-   - 正文 `section.post-page-content`：编号章节（一、二…）+ `x.y` 小节
-   - 结尾 `essay-ending` 总结 → `references-section`（编号列表 + 一句注释）→ `comments-section`（utterances）
+   - 正文放在 `section.post-page-content`；标题、层级与顺序由本篇的具体问题决定，编号按需要使用。
+   - 不固定添加 `logic-map` 或四节点卡片。图必须展示具体的数据、依赖、计算或状态变化，只有「找到问题→画出执行→定位源码→验证代价」等泛化标签时直接省略。
+   - 保留 `references-section` 与 `comments-section`。结尾按内容自然结束，不强制添加 `essay-ending` 或重复总结。
 
 ## 内容写作规范
 
-- 中文学术科普：「是什么」推到「为什么只能这样」，每个结论给结构性论证（例：交叉熵文的"唯一性——不是习惯，是结构"）
+- 中文技术科普，从具体计算、现象和读者疑问展开；需要推导的地方给出推导，不把所有文章套成固定论证句式。
 - 关键公式必须自己手推验证；配 1–2 个可手算的小例子（例：5 词词表逐项算 CE）
-- 每章配 `aside-card`（补充）或 `callout`（强结论）；对比用 `table.decision-table` / `calc-table`
+- `aside-card`、`callout`、表格与图只在确有信息组织价值时使用，不规定每章必须出现；可直接用连贯段落表达的内容不要再包装成卡片。
+- 不在公开文章中填充「本专栏将如何研究」「每篇必须有哪些证据」等写作过程说明，不自动添加八股式自测、方法论流程和口号式结尾。复用主题、页头和统计功能，不机械照搬正文模板。
 - 公式用 KaTeX：行内 `\(...\)`，块级 `\[...\]` 包在 `<div class="math-block">` 里；公式内 `>` `<` 要写 `&gt;` `&lt;`
 - 文章间互相链接保持知识图谱（例：交叉熵文引用 EAGLE 文 §4.2.1）
 - 中文技术术语为主，英文术语保留原文；引用用「」；来源链接用中文维基/科学空间等

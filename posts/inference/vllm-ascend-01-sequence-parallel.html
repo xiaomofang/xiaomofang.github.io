@@ -1,15 +1,15 @@
 <!DOCTYPE html>
 <html lang="zh-CN" data-theme="night">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <script>(function(){try{var s=localStorage.getItem("yichuan-theme");document.documentElement.setAttribute("data-theme",s||(matchMedia("(prefers-color-scheme: dark)").matches?"night":"day"));}catch(e){}})();</script>
-  <link rel="stylesheet" href="../../styles.css?v=70" />
-  <link rel="stylesheet" href="../../assets/vllm-ascend/reader.css?v=1" />
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous" />
+  <link rel="stylesheet" href="../../styles.css?v=70">
+  <link rel="stylesheet" href="../../assets/vllm-ascend/reader.css?v=2">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous">
   <title>SP 到底切了什么：从 Transformer Block 到 PCP、DCP 与 DSA-CP · 推理引擎解剖室 01</title>
-  <meta name="description" content="从两张卡、四个 token 出发，推导 TP、Dense SP、SP MoE 的完整计算与通信过程，解释 RMSNorm、FFN all-gather、PCP query 分片、DCP softmax 合并，并按固定源码核对组合边界。" />
-  <link rel="canonical" href="https://xiaomofang.github.io/posts/inference/vllm-ascend-01-sequence-parallel.html" />
+  <meta name="description" content="从两张卡、四个 token 出发，推导 TP、Dense SP、SP MoE 的完整计算与通信过程，解释 RMSNorm、FFN all-gather、PCP query 分片、DCP softmax 合并，并按固定源码核对组合边界。">
+  <link rel="canonical" href="https://xiaomofang.github.io/posts/inference/vllm-ascend-01-sequence-parallel.html">
 </head>
 <body class="engine-post">
   <header class="site-header">
@@ -35,7 +35,7 @@
 <summary>推理引擎解剖室</summary>
 <ol>
 <li>
-<a href="vllm-ascend-00-series.html">00 · 专栏与研究路线</a>
+<a href="vllm-ascend-00-series.html">专栏目录</a>
 </li>
 <li>
 <a href="vllm-ascend-01-sequence-parallel.html" aria-current="page">01 · SP 与上下文并行</a>
@@ -56,14 +56,14 @@
 <a href="#verification">复算与实验方法</a>
 </li>
 </ol>
-<small>vLLM × Ascend<br />沿着张量、通信和状态理解特性。</small>
+<small>双卡示例：4 个 token，H=8，TP=2。</small>
 </details>
 </aside>
     <article class="post-page">
       <header class="post-page-header">
         <p class="post-page-category">Inference · 推理引擎解剖室 01</p>
         <h1 class="post-page-title">SP 到底切了什么：从 Transformer Block 到 PCP、DCP 与 DSA-CP</h1>
-        <p class="post-lead">一句「沿序列切分」不足以解释 SP。真正需要跟踪的是：每张卡拥有哪些 token、哪些权重，以及当前张量是完整结果还是待求和的贡献。本文从一个双卡 block 推导通信边界，再用 <a href="https://github.com/vllm-project/vllm-ascend/blob/c09d3e20b9c45c80b34ae3781440d90904a44023/vllm_ascend/patch/worker/patch_qwen3_5.py">v0.30.0 的 Dense SP 实现</a>与固定主分支提交核对结论。</p>
+        <p class="post-lead">把 A/B 留在卡 0，C/D 留在卡 1 之后，RMSNorm 可以各算各的，FFN 前却需要把四个 token 收齐。这个看似绕远的步骤，来自 TP 权重仍分在两卡上。沿一个 block 走完，就能看出 SP 省下的计算、没有省下的通信，以及它与 PCP、DCP 的区别。</p>
         <div class="post-page-keywords">
 <a class="post-keyword-chip" href="../../index.html?keyword=vllm-ascend">vLLM × Ascend</a>
 <a class="post-keyword-chip" href="../../index.html?keyword=parallelism">并行与通信</a>
@@ -72,34 +72,9 @@
 </div>
         <p class="post-page-meta" data-date="2026-11-11" data-author="MOFANG" data-minutes="">
 </p>
-        <p class="ve-source-note">核对日期：2026-11-11。主讲版本：vLLM Ascend v0.30.0 / c09d3e20；版本差异对照：main / 89eb8a5e。本文的数值实验在 CPU 上验证代数与布局，不代表 NPU 性能实测。</p>
-      </header>
-      <div class="logic-map" aria-label="文章推导路线">
-        <div class="map-node map-node--start">
-<span>1</span>
-<strong>辨认布局</strong>
-<p>token 分片、通道分片、部分贡献分别意味着什么。</p>
-</div>
-<div class="map-arrow">→</div>
-        <div class="map-node map-node--ar">
-<span>2</span>
-<strong>推导通信</strong>
-<p>从矩阵乘法确定何时拼接，何时必须求和。</p>
-</div>
-<div class="map-arrow">→</div>
-        <div class="map-node map-node--par">
-<span>3</span>
-<strong>重排边界</strong>
-<p>把 Norm 和残差放进 RS 与 AG 之间。</p>
-</div>
-<div class="map-arrow">→</div>
-        <div class="map-node map-node--conv">
-<span>4</span>
-<strong>核对实现</strong>
-<p>区分 SP、PCP、DCP 与有版本限制的 DSA-CP。</p>
-</div>
-      </div>
-        <div class="ve-lab" id="block-lab" data-sp-lab>
+        <p class="ve-source-note">Dense SP 示例对应 vLLM Ascend v0.30.0 的 Qwen3.5 稠密路径，<a href="#source-versions">源码版本差异见文末</a>。</p>
+</header>
+      <div class="ve-lab" id="block-lab" data-sp-lab>
           <p class="ve-lab-heading">一个 block 的双卡执行过程</p>
           <p class="ve-lab-subtitle">N=4，H=8，4 个注意力头，FFN 中间维度 16。每行一个 token，每格一个通道；示意不包含 KV 缓存布局。</p>
           <div class="ve-controls" role="group" aria-label="切换普通 TP 与 Dense SP">
@@ -134,83 +109,49 @@
 </i>待求和的贡献</span>
 </div>
           <p class="ve-detail" data-sp-detail aria-live="polite">每个本地 token 的完整隐藏维度都在本卡。</p>
-          <noscript>交互演示需要 JavaScript。上面的静态流程给出了同样的完整计算与通信顺序。</noscript>
+          <noscript>交互图需要 JavaScript；正文中的静态流程也给出了完整计算顺序。</noscript>
         </div>
       <details class="ve-toc">
-<summary>本文阅读路径</summary>
+<summary>文章目录</summary>
 <ol>
 <li>
-<a href="#scope">一、先固定结论与版本</a>
+<a href="#layouts">四个 token 在两张卡上</a>
 </li>
 <li>
-<a href="#layouts">二、四种不能混淆的布局</a>
+<a href="#collectives">拼接 token 与合并贡献是两件事</a>
 </li>
 <li>
-<a href="#collectives">三、四种通信原语</a>
+<a href="#tp-block">两次输出投影，为什么都要跨卡求和</a>
 </li>
 <li>
-<a href="#tp-block">四、普通 TP 的注意力与 FFN</a>
+<a href="#rmsnorm">RMSNorm 只需要当前 token 的完整向量</a>
 </li>
 <li>
-<a href="#rmsnorm">五、RMSNorm 为什么能本地计算</a>
+<a href="#dense-sp">把 Norm 放到两段通信之间</a>
 </li>
 <li>
-<a href="#dense-sp">六、Dense SP 如何改写 block</a>
+<a href="#performance">算一遍 SP 的计算量、显存和通信量</a>
 </li>
 <li>
-<a href="#performance">七、计算、显存与通信收益</a>
+<a href="#moe">把 FFN 换成专家之后</a>
 </li>
 <li>
-<a href="#moe">八、SP MoE 与专家路由</a>
+<a href="#context-parallel">PCP 分 query，DCP 分历史 KV</a>
 </li>
 <li>
-<a href="#context-parallel">九、PCP、DCP 与 DSA-CP</a>
+<a href="#compatibility">哪些并行方式能叠加</a>
 </li>
 <li>
-<a href="#compatibility">十、这些特性怎样组合</a>
+<a href="#request">从 prefill 走到逐 token decode</a>
 </li>
 <li>
-<a href="#request">十一、一次完整生成请求</a>
-</li>
-<li>
-<a href="#verification">十二、复算、源码与实验方法</a>
+<a href="#verification">复算示例与实现位置</a>
 </li>
 </ol>
 </details>
       <section class="post-page-content">
-        <h2 id="scope">一、先固定结论与版本</h2>
-        <p>我们要验证的核心判断是：<strong>在本文分析的 Dense SP 路径中，注意力和稠密 FFN 的大矩阵计算仍然在每个 TP rank 上处理本轮全部有效 token，FFN 还可能包含对齐后的 padding；每个 rank 使用不同的权重分片。SP 主要把层间隐藏状态、残差以及相应的逐 token 运算按 token 分开。</strong>这与「每张卡只负责半段 token 的完整注意力」是两种不同的执行布局。</p>
-        <p>这个判断有三层证据。矩阵代数解释了为什么各卡的贡献必须齐全；CPU 小模型检查了变换前后的输出；固定版本源码确认这条特定实现在哪里 gather、在哪里 scatter。它不能单独证明加速幅度，也不能替所有叫 SP 的算法、所有模型和所有版本作保证。</p>
-        <div class="ve-table-scroll">
-<table class="decision-table">
-<caption>版本与条件对照；窄屏可横向滑动查看完整表格。</caption>
-<thead>
-<tr>
-<th>源码快照</th>
-<th>本文确认的事实</th>
-<th>使用边界</th>
-</tr>
-</thead>
-<tbody>
-          <tr>
-<td>v0.30.0，<a href="https://github.com/vllm-project/vllm-ascend/tree/c09d3e20b9c45c80b34ae3781440d90904a44023">c09d3e20</a>
-</td>
-<td>包含 Qwen3.5 稠密家族的 <code>enable_dense_sp</code>、decoder 补丁，以及旧 <code>enable_dsa_cp</code> 路径。</td>
-<td>Dense SP 的计算与通信推导以这份代码为落点。</td>
-</tr>
-          <tr>
-<td>2026-11-11 main，<a href="https://github.com/vllm-project/vllm-ascend/tree/89eb8a5e7a76d085b453a1aeadb6883e12d5ea2d">89eb8a5e</a>
-</td>
-<td>该快照的 <code>enable_sp</code> 只返回 MoE SP 判定；同名 Qwen 补丁已没有上述 Dense SP helper；配置模型中也不再有旧 DSA-CP 字段。</td>
-<td>不能把旧开关直接当作这份主分支的 Dense SP 或 DSA-CP 启用方式。</td>
-</tr>
-        </tbody>
-</table>
-</div>
-        <aside class="aside-card">版本名字并不能替代执行路径。对照的 main 是本文固定的一次提交，不是「永远最新」；v0.30.0 与主分支的依赖也不能任意拼接。数学结论可以复用，启用条件与兼容性需要跟着对应版本的配置和代码走。</aside>
-
-        <h2 id="layouts">二、先区分四种不能混淆的数据布局</h2>
-        <h3>2.1 一行是一个 token，一列是一个特征</h3>
+        <h2 id="layouts">四个 token 在两张卡上</h2>
+        <h3>一行是一个 token，一列是一个特征</h3>
         <p>设本轮输入为 A、B、C、D 四个 token，隐藏维度 H=8，矩阵 X 的形状是 [4,8]。TP=2 表示两张卡协作计算同一层。注意力共有 4 个头，每头维度 2；FFN 中间维度 F=16。以下矩阵统一采用数学上的 XW 写法，实际框架可能以转置形式保存权重。</p>
         <table class="decision-table">
 <thead>
@@ -249,13 +190,10 @@
         </tbody>
 </table>
         <p>最容易误判的是最后一种。两个 [4,8] 张量不一定是两份相同数据，也不一定是两块可以拼接的数据。它们可能分别是不同权重分片对同一输出坐标的贡献。只盯 shape 而不看语义，就会把 all-gather 和 all-reduce 混为一谈。</p>
-        <h3>2.2 「完整」必须同时说明哪个维度、哪个数值</h3>
+        <h3>「完整」必须同时说明哪个维度、哪个数值</h3>
         <p>「A 的完整 8 维」表示 A 的所有隐藏特征都在本卡，并且该层需要的 TP 贡献已经合并。它不要求 B/C/D 也在本卡。反过来，o_proj 的部分输出虽然也有 8 列，仍不能直接当作完整隐藏向量归一化。</p>
-        <div class="callout">
-<strong>每到一个算子，问三个问题：</strong>本卡有哪些 token 行？本卡有哪些权重列或行？当前数值是否还需要跨卡求和？通信操作由这三个答案决定。</div>
-
-        <h2 id="collectives">三、All-gather、All-reduce、Reduce-scatter 与 All-to-all</h2>
-        <h3>3.1 用一个可以手算的数组区分拼接与求和</h3>
+        <h2 id="collectives">拼接 token 与合并贡献是两件事</h2>
+        <h3>用一个可以手算的数组区分拼接与求和</h3>
         <p>每个 token 暂时只显示一个坐标。卡 0 产生贡献 [1,2,3,4]，卡 1 产生贡献 [10,20,30,40]。这里使用 SUM 归约。</p>
         <table class="calc-table decision-table">
 <thead>
@@ -289,12 +227,12 @@
 </table>
         <div class="math-block">\[\operatorname{AllReduce}_{\mathrm{SUM}}(P_0,\ldots,P_{T-1})\equiv\operatorname{AllGather}\!\left(\operatorname{ReduceScatter}_{\mathrm{SUM}}(P_0,\ldots,P_{T-1})\right)\]</div>
         <p>这描述的是对齐相同、归约操作相同情况下的数学等价。实际浮点数的累加顺序可能不同，不应进一步承诺逐位一致。各原语的基本定义可对照 <a href="https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/usage/collectives.html">collective operations 文档</a>；Ascend 的具体通信执行还要看 HCCL 和后端实现。</p>
-        <h3>3.2 All-to-all 是按目的地交换不同数据</h3>
+        <h3>All-to-all 是按目的地交换不同数据</h3>
         <p>All-gather 让各卡收齐同一批分片；All-to-all 则允许每个发送者给不同接收者发送不同的数据。专家并行中，A 可能去卡 0 的专家，B 可能去卡 1 的专家，因此 token dispatch/combine 常采用 all-to-all 或相应的变长通信实现。它不意味着把所有 token 广播给每个专家。</p>
-        <aside class="aside-card">切一块本来就复制在本卡的数据可以只是本地 slice；它与 reduce-scatter 不同。后者还包含跨 rank 的贡献求和。实现中的 padding、有效长度和行顺序必须同步维护。</aside>
+        <p>切一块本来就复制在本卡的数据可以只是本地 slice；它与 reduce-scatter 不同。后者还包含跨 rank 的贡献求和。实现中的 padding、有效长度和行顺序必须同步维护。</p>
 
-        <h2 id="tp-block">四、普通 TP：注意力与 FFN 为什么需要 All-reduce</h2>
-        <h3>4.1 注意力分数的 [4,4] 与头输出的 [4,4] 恰好相同</h3>
+        <h2 id="tp-block">两次输出投影，为什么都要跨卡求和</h2>
+        <h3>注意力分数的 [4,4] 与头输出的 [4,4] 恰好相同</h3>
         <p>对一个头来说，Q、K、V 都是 [4,2]。分数 QKᵀ 是 [4,4]，行表示 query token，列表示 key token；因果 mask 遮住未来位置。softmax 后再乘 V，这个头的输出回到 [4,2]。卡 0 负责两个头，把两个 [4,2] 沿特征列拼在一起，得到 [4,4]。</p>
         <pre>
 <code>一个头：
@@ -306,14 +244,14 @@ Q [4,2] × Kᵀ [2,4] → 分数 [4,4]
 卡 1 的头 3、4 拼接 → [4,4]</code>
 </pre>
         <p>分数矩阵的两个 4 都来自 token 数；头输出的第二个 4 来自「本卡头数 2 × 每头维度 2」。若输入变为 10 个 token，每头分数是 [10,10]，而每卡头输出是 [10,4]。FlashAttention 等实现可以不显式物化整个分数矩阵，这不改变上述逻辑形状。</p>
-        <h3>4.2 o_proj 的线性结构把拼头改写为贡献求和</h3>
+        <h3>o_proj 的线性结构把拼头改写为贡献求和</h3>
         <p>把两卡头输出记为 A₀、A₁，将 Wₒ 按输入特征维拆成上下两块。完整数学式为：</p>
         <div class="math-block">\[
           Y=[A_0\ A_1]\begin{bmatrix}W_{o,0}\\W_{o,1}\end{bmatrix}
           =A_0W_{o,0}+A_1W_{o,1}=P_0+P_1.
         \]</div>
         <p>Aᵣ 是 [4,4]，Wₒ,ᵣ 是 [4,8]，所以每卡先得到 Pᵣ=[4,8]。各卡贡献可直接相加，无须先把所有头的输出 all-gather 成完整 8 维。普通 TP 在这里执行 all-reduce，让每张卡拿到 Y。</p>
-        <h3>4.3 FFN 虽逐 token 独立，权重仍然分布在两卡</h3>
+        <h3>FFN 虽逐 token 独立，权重仍然分布在两卡</h3>
         <p>以 SwiGLU FFN 为例，Wg、Wu 的输出通道被两卡各分 8 个，Wd 按对应输入通道分片。设 Gᵣ、Uᵣ 是本卡中间结果：</p>
         <div class="math-block">\[
           G_r=XW_{g,r},\quad U_r=XW_{u,r},\quad
@@ -321,18 +259,18 @@ Q [4,2] × Kᵀ [2,4] → 分数 [4,4]
           \qquad \operatorname{FFN}(X)=\sum_r P_r.
         \]</div>
         <p>每卡中间激活是 [4,8]，down_proj 的部分输出也是 [4,8]，但语义完全不同。前者只拥有一部分中间通道；后者覆盖全部输出维度，只是还缺其他卡的贡献。普通 TP 在 down_proj 后再次 all-reduce。这个结构对应成对的输出通道分片和输入通道分片线性层，可对照 <a href="https://docs.nvidia.com/megatron-core/developer-guide/latest/apidocs/core/core.tensor_parallel.layers.html">ColumnParallelLinear / RowParallelLinear 的定义</a>。</p>
-        <div class="callout">
-<strong>普通 TP 的重复 block 主干有两个逻辑合并点：</strong>attention o_proj 之后、FFN down_proj 之后。这里不把 embedding、最终输出头、专家通信及额外模块的通信计入。实际图编译还可能将逻辑算子融合。</div>
+        <p>
+<strong>普通 TP 的重复 block 主干有两个逻辑合并点：</strong>attention o_proj 之后、FFN down_proj 之后。这里不把 embedding、最终输出头、专家通信及额外模块的通信计入。实际图编译还可能将逻辑算子融合。</p>
 
-        <h2 id="rmsnorm">五、RMSNorm 为什么可以留在本卡</h2>
-        <h3>5.1 归一化发生在一个 token 的隐藏维度内</h3>
+        <h2 id="rmsnorm">RMSNorm 只需要当前 token 的完整向量</h2>
+        <h3>归一化发生在一个 token 的隐藏维度内</h3>
         <p>RMSNorm 用一个 token 自身各维的均方根缩放该向量，再乘学习到的逐维系数。对于隐藏维度 H：</p>
         <div class="math-block">\[
           r(x)=\sqrt{\epsilon+\frac1H\sum_{j=1}^{H}x_j^2},\qquad
           y_j=\gamma_j\frac{x_j}{r(x)}.
         \]</div>
         <p>取 x=[1,1,1,1,3,3,3,3]，平方和为 40，除以 8 得到 5。忽略 ε、令 γ 全为 1，则输出是 x/√5。这一计算不需要相邻 token，也不需要整个 batch 的均值。参数 γ 通常在各卡复制。公式和轴定义可参阅 <a href="https://docs.pytorch.org/docs/2.15/generated/torch.nn.RMSNorm.html">RMSNorm API</a>与<a href="https://arxiv.org/abs/1910.07467">原论文</a>。</p>
-        <h3>5.2 必须先拿到完整数值，再按 token 本地归一化</h3>
+        <h3>必须先拿到完整数值，再按 token 本地归一化</h3>
         <p>SP 让卡 0 保存 A/B 的完整隐藏向量，卡 1 保存 C/D 的完整隐藏向量，所以各卡可分别归一化自己的行。若 A 的 8 个特征拆在不同卡上，则平方和还需要合并；若 o_proj 的 P₀、P₁ 尚未求和，也不能各自归一化后随意相加。</p>
         <div class="math-block">\[
           \operatorname{RMSNorm}(P_0+P_1)
@@ -345,10 +283,10 @@ Q [4,2] × Kᵀ [2,4] → 分数 [4,4]
           \operatorname{Concat}_r f(S_rY)=f(Y),\qquad
           Y=\sum_rP_r.
         \]</div>
-        <aside class="aside-card">「Norm 能本地执行」的前提是隐藏维完整、TP 贡献已合并、残差行归属一致。Q/K 每头归一化、GDN 的门控归一化等算子还要分别检查自己的归一化轴，不能只因名字里有 Norm 就套用同一个结论。</aside>
+        <p>「Norm 能本地执行」的前提是隐藏维完整、TP 贡献已合并、残差行归属一致。Q/K 每头归一化、GDN 的门控归一化等算子还要分别检查自己的归一化轴，不能只因名字里有 Norm 就套用同一个结论。</p>
 
-        <h2 id="dense-sp">六、Dense SP 如何改写一个完整 block</h2>
-        <h3>6.1 它在子层边界切换 token 分片与 TP 计算布局</h3>
+        <h2 id="dense-sp">把 Norm 放到两段通信之间</h2>
+        <h3>它在子层边界切换 token 分片与 TP 计算布局</h3>
         <p>在这条 Dense SP 路径里，层间的 X 和 residual 都按 token 分片。先本地 Norm，再收齐归一化后的行，进入按头或中间通道分工的 TP 计算。输出投影留下部分贡献，由 reduce-scatter 合并并恢复 token 分片。</p>
         <pre>
 <code>每卡本地输入 [N/T,H]
@@ -363,21 +301,21 @@ Q [4,2] × Kᵀ [2,4] → 分数 [4,4]
   → 本地加残差，进入下一层</code>
 </pre>
         <p>这里用 N 表示对齐后的 token 数以便画图；实现可能在 attention 前裁掉 padding，而 FFN 仍计算补齐后的行。第一轮输入准备、最后一层归一化和残差融合也可能放在不同的函数边界。上述是数据依赖关系，不是逐个 kernel 的发射清单。</p>
-        <h3>6.2 为什么 FFN 不直接各算本卡 token</h3>
+        <h3>为什么 FFN 不直接各算本卡 token</h3>
         <p>FFN 的 token 独立，意味着 FFN(A) 不依赖 B/C/D 的内容；它仍然需要 FFN 的所有相关权重。若卡 0 只有 A/B 和通道 1～8 的权重，卡 1 只有 C/D 和通道 9～16 的权重，直接各算各的，就缺了 A/B 的后半通道和 C/D 的前半通道。All-gather 把每个 token 送到拥有另一份权重的卡上，补齐这些交叉计算。</p>
         <p>若每张卡都保存完整 FFN 权重，确实可以只对本地 token 做完整 FFN，而不执行这次输入 all-gather。那改变了权重布局与显存成本，已经不是本文的同一条 TP-sharded FFN 路径。「必须交换信息」也不意味着所有算法都必须使用同一个 collective；这里只解释这份实现选择的 all-gather。</p>
-        <h3 id="block-walkthrough">6.3 逐步观察两张卡的数据</h3>
+        <h3 id="block-walkthrough">逐步观察两张卡的数据</h3>
         <p>可以返回<a href="#block-lab">开篇的双卡交互图</a>，切换普通 TP 与 Dense SP，再逐步观察 Norm、注意力、输出投影和 FFN 边界的行归属。图把可能融合的逻辑算子分开显示，方便与本节的完整流程对照。</p>
-        <h3>6.4 源码如何支撑这个结论</h3>
+        <h3>Qwen 补丁实际在哪些位置通信</h3>
         <p>固定的 v0.30.0 补丁中，<a href="https://github.com/vllm-project/vllm-ascend/blob/c09d3e20b9c45c80b34ae3781440d90904a44023/vllm_ascend/patch/worker/patch_qwen3_5.py#L105">
 <code>_sequence_parallel_dense_mlp_forward</code>
 </a>把 FFN 输入 gather 后送入 gate/up、激活与 down，再 scatter 输出；decoder 的 SP 分支也在 full attention 或 GDN 之前 gather，之后 scatter。初始化则把相应输出投影的 <code>reduce_results</code> 置为 false，避免先做 all-reduce 又重复归约。</p>
         <p>所以，「Dense SP 仍然对全部 token 做本卡权重分片对应的 GEMM」既能从代数推出，也能从这份实现的调用顺序直接定位。GDN 的内部状态更新与普通全注意力不同，但此版本的外围 token gather / 输出 scatter 结构同样存在。</p>
-        <div class="callout">
-<strong>这不是在本地先算一遍局部注意力，gather 后再算第二遍。</strong>Gather 前是本地 Norm；真正的注意力在 gather 后执行一次。前半段 token 的局部注意力结果，也不能靠简单拼接恢复后半段 query 对前缀的关注。</div>
+        <p>
+<strong>这不是在本地先算一遍局部注意力，gather 后再算第二遍。</strong>Gather 前是本地 Norm；真正的注意力在 gather 后执行一次。前半段 token 的局部注意力结果，也不能靠简单拼接恢复后半段 query 对前缀的关注。</p>
 
-        <h2 id="performance">七、SP 到底省了多少：分别算计算、显存和通信</h2>
-        <h3>7.1 大矩阵计算量没有因为这次改写再除以 TP</h3>
+        <h2 id="performance">算一遍 SP 的计算量、显存和通信量</h2>
+        <h3>大矩阵计算量没有因为这次改写再除以 TP</h3>
         <p>忽略激活等逐元素操作，SwiGLU FFN 包含两次 H→F 投影和一次 F→H 投影。一次乘加按 2 FLOPs 计，普通 TP 每 rank 的线性层工作量为：</p>
         <div class="math-block">\[
           C_{\mathrm{FFN,rank}}
@@ -385,10 +323,10 @@ Q [4,2] × Kᵀ [2,4] → 分数 [4,4]
           =\frac{6NHF}{T}.
         \]</div>
         <p>Dense SP 收齐行以后仍然做这三次本卡权重分片的乘法，理想有效 token 计算量相同。N=4、H=8、F=16、T=2 时，每卡是 1536 FLOPs，而不是再减半到 768。若 padding 增加了计算行数，还要把 N 换成实际执行的行数。</p>
-        <h3>7.2 缩小的是哪些激活</h3>
+        <h3>缩小的是哪些激活</h3>
         <p>普通 TP 的层间隐藏状态往往在每卡保存 NH 个元素；token 分片后，本卡保留 NH/T 个。残差与相应 Norm、add 的逐元素工作也按这种分工缩小。以 BF16、N=4096、H=4096、T=8 为例，一份 [N,H] 张量为 32 MiB，层间分片为每卡 4 MiB。</p>
         <p>这不等于总显存、KV cache 或整层峰值显存都缩小 8 倍。权重、中间激活、收齐后的输入、通信暂存区、图捕获缓冲和 KV cache 各有自己的布局。特别是 all-gather 附近仍会出现全量 token 视图，需要区分「层间常驻大小」与「运行时峰值」。</p>
-        <h3>7.3 同一 dtype 下，拆分并不自动减少通信字节</h3>
+        <h3>同一 dtype 下，拆分并不自动减少通信字节</h3>
         <p>设一次待归约张量大小为 M=NHb 字节，b 为每元素字节数。在理想 ring 算法的发送量口径下：</p>
         <div class="math-block">\[
           V_{\mathrm{RS}}=\frac{T-1}{T}M,\quad
@@ -396,48 +334,62 @@ Q [4,2] × Kᵀ [2,4] → 分数 [4,4]
           V_{\mathrm{AR}}=2\frac{T-1}{T}M.
         \]</div>
         <p>因此一对 RS+AG 与一次 AR 的理想发送字节量相同。M=32 MiB、T=8 时，每次 RS 或 AG 发送 28 MiB，AR 为 56 MiB。一个有两个合并点的 block，2 次 AR 与 2 次 RS+2 次 AG 都对应每 rank 112 MiB 的这一理想发送量。此处不再把接收字节重复计入，也不是 HCCL 实测链路流量。</p>
-        <h3>7.4 收益来自边界重排，速度必须实测</h3>
+        <h3>收益来自边界重排，速度必须实测</h3>
         <p>RS 后的 Norm 和残差运算可只做本卡 token，通信又可与相邻矩阵计算融合或重叠。量化还可能改变交换张量的 dtype，从而改变字节账本。反过来，更多 collective 调用、同步、padding 和小矩阵会抵消节省。小 batch decode 的收益尤其不能由长 prefill 的结果推断。</p>
         <p>Sequence Parallelism 早期与选择性重计算一起用于训练激活优化，但训练中的反向保存和重计算问题不能直接搬成推理加速百分比。理解其布局结构，可参阅 <a href="https://arxiv.org/abs/2205.05198">Reducing Activation Recomputation in Large Transformer Models</a>；部署收益则要回到具体模型、硬件和负载。</p>
-        <aside class="aside-card">
-<strong>可以确定的是工作量与布局，不能凭此确定的是速度。</strong>「本路径的大 GEMM 不再减少一半 token」是结构结论；「整体一定更快」「通信延迟一定下降」「峰值显存一定除以 TP」都需要额外条件和实际测量。</aside>
-
-        <h2 id="moe">八、MoE 在哪里发挥作用，SP MoE 又省了什么</h2>
-        <h3>8.1 专家通常替换 FFN，不替换注意力分数计算</h3>
+        <h2 id="moe">把 FFN 换成专家之后</h2>
+        <h3>专家通常替换 FFN，不替换注意力分数计算</h3>
         <p>在本文讨论的常见 MoE 模型中，attention 先汇集上下文，随后 Router 为每个 token 的当前隐藏向量选少数专家 FFN，再按权重合并。某层为 A 选择专家 E2、E5，可以示意为 0.7E2(A)+0.3E5(A)。这里的 A 已经是经过前面子层更新后的向量。prefill 和 decode 都会经过这些 MoE 层，选择可以随 token 和层变化。</p>
         <figure class="diagram-figure">
-          <svg viewBox="0 0 840 655" role="img" aria-label="一个 pre-norm Transformer block 中，注意力与 MoE FFN 的位置以及两条残差连接">
+          <svg viewbox="0 0 840 655" role="img" aria-label="一个 pre-norm Transformer block 中，注意力与 MoE FFN 的位置以及两条残差连接">
             <defs>
-<marker id="ve-block-head" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
-<path d="M0 0L8 4L0 8Z" class="d-accent-blue"/>
+<marker id="ve-block-head" markerwidth="8" markerheight="8" refx="7" refy="4" orient="auto">
+<path d="M0 0L8 4L0 8Z" class="d-accent-blue">
+</path>
 </marker>
 </defs>
             <text x="420" y="26" text-anchor="middle" class="d-title">MoE 位于 FFN 子层</text>
             <g class="d-arrow-blue" marker-end="url(#ve-block-head)">
-<path d="M420 105V134"/>
-<path d="M420 185V214"/>
-<path d="M420 265V294"/>
-<path d="M420 345V374"/>
-<path d="M420 425V454"/>
-<path d="M420 520V549"/>
-<path d="M420 600V628"/>
-<path d="M560 80H732V310H561"/>
-<path d="M560 335H685V575H561"/>
+<path d="M420 105V134">
+</path>
+<path d="M420 185V214">
+</path>
+<path d="M420 265V294">
+</path>
+<path d="M420 345V374">
+</path>
+<path d="M420 425V454">
+</path>
+<path d="M420 520V549">
+</path>
+<path d="M420 600V628">
+</path>
+<path d="M560 80H732V310H561">
+</path>
+<path d="M560 335H685V575H561">
+</path>
 </g>
-            <rect x="280" y="55" width="280" height="50" rx="6" class="d-box"/>
+            <rect x="280" y="55" width="280" height="50" rx="6" class="d-box">
+</rect>
 <text x="420" y="87" text-anchor="middle" class="d-label">输入 X</text>
-            <rect x="280" y="135" width="280" height="50" rx="6" class="d-box-blue"/>
+            <rect x="280" y="135" width="280" height="50" rx="6" class="d-box-blue">
+</rect>
 <text x="420" y="167" text-anchor="middle" class="d-label">RMSNorm</text>
-            <rect x="280" y="215" width="280" height="50" rx="6" class="d-box-blue"/>
+            <rect x="280" y="215" width="280" height="50" rx="6" class="d-box-blue">
+</rect>
 <text x="420" y="247" text-anchor="middle" class="d-label">QKV → Attention → o_proj</text>
-            <rect x="280" y="295" width="280" height="50" rx="6" class="d-box"/>
+            <rect x="280" y="295" width="280" height="50" rx="6" class="d-box">
+</rect>
 <text x="420" y="327" text-anchor="middle" class="d-label">与 X 相加，得到残差 R</text>
-            <rect x="280" y="375" width="280" height="50" rx="6" class="d-box-blue"/>
+            <rect x="280" y="375" width="280" height="50" rx="6" class="d-box-blue">
+</rect>
 <text x="420" y="407" text-anchor="middle" class="d-label">RMSNorm</text>
-            <rect x="210" y="455" width="420" height="65" rx="6" class="d-box-purple"/>
+            <rect x="210" y="455" width="420" height="65" rx="6" class="d-box-purple">
+</rect>
 <text x="420" y="482" text-anchor="middle" class="d-label">Dense FFN，或 MoE</text>
 <text x="420" y="505" text-anchor="middle" class="d-muted">Router → 少数专家 FFN → 加权合并</text>
-            <rect x="280" y="550" width="280" height="50" rx="6" class="d-box"/>
+            <rect x="280" y="550" width="280" height="50" rx="6" class="d-box">
+</rect>
 <text x="420" y="582" text-anchor="middle" class="d-label">与 R 相加</text>
             <text x="420" y="649" text-anchor="middle" class="d-label">下一层</text>
             <text x="34" y="240" class="d-muted">跨 token 汇集信息</text>
@@ -448,13 +400,13 @@ Q [4,2] × Kᵀ [2,4] → 分数 [4,4]
           <figcaption>图 1：专家是多套 FFN 参数。MoE Router 选择专家，attention 权重决定信息如何从上下文汇入当前 token，两种「选择」作用于不同对象。</figcaption>
         </figure>
         <p>MoE 可以增加总参数容量，同时限制每 token 实际激活的专家数；专家并不必须按「数学、翻译」等人工任务命名。以 Mixtral 为例，官方说明的路由正发生在 feedforward block 中。[<a href="https://mistral.ai/news/mixtral-of-experts/">Mixtral 原始结构介绍</a>]</p>
-        <h3>8.2 token 所有权与专家所有权是两张不同的表</h3>
+        <h3>token 所有权与专家所有权是两张不同的表</h3>
         <p>假设入口卡 0 拥有 A/B，卡 1 拥有 C/D；专家 E0 放在卡 0，E1 放在卡 1，并且 top-1 路由决定 A/C 去 E0，B/D 去 E1。dispatch 时 B 发给卡 1、C 发给卡 0；专家完成计算后，结果按 token 的原归属返回并合并。top-k 情况还需要为同一 token 合并多个专家的合法贡献。</p>
         <p>如果 TP 已经让各 rank 持有复制的 token，而这些副本又被当作独立任务送入 EP，就会重复路由和计算。SP MoE 让每个 token 从明确的所属 rank 进入专家路径，避免这类冗余。它不省略本来就需要执行的多个 top-k 专家，也不等于把一个专家的不同 TP 权重分片当成重复工作。</p>
-        <aside class="aside-card">文档中「o_proj 后输入复制」说的是送入后续子层的隐藏状态。o_proj 自己的输入通常还是不同头的分片输出。MoE 边界的最终恢复布局因模型和后端而异，不能给所有模型硬套同一种额外 all-reduce。</aside>
+        <p>文档中「o_proj 后输入复制」说的是送入后续子层的隐藏状态。o_proj 自己的输入通常还是不同头的分片输出。MoE 边界的最终恢复布局因模型和后端而异，不能给所有模型硬套同一种额外 all-reduce。</p>
 
-        <h2 id="context-parallel">九、PCP、DCP 与 DSA-CP：分别切 query、缓存与执行路径</h2>
-        <h3>9.1 PCP 把注意力内部的 query 行也分开</h3>
+        <h2 id="context-parallel">PCP 分 query，DCP 分历史 KV</h2>
+        <h3>PCP 把注意力内部的 query 行也分开</h3>
         <p>前面的 Dense SP+TP2 中，两卡都计算 A/B/C/D 的 query，但各负责两个头。若用一个普通全注意力、TP1、PCP2 的教学模型，每卡可处理全部头、只负责部分 query。例如头尾配对后，卡 0 处理 A/D，卡 1 处理 B/C。</p>
         <table class="decision-table">
 <thead>
@@ -479,10 +431,10 @@ Q [4,2] × Kᵀ [2,4] → 分数 [4,4]
 </table>
         <p>PCP 仍需给本地 query 提供正确的上下文。D 必须能读取 A/B/C/D 的有效 KV；交换的是 KV、缓存更新输入，还是某种前处理结果，要看后端。不能只算两个互不交流的局部序列，再拼接 attention 输出。头尾配对使 A 与 D 的因果工作量 1+4，恰好与 B、C 的 2+3 均衡；真实实现还处理变长请求和 padding。</p>
         <p>如果这个 TP1 教学模型在每卡完整保存稠密 FFN 权重，FFN 就能只算本卡 token；叠加 TP 或 EP 后，还会出现对应权重分片或专家路径的通信。PCP 是独立的 rank 维度，SP 通常复用 TP 组；两者因此可以作用于不同层次，不能仅因都沿 token 切分就视为同义词。</p>
-        <h3>9.2 DCP 沿历史长度分片保存 KV</h3>
+        <h3>DCP 沿历史长度分片保存 KV</h3>
         <p>PCP 首先解决 prefill query 工作如何分摊。DCP 还要解决长历史 KV 如何沿序列位置分布。decode 时，一个新 query 需要在多个 KV shard 上计算注意力，各卡产生局部输出与归一化统计，再合成全局输出。</p>
         <p>PCP-only 不保证每卡只存一段 KV：在核对的 Ascend 布局中，DCP=1 时，各 PCP rank 可保留本卡 TP 头的完整序列 KV。DSA PCP 与 DSA V4.1 PCP 的缓存还有自己的复制及压缩布局。因此，「切了 query」与「切了 KV 存储」必须分别确认。[<a href="https://github.com/vllm-project/vllm-ascend/blob/89eb8a5e7a76d085b453a1aeadb6883e12d5ea2d/docs/source/developer_guide/Design_Documents/context_parallel.md">CP 缓存与执行设计</a>]</p>
-        <h3>9.3 DCP 输出为什么不能直接相加或平均</h3>
+        <h3>DCP 输出为什么不能直接相加或平均</h3>
         <p>TP 的输出贡献 P₀、P₁ 来自线性分解，可以直接求和。DCP 各 KV shard 的 attention 输出却可能已经用本地 softmax 归一化，分母不同。设第 j 个 shard 的归一化输出为 Oⱼ，分区函数 Zⱼ=Σexp(s)，Lⱼ=log Zⱼ，则：</p>
         <div class="math-block">\[
           O=\frac{\sum_j Z_jO_j}{\sum_j Z_j}
@@ -490,14 +442,14 @@ Q [4,2] × Kᵀ [2,4] → 分数 [4,4]
           \qquad m=\max_jL_j.
         \]</div>
         <p>手算一个只有两个 key 的例子：卡 0 的 score=0、value=2，所以 Z₀=1、O₀=2；卡 1 的 score=ln 3、value=10，所以 Z₁=3、O₁=10。正确全局输出为 (1×2+3×10)/(1+3)=8。直接平均局部输出得到 6，直接相加得到 12，都不对。实现会交换 partial output 与 LSE 等统计量，不能把它简单理解成普通 TP 的一次 SUM。</p>
-        <h3>9.4 DSA 选择 KV 位置，MoE 选择专家</h3>
+        <h3>DSA 选择 KV 位置，MoE 选择专家</h3>
         <p>DeepSeek Sparse Attention 在主注意力之前通过 indexer 选择重要上下文位置，再让主 attention 处理这些位置。以 V3.2 为例，主计算的稀疏性与前面 FFN 的 MoE 是不同机制：一个 token 可以先执行 DSA attention，再进入 MoE FFN。Indexer 本身仍有计算与缓存成本，不能把整体成本不加条件地写成只有 top-k 那部分。[<a href="https://huggingface.co/docs/transformers/en/model_doc/deepseek_v32#deepseek-sparse-attention-dsa">DSA 结构说明</a>]</p>
         <p>旧的 DSA-CP 是 Ascend 为这类稀疏注意力设计的专门执行路径，依赖相应 SP/FlashComm 布局。它还要适配 indexer、KV 和输出投影；某些 prefill 路径会临时 gather 投影权重，使本卡可以投影本地 token。主分支中的 <code>context_parallel/dsa_cp.py</code> 则已经是 PCP group 上的 DSA 后端，文件名不能作为旧开关仍存在的证据。</p>
-        <div class="callout">
-<strong>判断分工要看实际 query 行、头范围和缓存所有权。</strong>PCP 也可能 all-gather 隐藏状态用于全局缓存或索引处理，随后仍然只计算本地 query。看到一个 gather，不能马上断言所有卡都回到了 Dense SP 的全部 query 计算。</div>
+        <p>
+<strong>判断分工要看实际 query 行、头范围和缓存所有权。</strong>PCP 也可能 all-gather 隐藏状态用于全局缓存或索引处理，随后仍然只计算本地 query。看到一个 gather，不能马上断言所有卡都回到了 Dense SP 的全部 query 计算。</p>
 
-        <h2 id="compatibility">十、SP、PCP、DCP、DSA-CP 可以一起开吗</h2>
-        <h3>10.1 先给条件化答案：不能把四个开关全部叠上</h3>
+        <h2 id="compatibility">哪些并行方式能叠加</h2>
+        <h3>不能把四个开关全部叠上</h3>
         <p>SP MoE、PCP、DCP 具有组合路径，但必须满足模型、attention backend、通信后端、rank 规模及版本限制。旧 DSA-CP 与 PCP 在 v0.30.0 配置中显式互斥，因而这四项不存在一个不加条件的「全部开启」。更不能把 MoE/MLA/SFA 的组合支持外推成 Qwen 混合 GDN 的 Dense SP 也自动支持相同组合。</p>
         <div class="ve-table-scroll">
 <table class="decision-table">
@@ -550,32 +502,41 @@ Q [4,2] × Kᵀ [2,4] → 分数 [4,4]
 </table>
 </div>
         <p>v0.30.0 的旧开关互斥与依赖，可直接定位 <a href="https://github.com/vllm-project/vllm-ascend/blob/c09d3e20b9c45c80b34ae3781440d90904a44023/vllm_ascend/ascend_config.py#L697">AscendConfig 校验</a>；当前固定快照的 PCP/DCP 组合尺寸，见<a href="https://github.com/vllm-project/vllm-ascend/blob/89eb8a5e7a76d085b453a1aeadb6883e12d5ea2d/docs/source/user_guide/feature_guide/context_parallel.md">Context Parallel Guide</a>。支持表给出适用范围，配置谓词决定是否实际启用，硬件测试再确认正确性和收益。</p>
-        <h3>10.2 TP2 × PCP2 × DCP4 为什么仍然是四张卡</h3>
+        <h3>TP2 × PCP2 × DCP4 为什么仍然是四张卡</h3>
         <p>令 DP=PP=1。PCP 增加进程 rank；SP 复用 TP 组，DCP 复用已有 TP/PCP rank。对支持该拓扑的 MLA/SFA，TP2、PCP2、DCP4 的主 worker 数为 2×2=4，而不是再乘 4 得到 16。</p>
         <figure class="diagram-figure">
-          <svg viewBox="0 0 840 370" role="img" aria-label="TP2乘PCP2的四卡网格，行组成TP组，列组成PCP组，DCP4复用四卡">
+          <svg viewbox="0 0 840 370" role="img" aria-label="TP2乘PCP2的四卡网格，行组成TP组，列组成PCP组，DCP4复用四卡">
             <defs>
-<marker id="ve-topology-head" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
-<path d="M0 0L8 4L0 8Z" class="d-accent-orange"/>
+<marker id="ve-topology-head" markerwidth="8" markerheight="8" refx="7" refy="4" orient="auto">
+<path d="M0 0L8 4L0 8Z" class="d-accent-orange">
+</path>
 </marker>
 </defs>
             <text x="420" y="30" text-anchor="middle" class="d-title">TP2 × PCP2：四个 worker</text>
             <text x="265" y="69" text-anchor="middle" class="d-muted">TP 坐标 0</text>
 <text x="615" y="69" text-anchor="middle" class="d-muted">TP 坐标 1</text>
-            <rect x="115" y="85" width="650" height="85" rx="8" class="d-zone-blue"/>
-<rect x="115" y="215" width="650" height="85" rx="8" class="d-zone-blue"/>
-            <rect x="160" y="103" width="210" height="48" rx="6" class="d-box-blue"/>
-<rect x="510" y="103" width="210" height="48" rx="6" class="d-box-blue"/>
-            <rect x="160" y="233" width="210" height="48" rx="6" class="d-box-blue"/>
-<rect x="510" y="233" width="210" height="48" rx="6" class="d-box-blue"/>
+            <rect x="115" y="85" width="650" height="85" rx="8" class="d-zone-blue">
+</rect>
+<rect x="115" y="215" width="650" height="85" rx="8" class="d-zone-blue">
+</rect>
+            <rect x="160" y="103" width="210" height="48" rx="6" class="d-box-blue">
+</rect>
+<rect x="510" y="103" width="210" height="48" rx="6" class="d-box-blue">
+</rect>
+            <rect x="160" y="233" width="210" height="48" rx="6" class="d-box-blue">
+</rect>
+<rect x="510" y="233" width="210" height="48" rx="6" class="d-box-blue">
+</rect>
             <text x="265" y="134" text-anchor="middle" class="d-label">rank 0</text>
 <text x="615" y="134" text-anchor="middle" class="d-label">rank 1</text>
             <text x="265" y="264" text-anchor="middle" class="d-label">rank 2</text>
 <text x="615" y="264" text-anchor="middle" class="d-label">rank 3</text>
             <text x="20" y="135" class="d-muted">PCP 0</text>
 <text x="20" y="264" class="d-muted">PCP 1</text>
-            <path d="M265 177V208" class="d-arrow-orange" marker-end="url(#ve-topology-head)"/>
-<path d="M615 177V208" class="d-arrow-orange" marker-end="url(#ve-topology-head)"/>
+            <path d="M265 177V208" class="d-arrow-orange" marker-end="url(#ve-topology-head)">
+</path>
+<path d="M615 177V208" class="d-arrow-orange" marker-end="url(#ve-topology-head)">
+</path>
             <text x="420" y="133" text-anchor="middle" class="d-label">TP 组</text>
 <text x="420" y="263" text-anchor="middle" class="d-label">TP 组</text>
             <text x="286" y="197" class="d-muted">PCP 组 [0,2]</text>
@@ -585,14 +546,12 @@ Q [4,2] × Kᵀ [2,4] → 分数 [4,4]
           </svg>
           <figcaption>图 2：行方向按头或权重分工，列方向分配 PCP query，DCP 沿支持的已有 rank 组织缓存协作。EP 的规模也应从实际组定义读取，不能见到一个并行缩写就额外乘一次设备数。</figcaption>
         </figure>
-        <h3>10.3 旧 DSA-CP 与 DSA PCP 不要只按名字匹配</h3>
+        <h3>旧 DSA-CP 与 DSA PCP 不要只按名字匹配</h3>
         <p>在 v0.30.0，<code>enable_dsa_cp</code> 是 Runner V1 的专门开关；PCP 是 Runner V2 的通用上下文并行入口。到本文固定的 main 提交，旧字段已不在 <a href="https://github.com/vllm-project/vllm-ascend/blob/89eb8a5e7a76d085b453a1aeadb6883e12d5ea2d/vllm_ascend/ascend_config.py">配置模型</a>中，<a href="https://github.com/vllm-project/vllm-ascend/blob/89eb8a5e7a76d085b453a1aeadb6883e12d5ea2d/vllm_ascend/attention/context_parallel/dsa_cp.py">同名 DSA CP 文件</a>实现的是 PCP 后端。旧教程中的字段与当前源码文件不是一一对应关系。</p>
-        <aside class="aside-card">实际调参前，先确认模型 architecture、attention backend、已安装版本与 runner，再检查配置是否被禁用或回退，最后看执行 shape 与通信 trace。某项开关能被 JSON 接受，不等于目标优化分支已经生效。</aside>
-
-        <h2 id="request">十一、把这些过程放进一次完整请求</h2>
-        <h3>11.1 Prefill 输出第一个生成 token</h3>
+        <h2 id="request">从 prefill 走到逐 token decode</h2>
+        <h3>Prefill 输出第一个生成 token</h3>
         <p>设 prompt 分词后为 A/B/C/D。模型先准备 embedding 与位置，再经过全部 decoder block。每层全注意力写入自己对应的 K/V 缓存；通常从最后一个有效位置 D 的末层输出计算词表分数，采样出 E。一次处理四个 prompt token，不表示一次生成四个新 token。</p>
-        <h3>11.2 Decode 每轮通常只输入新 token</h3>
+        <h3>Decode 每轮通常只输入新 token</h3>
         <pre>
 <code>Prefill：输入 A B C D → 所有 block → 采样 E
 Decode 1：输入 E     → 所有 block，复用历史 KV → 采样 F
@@ -600,23 +559,48 @@ Decode 2：输入 F     → 所有 block，复用历史 KV → 采样 G
 继续，直到结束符或长度上限。</code>
 </pre>
         <p>E 被采样出来时，还没有作为下一轮输入经过每一层。下一轮才计算 E 的 Q/K/V，把 E 的 K/V 加入各层缓存，并利用此前 A/B/C/D 的 K/V 计算新的输出。旧 token 的隐藏状态不需要重新跑完整个模型。GDN 等递推层保存的则是对应卷积/递推状态，不能将所有层都画成普通 KV cache。</p>
-        <h3>11.3 本轮 token 数 N 与历史长度 L 是两个变量</h3>
+        <h3>本轮 token 数 N 与历史长度 L 是两个变量</h3>
         <p>SP 的输入 gather 面对本轮隐藏状态；decode attention 读取的历史长度可能已经很大。单请求普通 decode 的 N 常为 1，多请求批处理的 N 可接近活跃序列数；投机验证等场景还可能每请求带多个 query。不能把「context 很长」直接等同于「SP 有很多新行可以均分」。</p>
         <p>当 N 不能整除 TP 时，SP 可能补齐 token 行。假设 TP=8、有效 N=1，某些逐 token 工作可能落在 padding 上，计算和通信依然有启动成本。实现还要保证有效长度、positions、request 边界、KV slot mapping 和恢复顺序一致。跨不同请求 gather 到同一缓冲区，并不允许这些请求互相做 attention。</p>
-        <h3>11.4 Chunked Prefill、PCP 与调度批处理也不能混为一谈</h3>
+        <h3>Chunked Prefill、PCP 与调度批处理也不能混为一谈</h3>
         <p>Chunked Prefill 把一次长 prefill 分成若干调度步；PCP 把某步 query 工作分给协作 rank；SP 改写子层周围的激活与通信布局。一个描述时间上的分步，一个描述空间上的 query 分工，一个描述算子边界上的布局变换。它们可能组合，但不会因为都出现「chunk」就自动拥有相同的语义。</p>
-        <div class="callout">
-<strong>读一次请求，要同时记录两条时间线：</strong>请求已经处理到哪个位置，以及本轮各 rank 拥有什么布局。前者决定历史缓存，后者决定当前计算与通信；sampling、embedding 与模型边界还可能有额外通信。</div>
-
-        <h2 id="verification">十二、怎样把「讲清楚」变成可以复核的证据</h2>
-        <h3>12.1 数学复算：完整 block 与分片 block 是否等价</h3>
+        <h2 id="verification">复算示例与实现位置</h2>
+        <h3>数学复算：完整 block 与分片 block 是否等价</h3>
         <p>随文提供 <a href="../../assets/vllm-ascend/verify-layouts.py">verify-layouts.py</a>，仅依赖 NumPy。它使用 H=8、4 个注意力头、F=16、TP=2 和固定随机权重，在 CPU float64 上比较：单份完整计算、普通 TP 贡献求和、Dense SP gather/scatter，以及 PCP 头尾 query 分配。还检查 RMSNorm 的逐行独立性和 DCP 的 LSE 合并。</p>
         <pre>
 <code class="language-bash"># 在博客仓库根目录运行；需要安装 NumPy
 python assets/vllm-ascend/verify-layouts.py</code>
 </pre>
         <p>本次复算覆盖有效 token 数 1、4、5、9，包括补齐到 2、4、6、10 行的情况。普通 TP 与 Dense SP 对完整参考 block 的最大绝对误差均不超过 4.45×10⁻¹⁶；四 token PCP 示例误差为 0。DCP 手算例的全局结果与分区合并均为 8，而错误的未加权平均为 6。它们验证本文的代数与教学布局，不运行 vLLM、不调用 HCCL，也不证明真实后端的速度或所有 mask/量化分支正确。</p>
-        <h3>12.2 源码阅读：沿 predicate → 布局 → 投影 → collectives 追踪</h3>
+        <h3 id="source-versions">这份执行顺序对应哪个版本</h3>
+<p>Dense SP 的调用顺序来自 v0.30.0 的 Qwen3.5 补丁。2026 年 11 月 11 日核对的主分支中，这个 helper 已经删除，旧 DSA-CP 配置入口也已变化；具体区别如下。</p>
+<div class="ve-table-scroll">
+<table class="decision-table">
+<caption>本文用到的两个实现版本</caption>
+<thead>
+<tr>
+<th>源码快照</th>
+<th>本文确认的事实</th>
+<th>使用边界</th>
+</tr>
+</thead>
+<tbody>
+          <tr>
+<td>v0.30.0，<a href="https://github.com/vllm-project/vllm-ascend/tree/c09d3e20b9c45c80b34ae3781440d90904a44023">c09d3e20</a>
+</td>
+<td>包含 Qwen3.5 稠密家族的 <code>enable_dense_sp</code>、decoder 补丁，以及旧 <code>enable_dsa_cp</code> 路径。</td>
+<td>Dense SP 的计算与通信推导以这份代码为落点。</td>
+</tr>
+          <tr>
+<td>2026-11-11 main，<a href="https://github.com/vllm-project/vllm-ascend/tree/89eb8a5e7a76d085b453a1aeadb6883e12d5ea2d">89eb8a5e</a>
+</td>
+<td>该快照的 <code>enable_sp</code> 只返回 MoE SP 判定；同名 Qwen 补丁已没有上述 Dense SP helper；配置模型中也不再有旧 DSA-CP 字段。</td>
+<td>不能把旧开关直接当作这份主分支的 Dense SP 或 DSA-CP 启用方式。</td>
+</tr>
+        </tbody>
+</table>
+</div>
+        <h3>几个直接相关的源码入口</h3>
         <table class="decision-table">
 <thead>
 <tr>
@@ -657,36 +641,11 @@ python assets/vllm-ascend/verify-layouts.py</code>
 </tr>
         </tbody>
 </table>
-        <h3>12.3 性能实验：每次只改变一个可以解释的变量</h3>
+        <h3>长 prefill、小 batch decode 与融合设置</h3>
         <p>先固定模型与权重精度、NPU 型号与互联、vLLM/Ascend/CANN 版本、并行组、输入输出长度、并发和图模式，再比较基线与 SP。至少分别记录 TTFT、TPOT、吞吐、尾延迟、峰值显存、实际 padding 行数及 collective 时间。性能背景可配合阅读<a href="llm-inference-prefill-decode-bottleneck-analysis.html">推理性能分析</a>。</p>
         <p>实验分三组最有解释力：长 prefill/短输出观察 Norm 与通信重排；小 batch 长 decode 检查调用和 padding 的负担；不同融合与量化设置区分「布局变化」与「算子/字节变化」。多机环境还需把网络拓扑和带宽计入。输出一致性至少检查 logits 或容差内的张量；随机采样结果相同与否都不是完整的算子验证。</p>
-        <aside class="aside-card">本文提供的是机制推导、固定源码检查和 CPU 数值复算。没有执行 NPU 压测，也没有把示意计算量当作实际吞吐或延迟。后续若加入硬件实验，应保留完整环境、基线与结果记录。</aside>
-        <h3>12.4 读完后，可以独立回答的几个问题</h3>
-        <div class="ve-faq">
-          <details>
-<summary>为什么 attention 后同样是 [N,H]，还需要通信？</summary>
-<p>形状完整不等于数值完整。每卡 o_proj 只包含本卡头的贡献；需要 SUM，普通 TP 用 AR，SP 用 RS 保留完整的本地 token 行。</p>
-</details>
-          <details>
-<summary>为什么 FFN 逐 token 独立，还需要 all-gather？</summary>
-<p>独立性针对 token 之间的依赖；TP 权重仍分在不同卡。每个 token 必须经过各卡对应的权重分片。换成完整复制权重会改变成本和算法布局。</p>
-</details>
-          <details>
-<summary>SP 是否意味着每卡只算一半注意力 query？</summary>
-<p>本文的 Dense SP 不是：它在 attention 前收齐本轮隐藏状态，再按头分工。PCP 才把注意力里的 query 行分配给不同 PCP rank；后端仍须提供正确的上下文。</p>
-</details>
-          <details>
-<summary>SP、PCP、DCP、DSA-CP 能否一起使用？</summary>
-<p>不能无条件四开。旧 DSA-CP 与 PCP 在固定 v0.30.0 中明确互斥；SP MoE、PCP、DCP 的共同支持还要核对模型后端与拓扑。Dense SP 不自动继承 MoE 的兼容矩阵。</p>
-</details>
-          <details>
-<summary>把 AR 拆成 RS+AG，通信量是不是直接减半？</summary>
-<p>同一 dtype、同一张量的理想 ring 发送量相同。中间逐 token 工作、激活占用与融合机会改变了；实际延迟与字节量还受后端、量化和 padding 影响。</p>
-</details>
-        </div>
-        <div class="essay-ending">理解 SP 的起点是给每一行、每一列和每一份贡献找到所有者。TP 的线性分解解释为什么要合并，逐 token 的独立性解释为什么 Norm 可以留在分片，PCP 与 DCP 再把 query 和历史 KV 的分工展开。沿着这些依赖读源码，特性开关就能还原成可以推导、复算并测量的执行过程。</div>
-        <p>本篇是<a href="vllm-ascend-00-series.html">「推理引擎解剖室：vLLM × Ascend」</a>的第一篇机制解析。后续继续研究细粒度 TP、专家负载均衡、缓存分层、启动加载、投机解码和调度，始终记录它改变了哪份状态、哪段依赖以及哪项成本。</p>
-        <section class="references-section" aria-label="参考与扩展阅读">
+        <p>其他选题见<a href="vllm-ascend-00-series.html">专栏目录</a>；注意力头与 KV 结构可接着读<a href="../basic/attention-mechanism-evolution-mha-mqa-gqa-mla.html">MHA、MQA、GQA 与 MLA</a>。</p>
+<section class="references-section" aria-label="参考与扩展阅读">
 <h2>参考与扩展阅读</h2>
 <ol class="reference-list">
           <li>
