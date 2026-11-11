@@ -6,91 +6,47 @@
   <script>(function(){try{var s=localStorage.getItem("yichuan-theme");document.documentElement.setAttribute("data-theme",s||(matchMedia("(prefers-color-scheme: dark)").matches?"night":"day"));}catch(e){}})();</script>
   <link rel="stylesheet" href="../../styles.css?v=64" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous" />
-  <title>PyMotor 源码阅读（6）｜NodeManager 与原生引擎运行时</title>
+  <title>PyMotor 06 · 进程活着，服务就健康吗</title>
   <meta name="description" content="跟踪 LaunchContext 到原生进程的转换，拆解服务注册、后端配置、进程监督、心跳、虚推和 FT 代理，理解本地恢复的执行边界。" />
+  <link rel="stylesheet" href="../../assets/pymotor/reader.css?v=1" />
 </head>
 <body class="pymotor-post">
-  <div class="ambient" aria-hidden="true"><span class="orb orb-a"></span><span class="orb orb-b"></span></div><canvas id="star-canvas"></canvas>
-  <header class="site-header"><div class="header-inner"><a href="../../index.html" class="logo"><span class="logo-dot"></span><span class="logo-text">MOFANG</span></a><div class="header-actions"><nav class="site-nav"><a href="../../index.html">← 首页</a></nav><button id="theme-toggle" class="theme-toggle" type="button" aria-label="切换主题"><span class="icon-sun">☀️</span><span class="icon-moon">🌙</span></button></div></div></header>
-  <main class="site-main"><article class="post-page">
+
+  <header class="site-header"><div class="header-inner"><a href="../../index.html" class="logo"><span class="logo-dot"></span><span class="logo-text">MOFANG</span></a><div class="header-actions"><nav class="site-nav"><a href="../../index.html">← 首页</a></nav><button id="theme-toggle" class="theme-toggle" type="button" aria-label="切换主题">切换日夜</button></div></div></header>
+  <main class="site-main"><div class="pm-reader-layout"><aside class="pm-rail"><details open><summary>PyMotor · 阅读路径</summary><ol><li><a href="pymotor-00-overview.html"><span>00</span><span>系统全景</span></a></li><li><a href="pymotor-01-startup.html"><span>01</span><span>实例上线</span></a></li><li><a href="pymotor-02-request.html"><span>02</span><span>请求编排</span></a></li><li><a href="pymotor-03-scheduler-shm.html"><span>03</span><span>并发调度</span></a></li><li><a href="pymotor-04-kv-affinity.html"><span>04</span><span>缓存亲和</span></a></li><li><a href="pymotor-05-stream-recovery.html"><span>05</span><span>流式恢复</span></a></li><li><a href="pymotor-06-node-manager.html" aria-current="page"><span>06</span><span>节点运行时</span></a></li><li><a href="pymotor-07-ep-fault-tolerance.html"><span>07</span><span>大 EP 恢复</span></a></li><li><a href="pymotor-08-observability.html"><span>08</span><span>观测与复盘</span></a></li></ol><small>从一次执行理解系统，再用条件变化检验理解。</small></details></aside><article class="post-page">
     <header class="post-page-header">
-      <p class="post-page-category">Inference · PyMotor 源码阅读 06</p>
-      <h1 class="post-page-title">PyMotor 源码阅读（6）｜NodeManager 与原生引擎运行时</h1>
-      <p class="post-lead">跟踪 LaunchContext 到原生进程的转换，拆解服务注册、后端配置、进程监督、心跳、虚推和 FT 代理，理解本地恢复的执行边界。本文对照 <a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/README.md" target="_blank" rel="noopener noreferrer">MindIE-PyMotor 841e50df 源码</a>。</p>
-      <div class="post-page-keywords" aria-label="关键词"><a class="post-keyword-chip" href="../../index.html?keyword=pymotor">PyMotor</a><a class="post-keyword-chip" href="../../index.html?keyword=inference-systems">推理框架</a><a class="post-keyword-chip" href="../../index.html?keyword=pd-disagg">PD 分离</a></div>
-      <p class="post-page-meta" data-date="2026-11-11" data-author="MOFANG" data-minutes=""></p>
-    </header>
-    <details class="pymotor-series-menu"><summary>PyMotor 源码阅读系列 · 7 / 9</summary><ol><li><a href="pymotor-00-overview.html"><span>00</span> 系统全景与源码阅读路线</a></li>
-<li><a href="pymotor-01-startup.html"><span>01</span> 配置、注册与实例上线</a></li>
-<li><a href="pymotor-02-request.html"><span>02</span> 一次请求的完整执行链</a></li>
-<li><a href="pymotor-03-scheduler-shm.html"><span>03</span> 调度策略与共享内存并发记账</a></li>
-<li><a href="pymotor-04-kv-affinity.html"><span>04</span> 缓存亲和与分层前缀索引</a></li>
-<li><a href="pymotor-05-stream-recovery.html"><span>05</span> 流式响应、重调度与精度探测</a></li>
-<li><a href="pymotor-06-node-manager.html" aria-current="page"><span>06</span> NodeManager 与原生引擎运行时</a></li>
-<li><a href="pymotor-07-ep-fault-tolerance.html"><span>07</span> 大 EP 实例的故障恢复</a></li>
-<li><a href="pymotor-08-observability.html"><span>08</span> 观测、验证与项目复盘</a></li></ol></details>
-    <div class="logic-map" aria-label="本文逻辑路线"><div class="map-node map-node--start"><span>1</span><strong>服务选择</strong></div><div class="map-arrow" aria-hidden="true">→</div><div class="map-node map-node--ar"><span>2</span><strong>启动规格</strong></div><div class="map-arrow" aria-hidden="true">→</div><div class="map-node map-node--par"><span>3</span><strong>健康信号</strong></div><div class="map-arrow" aria-hidden="true">→</div><div class="map-node map-node--conv"><span>4</span><strong>本地执行</strong></div></div>
-    <nav class="pymotor-toc" aria-label="本文目录"><strong>本文目录</strong><ol><li><a href="#node-manager-map">一、从一个节点代理建立运行地图</a></li><li><a href="#node-registration">二、注册、API 就绪和启动身份</a></li><li><a href="#node-native-launch">三、从不可变规格走到原生进程</a></li><li><a href="#node-services">四、服务注册、KV 服务和启动加速</a></li><li><a href="#node-health">五、健康事实、虚推和统一退出仲裁</a></li><li><a href="#node-ft-proxy">六、FT 代理与退役端点的一致收尾</a></li></ol></nav>
-    <section class="post-page-content">
+<p class="pm-kicker">PYMOTOR / 系统剖面 06</p>
+<h1 class="post-page-title">进程活着，服务就健康吗</h1>
+<p class="post-lead">让进程、健康接口、小型推理请求和容量等待给出不同信号，看看 NodeManager 能观察到什么。再进入启动规格、服务监督与恢复保护窗口，理解本地执行的边界。</p>
+<p class="post-page-meta" data-date="2026-11-11" data-author="MOFANG" data-minutes=""></p>
+<p class="pm-source-note">对照 <a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/README.md">源码 841e50df</a> · 演示中的时间与负载用于解释机制</p>
+</header>
+
+
+    <div id="experiment" class="pm-lab" data-pm-lab="node"><p>正在准备交互讲解。下面可继续阅读完整源码解析。</p></div>
+<details class="pm-toc"><summary>沿源码继续阅读</summary><ol><li><a href="#node-manager-map">从一个节点代理建立运行地图</a></li><li><a href="#node-registration">注册、API 就绪和启动身份</a></li><li><a href="#node-native-launch">从不可变规格走到原生进程</a></li><li><a href="#node-services">服务注册、KV 服务和启动加速</a></li><li><a href="#node-health">健康事实、虚推和统一退出仲裁</a></li><li><a href="#node-ft-proxy">FT 代理与退役端点的一致收尾</a></li><li><a href="#interview-check">把机制讲清楚</a></li></ol></details>
+<section class="post-page-content">
 <p class="lead">前几章已经把用户请求走过的 Coordinator、调度器和缓存索引串了起来。本章沿着另一条链走到设备所在的节点，观察 Controller 发出的启动指令如何变成原生引擎进程，以及进程运行以后谁负责收集健康事实、执行重启和协调故障恢复。NodeManager 把全局实例管理与节点上的具体执行接在一起，它的代码适合用“接收命令、生成规格、启动进程、观察状态、执行收尾”五个动作来阅读。</p>
 
-<h2 id="node-manager-map">一、从一个节点代理建立运行地图</h2>
-<h3>1.1 应用骨架怎样组合模块</h3>
+<h2 id="node-manager-map">从一个节点代理建立运行地图</h2>
+<h3>应用骨架怎样组合模块</h3>
 <p>
 <code>NodeManager</code> 继承公共的 <code>Application</code>，在 <code>init_modules()</code> 中先建立 <code>Daemon</code> 和 <code>NodeManagerAPI</code>。当 Daemon 的活动服务包含引擎时，应用继续建立 <code>RegisterManager</code>、<code>HeartbeatManager</code>，最后启动本地退出仲裁。这个顺序有明确依赖，仲裁线程读取心跳管理器提供的端点事实，因此需要等共享配置和模块对象都绑定完成。仅运行 KV 服务的 Pod 使用更小的模块集合，代码由活动服务决定是否参加引擎注册与心跳。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/node_manager/node_manager.py">源码 · NodeManager 应用组装</a>
 </p>
-<figure class="diagram-figure">
-<svg viewBox="0 0 840 330" role="img" aria-labelledby="p6-title p6-desc">
-<title id="p6-title">NodeManager 的本地运行链</title>
-<desc id="p6-desc">Controller 指令进入管理 API，注册管理器保存身份，Daemon 通过服务、后端和进程监督器启动引擎。心跳管理器和故障接口代理收集运行事实并回报 Controller。</desc>
-<defs>
-<marker id="arrowhead" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto">
-<path class="d-accent" d="M0 0 L10 4 L0 8 Z"/>
-</marker>
-</defs>
-<rect class="d-box-purple" x="20" y="28" width="160" height="62" rx="10"/>
-<text class="d-label" x="100" y="54" text-anchor="middle">Controller</text>
-<text class="d-muted" x="100" y="75" text-anchor="middle">StartCmd / 恢复指令</text>
-<rect class="d-box-blue" x="232" y="28" width="168" height="62" rx="10"/>
-<text class="d-label" x="316" y="54" text-anchor="middle">NodeManager API</text>
-<text class="d-muted" x="316" y="75" text-anchor="middle">身份与参数校验</text>
-<rect class="d-box-blue" x="450" y="28" width="160" height="62" rx="10"/>
-<text class="d-label" x="530" y="54" text-anchor="middle">Daemon</text>
-<text class="d-muted" x="530" y="75" text-anchor="middle">服务编排 / 退出仲裁</text>
-<rect class="d-box-orange" x="660" y="28" width="160" height="62" rx="10"/>
-<text class="d-label" x="740" y="54" text-anchor="middle">NativeEngineService</text>
-<text class="d-muted" x="740" y="75" text-anchor="middle">逐端点构造规格</text>
-<path class="d-arrow" d="M180 59 H232 M400 59 H450 M610 59 H660" fill="none" marker-end="url(#arrowhead)"/>
-<rect class="d-box-orange" x="660" y="139" width="160" height="62" rx="10"/>
-<text class="d-label" x="740" y="165" text-anchor="middle">Backend / Config</text>
-<text class="d-muted" x="740" y="186" text-anchor="middle">生成 LaunchSpec</text>
-<rect class="d-box-purple" x="450" y="139" width="160" height="62" rx="10"/>
-<text class="d-label" x="530" y="165" text-anchor="middle">ProcessSupervisor</text>
-<text class="d-muted" x="530" y="186" text-anchor="middle">进程组 / 原生探针</text>
-<rect class="d-box-purple" x="232" y="139" width="168" height="62" rx="10"/>
-<text class="d-label" x="316" y="165" text-anchor="middle">vLLM / SGLang</text>
-<text class="d-muted" x="316" y="186" text-anchor="middle">模型执行与设备通信</text>
-<path class="d-arrow" d="M740 90 V139 M660 170 H610 M450 170 H400" fill="none" marker-end="url(#arrowhead)"/>
-<rect class="d-box-blue" x="232" y="250" width="378" height="56" rx="10"/>
-<text class="d-label" x="421" y="274" text-anchor="middle">HeartbeatManager / EngineFtManager</text>
-<text class="d-muted" x="421" y="294" text-anchor="middle">健康事实、恢复状态和退役端点过滤</text>
-<path class="d-arrow" d="M316 201 V250 M232 278 H100 V90" fill="none" marker-end="url(#arrowhead)"/>
-</svg>
-<figcaption>实线表示管理和本地运行关系。正常推理请求由 Coordinator 调用引擎业务接口。</figcaption>
-</figure>
-<h3>1.2 按状态归属理解文件</h3>
+
+<h3>按状态归属理解文件</h3>
 <p>注册管理器保存 Controller 分配的实例身份和启动参数，心跳管理器保存当前端点状态，进程监督器保存本地进程对象，Daemon 负责把服务运行和退出决策协调起来。读到同一个 endpoint id 出现在几个文件里时，要追问每个模块保存的是哪种事实。实例已经注册、进程已经创建、健康接口已经通过、实例已经进入调度池，分别对应四个里程碑。</p>
 <aside class="aside-card">
 <strong>本章阅读目标</strong>
 <p>选择一个端点，追踪它的 <code>instance_id</code>、<code>dp_rank</code>、设备可见范围、业务端口和运行状态。读完后，应能说明这五项信息在哪产生、由谁消费，以及启动失败时怎样回收已经创建的资源。</p>
 </aside>
 
-<h2 id="node-registration">二、注册、API 就绪和启动身份</h2>
-<h3>2.1 先具备接收命令的能力</h3>
+<h2 id="node-registration">注册、API 就绪和启动身份</h2>
+<h3>先具备接收命令的能力</h3>
 <p>
 <code>api_ready_event.py</code> 定义了进程内的就绪事件。注册线程在向 Controller 发起注册前先等待 NodeManager 管理 API 就绪，因为 Controller 完成实例组装后会立即回调启动接口。当前 <code>_register()</code> 等待 30 秒，超时会记录错误并继续尝试注册。随后使用从 2 秒开始、最大 32 秒的指数退避，持续尝试直到注册成功。阅读这个函数时，应把 API 等待超时和注册重试间隔分别记录。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/node_manager/core/api_ready_event.py">源码 · API 就绪事件</a> <a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/node_manager/core/register_manager.py">源码 · 注册与启动身份</a>
 </p>
-<h3>2.2 RegisterMsg 与 StartCmdMsg 分别传什么</h3>
+<h3>RegisterMsg 与 StartCmdMsg 分别传什么</h3>
 <p>
 <code>_gen_register_msg()</code> 从配置读取 job、模型、角色、引擎类型、dispatch 能力、FT 能力、业务端口、并行配置、设备数和节点数等，构造 <code>RegisterMsg</code>。Controller 汇总这些描述，随后给各节点发送 <code>StartCmdMsg</code>，其中包含分配好的实例身份、端点、master 信息和 node rank。注册消息告诉控制面本节点能提供什么，启动消息带回控制面已经确定的执行拓扑。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/common/resources/http_msg_spec.py">源码 · 组件间消息合同</a>
 </p>
@@ -135,25 +91,25 @@
 </tbody>
 </table>
 
-<h2 id="node-native-launch">三、从不可变规格走到原生进程</h2>
-<h3>3.1 models、factory 与 config_factory</h3>
+<h2 id="node-native-launch">从不可变规格走到原生进程</h2>
+<h3>models、factory 与 config_factory</h3>
 <p>
 <code>native_engine/models.py</code> 把启动拆成几个明确的对象。<code>LaunchContext</code> 保存角色、实例、DP rank、node rank、地址、端口、环境和可选快照信息。<code>CommandSpec</code> 保存 argv、环境和工作目录。<code>ProbeSpec</code> 保存健康路径、超时、重试和是否仅检查进程。<code>LaunchSpec</code> 组合命令与探针。前几个对象使用冻结 dataclass，并对映射复制或包装，便于在启动前固定输入。可变的 <code>RuntimeProcess</code> 由监督器独占管理，保存进程句柄与本地运行状态。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/node_manager/core/services/native_engine/models.py">源码 · 启动规格与运行态</a>
 </p>
 <p>
 <code>factory.py</code> 根据归一化的引擎类型选取无状态 Backend，<code>config_factory.py</code> 再惰性加载 vLLM 或 SGLang 的 CLI 配置转换器。<code>BaseNativeEngineBackend.prepare()</code> 先建立并验证 <code>EndpointConfig</code>，加载当前角色对应配置，交给转换器生成 CLI，最后返回 <code>LaunchSpec</code>。这些函数能够在没有模型进程的测试里验证大部分参数传播。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/node_manager/core/services/native_engine/backends/base.py">源码 · Backend 公共转换</a> <a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/node_manager/core/services/native_engine/config_factory.py">源码 · 配置转换工厂</a>
 </p>
-<h3>3.2 用四个 DP 端点跟一次启动</h3>
+<h3>用四个 DP 端点跟一次启动</h3>
 <p>设一个教学实例在当前节点有 DP0、DP1、DP2、DP3 四个业务端点，每个端点使用两个本地设备。<code>NativeEngineService._pull()</code> 逐个端点复制基础环境，计算设备可见范围，用 endpoint id 填充 <code>LaunchContext.dp_rank</code>，再传入业务端口、master 和 node rank。vLLM 转换器最终生成原生 <code>data-parallel-rank</code> 等参数，监督器以 endpoint id 为 key 保存进程。这个例子表达参数传播关系，具体可见设备集合仍由部署配置和服务中的计算函数决定。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/node_manager/core/services/native_engine/service.py">源码 · 原生引擎服务</a> <a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/node_manager/core/services/native_engine/backends/vllm/config.py">源码 · vLLM 参数转换</a>
 </p>
 <p>假设 DP0、DP1 成功启动，构造 DP2 的规格时失败。服务记录本轮已经启动的 endpoint id，异常处理会逆序停止这些进程，再把失败交给上层。监督器自身也约束重复启动，同一端点已经运行且规格相同会返回“本次没有新启动”，规格不同则报错。这样外层回滚只回收本轮真正创建的进程，避免重复命令把既有运行态当成本轮产物清掉。</p>
-<h3>3.3 进程组和探针的生命周期</h3>
+<h3>进程组和探针的生命周期</h3>
 <p>
 <code>ProcessSupervisor.start()</code> 使用 argv 列表启动进程，记录启动时间与进程组身份。<code>state()</code> 先看进程是否退出，再按探针检查原生服务。普通端点使用健康接口，headless 端点可使用进程检查，快照路径还会解释不同健康返回状态。冷启动阶段允许加载模型，超过启动窗口仍不健康则推进本地状态。停止通过进程组协调子孙进程退出，并保留超时后的强制收尾路径。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/node_manager/core/services/native_engine/supervisor.py">源码 · 进程监督器</a>
 </p>
 
-<h2 id="node-services">四、服务注册、KV 服务和启动加速</h2>
-<h3>4.1 registry 与 protocols 让 Daemon 管理不同服务</h3>
+<h2 id="node-services">服务注册、KV 服务和启动加速</h2>
+<h3>registry 与 protocols 让 Daemon 管理不同服务</h3>
 <p>
 <code>services/registry.py</code> 使用装饰器登记服务，按配置发现并导入对应模块，再实例化活动服务。空服务配置默认保留 engine。具备 prepare 阶段的服务按 <code>prepare_priority</code> 排序，数值较小者先准备。<code>DaemonService</code> 约定 stop 与 health_check，<code>PreparableService</code> 再增加 prepare。Daemon 因而可以通过稳定合同管理引擎和存储服务，同时让每种服务封装自己的配置、进程与健康细节。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/node_manager/core/services/registry.py">源码 · 服务注册表</a> <a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/node_manager/core/services/protocols.py">源码 · 服务合同</a>
 </p>
@@ -205,26 +161,26 @@
 </table>
 <p>Mooncake 与 Memcache 的实现都有服务生命周期边界。Memcache 在 inprocess 模式下准备用户管理的配置，standalone 模式才由本模块启动专用子进程。Mooncake 的生命周期层选择对应硬件 bootstrap，并协调服务进程的通信资源。阅读时应先判断配置激活了哪个 backend 和模式，再沿实际启动函数进入子进程。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/node_manager/core/services/memcache/lifecycle.py">源码 · Memcache 生命周期</a> <a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/node_manager/core/services/mooncake/lifecycle.py">源码 · Mooncake 生命周期</a>
 </p>
-<h3>4.2 启动加速的输入、覆盖和适用性</h3>
+<h3>启动加速的输入、覆盖和适用性</h3>
 <p>
 <code>startup_acceleration.py</code> 根据配置解析可复用缓存根，生成引擎环境，并检查 Startup Plan 文件和图复用目录。启用图复用时，它会产生 eager、编译及图模式相关覆盖，D 角色使用对应的 decode-only 图模式。这里完成的是运行前准备和配置衔接，某份历史 profile 是否适用于本轮模型、设备和引擎执行仍由后续引擎判断。学习时可对照覆盖合并函数，观察嵌套配置怎样保留其他原生选项，以及冲突如何被记录。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/node_manager/core/services/native_engine/startup_acceleration.py">源码 · 启动加速准备</a>
 </p>
 
-<h2 id="node-health">五、健康事实、虚推和统一退出仲裁</h2>
-<h3>5.1 健康采集与心跳发送分开</h3>
+<h2 id="node-health">健康事实、虚推和统一退出仲裁</h2>
+<h3>健康采集与心跳发送分开</h3>
 <p>
 <code>HeartbeatManager</code> 维护端点列表、状态、退役集合与端点代际。状态线程等待 Daemon 提供的引擎就绪事件后轮询本地运行态，报告线程按节奏发送心跳。配置更新和端点更新受锁保护，外部读取获得稳定快照。端点变化会推进 generation，避免仲裁沿用上一轮拓扑的连续异常计数。代码还保留冷启动宽限期，让模型加载与业务异常能够按不同阶段处理。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/node_manager/core/heartbeat_manager.py">源码 · 心跳与端点事实</a>
 </p>
-<h3>5.2 virtual_inference 的几个小模块</h3>
+<h3>virtual_inference 的几个小模块</h3>
 <p>健康接口能够表达服务自身的判断，小型推理请求又提供了一种实际执行信号。<code>capabilities.py</code> 判断配置、DP master、headless 和使用率阈值是否允许开启 vLLM 虚推。<code>spec.py</code> 固定探测目标身份，<code>requesters.py</code> 发送小型 Completion 并读取容量等待指标，<code>worker.py</code> 组织预热、周期请求和连续失败，<code>ai_cube.py</code> 采样 AI Cube 使用率。当前路径围绕所选 active DP master 运行，缩容更换 master 后会重新协调探测目标。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/node_manager/core/services/native_engine/virtual_inference/worker.py">源码 · 虚推 Worker</a> <a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/node_manager/core/services/native_engine/virtual_inference/capabilities.py">源码 · 虚推能力判断</a>
 </p>
 <p>虚推失败需要结合负载解释。当前 Worker 在周期检查中采样 AI Cube 峰值，高负载时延长请求间隔。低使用率下的小请求失败还会查询 capacity-waiting 信号，容量排队或指标不可用时存在跳过失败计数的分支。最终异常标志会反馈到服务运行状态，再由 Daemon 统一仲裁退出。可以用“进程仍在、健康接口失败、虚推失败、容量等待大于零”四个事实组合，练习解释每层知道什么。SGLang 路径还应结合它的原生健康语义单独阅读。</p>
-<h3>5.3 有期限的 freeze 协调本地恢复</h3>
+<h3>有期限的 freeze 协调本地恢复</h3>
 <p>Daemon 的进程监督线程和退出仲裁线程分别处理进程死亡与连续异常。退出仲裁读取心跳事实，在宽限期或 freeze 有效期间重置异常计数。freeze 使用截止时间，后来的冻结请求取更长的有效期限，避免一个较短操作覆盖已经建立的恢复窗口。引擎故障上报被 Controller 接受后，Daemon 才按恢复等待窗口冻结。这样能够给全局恢复留出机会，同时在消息丢失或恢复没有继续时通过期限恢复本地判断。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/node_manager/core/daemon.py">源码 · Daemon 监督与退出仲裁</a>
 </p>
 
-<h2 id="node-ft-proxy">六、FT 代理与退役端点的一致收尾</h2>
-<h3>6.1 status、apply、guard、finalize</h3>
+<h2 id="node-ft-proxy">FT 代理与退役端点的一致收尾</h2>
+<h3>status、apply、guard、finalize</h3>
 <p>
 <code>EngineFtManager</code> 定期查询原生引擎 FT 状态，并提供恢复期间的主动查询和指令代理。<code>query()</code> 并发刷新指定端点，传输失败会形成 unknown 结果。明确 dead 的引擎响应才提供不可逆移除所需的权威证据。<code>apply()</code> 当前接受 retry 和 scale_down 指令，校验端点归属并转换原生参数。scale-down 的 store 端口还会结合 master rank 解析，因此参数检查覆盖 rank 类型、范围和最终端口范围。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/node_manager/core/engine_ft_manager.py">源码 · 引擎 FT 代理</a>
 </p>
@@ -234,19 +190,27 @@
 <p>再看一条本地重启时序。原实例已经保存四个端点，Controller 通过 engine-restart 请求要求 NM 原地重拉。Daemon 需要先校验当前实例身份和已有启动参数，建立恢复等待窗口，停止旧引擎，再用保存的角色与端点规格重新启动。心跳管理器应在新运行态建立后继续上报这一实例，进程监督器则持有新的进程对象。这个例子中逻辑实例身份与操作系统进程身份各有生命周期，排障记录应同时保存两者，否则很容易把迟到的旧进程消息与新运行态混在一起。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/node_manager/core/daemon.py">源码 · 本地引擎重启编排</a>
 </p>
 <p>阅读过程中还可以建立一份“状态转换记录”。每一行写下触发动作、调用前的端点代际、启动规格、进程状态、心跳状态和退出仲裁是否冻结。例如进程创建后，业务健康可能仍在启动宽限期内，心跳也还没有让全局实例进入可服务状态。随后原生探针通过，虚推是否开启又取决于能力条件。这样逐项标注之后，一条笼统的“服务未就绪”就能被拆成配置转换失败、进程创建失败、模型尚在加载、业务执行异常或成员发布尚未收敛等可继续定位的阶段。</p>
-<h3>6.2 用已有测试完成本章练习</h3>
+<h3>用已有测试完成本章练习</h3>
 <p>先读 <code>test_backends.py</code> 和 <code>test_config_contract.py</code>，为 DP rank、master 和设备配置画一条规格转换线。再读 <code>test_service.py</code>、<code>test_supervisor.py</code>，手工模拟第二个端点启动失败，写出哪些进程属于本轮、哪些需要回滚。接着用 <code>test_heartbeat_manager.py</code> 和 <code>test_daemon.py</code> 跟一遍健康异常、freeze 到期和退出仲裁。最后阅读 <code>test_engine_ft_manager.py</code>、<code>test_retired_metrics.py</code>，检查提交退役端点以后哪些出口需要同步过滤。练习产出应包含输入消息、状态所属对象、调用顺序和失败收尾，随后就能进入下一章的全局恢复编排。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/tests/node_manager/core/services/native_engine/test_service.py">测试 · 引擎服务</a> <a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/tests/node_manager/core/test_engine_ft_manager.py">测试 · FT 代理</a>
 </p>
 
-      <div class="essay-ending">接下来沿着大 EP 实例的故障恢复继续追踪对象和状态。</div>
-      <section class="references-section" aria-label="源码与延伸阅读"><h2>源码与延伸阅读</h2><ol class="reference-list"><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/node_manager/node_manager.py" target="_blank" rel="noopener noreferrer">motor/node_manager/node_manager.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/node_manager/core/api_ready_event.py" target="_blank" rel="noopener noreferrer">motor/node_manager/core/api_ready_event.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/node_manager/core/register_manager.py" target="_blank" rel="noopener noreferrer">motor/node_manager/core/register_manager.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/common/resources/http_msg_spec.py" target="_blank" rel="noopener noreferrer">motor/common/resources/http_msg_spec.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/node_manager/core/services/native_engine/models.py" target="_blank" rel="noopener noreferrer">motor/node_manager/core/services/native_engine/models.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/node_manager/core/services/native_engine/backends/base.py" target="_blank" rel="noopener noreferrer">motor/node_manager/core/services/native_engine/backends/base.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/node_manager/core/services/native_engine/config_factory.py" target="_blank" rel="noopener noreferrer">motor/node_manager/core/services/native_engine/config_factory.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/node_manager/core/services/native_engine/service.py" target="_blank" rel="noopener noreferrer">motor/node_manager/core/services/native_engine/service.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/node_manager/core/services/native_engine/backends/vllm/config.py" target="_blank" rel="noopener noreferrer">motor/node_manager/core/services/native_engine/backends/vllm/config.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/node_manager/core/services/native_engine/supervisor.py" target="_blank" rel="noopener noreferrer">motor/node_manager/core/services/native_engine/supervisor.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/node_manager/core/services/registry.py" target="_blank" rel="noopener noreferrer">motor/node_manager/core/services/registry.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/node_manager/core/services/protocols.py" target="_blank" rel="noopener noreferrer">motor/node_manager/core/services/protocols.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/node_manager/core/services/memcache/lifecycle.py" target="_blank" rel="noopener noreferrer">motor/node_manager/core/services/memcache/lifecycle.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/node_manager/core/services/mooncake/lifecycle.py" target="_blank" rel="noopener noreferrer">motor/node_manager/core/services/mooncake/lifecycle.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/node_manager/core/services/native_engine/startup_acceleration.py" target="_blank" rel="noopener noreferrer">motor/node_manager/core/services/native_engine/startup_acceleration.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/node_manager/core/heartbeat_manager.py" target="_blank" rel="noopener noreferrer">motor/node_manager/core/heartbeat_manager.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/node_manager/core/services/native_engine/virtual_inference/worker.py" target="_blank" rel="noopener noreferrer">motor/node_manager/core/services/native_engine/virtual_inference/worker.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/node_manager/core/services/native_engine/virtual_inference/capabilities.py" target="_blank" rel="noopener noreferrer">motor/node_manager/core/services/native_engine/virtual_inference/capabilities.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/node_manager/core/daemon.py" target="_blank" rel="noopener noreferrer">motor/node_manager/core/daemon.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/node_manager/core/engine_ft_manager.py" target="_blank" rel="noopener noreferrer">motor/node_manager/core/engine_ft_manager.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/node_manager/api_server/node_manager_api.py" target="_blank" rel="noopener noreferrer">motor/node_manager/api_server/node_manager_api.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/tests/node_manager/core/services/native_engine/test_service.py" target="_blank" rel="noopener noreferrer">tests/node_manager/core/services/native_engine/test_service.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/tests/node_manager/core/test_engine_ft_manager.py" target="_blank" rel="noopener noreferrer">tests/node_manager/core/test_engine_ft_manager.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="llm-inference-prefill-decode-bottleneck-analysis.html">LLM 推理性能分析</a><span>配合阅读 Prefill、Decode、并行维度与服务指标。</span></li><li><a href="mooncake-architecture-overview.html">Mooncake 架构与源码阅读地图</a><span>继续追踪引擎之外的 KV 存储和传输机制。</span></li></ol></section>
+
+      <section class="pm-interview" aria-label="面试自检"><h2 id="interview-check">把机制讲清楚</h2><p>先自己回答，再展开核对。把答案落到对象、状态和代码位置上。</p><details><summary>PID、健康接口和虚推分别能说明什么？</summary><p>PID 描述进程存活，原生健康接口表达服务自身状态，小请求提供实际执行信号。虚推判断还需结合宽限期、容量等待、连续失败与配置能力。</p><p class="pm-answer-hook">继续追问 · 给出进程仍活着但请求执行异常的一组观测事实。</p></details>
+<details><summary>多个端点只启动了一半怎么办？</summary><p>NativeEngineService 记录本轮成功启动的端点。后续启动失败时，对本轮已启动进程执行回滚，保留运行历史的判断需要结合 supervisor 的身份和状态。</p><p class="pm-answer-hook">继续追问 · 逐项列出 LaunchContext、LaunchSpec、Popen 和回滚范围。</p></details>
+<details><summary>恢复期间 NM 为什么需要 guard？</summary><p>全局恢复可能暂时使引擎不健康。带事务身份和期限的保护让本地退出仲裁与 Controller 的恢复窗口协调，期限也避免保护无限延续。</p><p class="pm-answer-hook">继续追问 · 说明 guard、租约、finalize 和本地健康采集的关系。</p></details>
+</section>
+<details class="pm-reference-fold"><summary>源码与扩展阅读</summary><section class="references-section" aria-label="源码与延伸阅读"><h2>源码与延伸阅读</h2><ol class="reference-list"><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/node_manager/node_manager.py" target="_blank" rel="noopener noreferrer">motor/node_manager/node_manager.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/node_manager/core/api_ready_event.py" target="_blank" rel="noopener noreferrer">motor/node_manager/core/api_ready_event.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/node_manager/core/register_manager.py" target="_blank" rel="noopener noreferrer">motor/node_manager/core/register_manager.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/common/resources/http_msg_spec.py" target="_blank" rel="noopener noreferrer">motor/common/resources/http_msg_spec.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/node_manager/core/services/native_engine/models.py" target="_blank" rel="noopener noreferrer">motor/node_manager/core/services/native_engine/models.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/node_manager/core/services/native_engine/backends/base.py" target="_blank" rel="noopener noreferrer">motor/node_manager/core/services/native_engine/backends/base.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/node_manager/core/services/native_engine/config_factory.py" target="_blank" rel="noopener noreferrer">motor/node_manager/core/services/native_engine/config_factory.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/node_manager/core/services/native_engine/service.py" target="_blank" rel="noopener noreferrer">motor/node_manager/core/services/native_engine/service.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/node_manager/core/services/native_engine/backends/vllm/config.py" target="_blank" rel="noopener noreferrer">motor/node_manager/core/services/native_engine/backends/vllm/config.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/node_manager/core/services/native_engine/supervisor.py" target="_blank" rel="noopener noreferrer">motor/node_manager/core/services/native_engine/supervisor.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/node_manager/core/services/registry.py" target="_blank" rel="noopener noreferrer">motor/node_manager/core/services/registry.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/node_manager/core/services/protocols.py" target="_blank" rel="noopener noreferrer">motor/node_manager/core/services/protocols.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/node_manager/core/services/memcache/lifecycle.py" target="_blank" rel="noopener noreferrer">motor/node_manager/core/services/memcache/lifecycle.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/node_manager/core/services/mooncake/lifecycle.py" target="_blank" rel="noopener noreferrer">motor/node_manager/core/services/mooncake/lifecycle.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/node_manager/core/services/native_engine/startup_acceleration.py" target="_blank" rel="noopener noreferrer">motor/node_manager/core/services/native_engine/startup_acceleration.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/node_manager/core/heartbeat_manager.py" target="_blank" rel="noopener noreferrer">motor/node_manager/core/heartbeat_manager.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/node_manager/core/services/native_engine/virtual_inference/worker.py" target="_blank" rel="noopener noreferrer">motor/node_manager/core/services/native_engine/virtual_inference/worker.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/node_manager/core/services/native_engine/virtual_inference/capabilities.py" target="_blank" rel="noopener noreferrer">motor/node_manager/core/services/native_engine/virtual_inference/capabilities.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/node_manager/core/daemon.py" target="_blank" rel="noopener noreferrer">motor/node_manager/core/daemon.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/node_manager/core/engine_ft_manager.py" target="_blank" rel="noopener noreferrer">motor/node_manager/core/engine_ft_manager.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/node_manager/api_server/node_manager_api.py" target="_blank" rel="noopener noreferrer">motor/node_manager/api_server/node_manager_api.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/tests/node_manager/core/services/native_engine/test_service.py" target="_blank" rel="noopener noreferrer">tests/node_manager/core/services/native_engine/test_service.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/tests/node_manager/core/test_engine_ft_manager.py" target="_blank" rel="noopener noreferrer">tests/node_manager/core/test_engine_ft_manager.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="llm-inference-prefill-decode-bottleneck-analysis.html">LLM 推理性能分析</a><span>配合阅读 Prefill、Decode、并行维度与服务指标。</span></li><li><a href="mooncake-architecture-overview.html">Mooncake 架构与源码阅读地图</a><span>继续追踪引擎之外的 KV 存储和传输机制。</span></li></ol></section></details>
       <nav class="pymotor-next" aria-label="前后篇"><a href="pymotor-05-stream-recovery.html">← 上一篇 · 流式响应、重调度与精度探测</a><a href="pymotor-07-ep-fault-tolerance.html">下一篇 · 大 EP 实例的故障恢复 →</a></nav>
     </section>
     <section class="comments-section" id="comments" aria-label="Discussion"><div class="comments-header"><h2>Discussion</h2></div><div id="utterances-container" class="utterances-container"></div><noscript>请启用 JavaScript 查看评论。</noscript></section>
-  </article></main>
+  </article></div></main>
   <footer class="site-footer"><span class="footer-credit">© 2026 by <a href="../../index.html">MOFANG</a></span></footer>
   <script src="../../app.js?v=46"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" crossorigin="anonymous"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js" crossorigin="anonymous" onload="renderMathInElement(document.querySelector('.post-page-content'),{delimiters:[{left:'\\[',right:'\\]',display:true},{left:'\\(',right:'\\)',display:false}],throwOnError:false});"></script>
+<script defer src="../../assets/pymotor/labs-lifecycle.js?v=1"></script>
+<script defer src="../../assets/pymotor/labs-scheduling.js?v=1"></script>
+<script defer src="../../assets/pymotor/labs-reliability.js?v=1"></script>
+<script defer src="../../assets/pymotor/reader.js?v=1"></script>
 </body>
 </html>

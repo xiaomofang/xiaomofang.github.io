@@ -109,92 +109,92 @@
     <section id="blog" class="section">
       <div class="post-list" id="post-list">
         <!-- PYMOTOR_SERIES_START -->
-        <article class="post-card" data-category="inference" data-keywords="pymotor inference-systems pd-disagg" data-date="2026-11-11" data-title="PyMotor 源码阅读（0）｜系统全景与源码阅读路线">
+        <article class="post-card" data-category="inference" data-keywords="pymotor inference-systems pd-disagg" data-date="2026-11-11" data-title="PyMotor · 把一条请求放进 PyMotor">
           <a href="posts/inference/pymotor-00-overview.html" class="post-card-link">
             <div class="post-meta-row"><span class="post-tag">Inference · PyMotor 00</span></div>
-            <h3 class="post-title">PyMotor 源码阅读（0）｜系统全景与源码阅读路线</h3>
-            <p class="post-excerpt">从一次用户请求和一次实例生命周期出发，建立 Controller、Coordinator、NodeManager、Engine 与 KV Conductor 的关系，理解大 EP、DP 端点和状态归属。</p>
-            <p class="post-card-stats">2026年11月11日 · 11 分钟 · 3165 字 · MOFANG</p>
+            <h3 class="post-title">PyMotor · 把一条请求放进 PyMotor</h3>
+            <p class="post-excerpt">一条请求到来时，引擎已经在哪里等它？先在图里切换推理、实例管理和缓存索引三条路径，再点击组件，观察每一份状态由谁负责。后面的源码阅读，就从这些交点展开。</p>
+            <p class="post-card-stats">2026年11月11日 · 12 分钟 · 3314 字 · MOFANG</p>
           </a>
           <div class="post-card-keywords"><button class="post-keyword-chip" data-keyword="pymotor" type="button">PyMotor</button><button class="post-keyword-chip" data-keyword="inference-systems" type="button">推理框架</button><button class="post-keyword-chip" data-keyword="pd-disagg" type="button">PD 分离</button></div>
         </article>
 
-        <article class="post-card" data-category="inference" data-keywords="pymotor inference-systems pd-disagg" data-date="2026-11-11" data-title="PyMotor 源码阅读（1）｜配置、注册与实例上线">
+        <article class="post-card" data-category="inference" data-keywords="pymotor inference-systems pd-disagg" data-date="2026-11-11" data-title="PyMotor · 一个引擎，怎样成为可调度资源">
           <a href="posts/inference/pymotor-01-startup.html" class="post-card-link">
             <div class="post-meta-row"><span class="post-tag">Inference · PyMotor 01</span></div>
-            <h3 class="post-title">PyMotor 源码阅读（1）｜配置、注册与实例上线</h3>
-            <p class="post-excerpt">沿配置、部署、注册、实例组装和心跳状态机追踪一个新节点，解释启动命令怎样成为可调度端点，以及成员变更如何传播到 Worker。</p>
-            <p class="post-card-stats">2026年11月11日 · 14 分钟 · 4058 字 · MOFANG</p>
+            <h3 class="post-title">PyMotor · 一个引擎，怎样成为可调度资源</h3>
+            <p class="post-excerpt">容器已经启动，模型也正在加载，Coordinator 却还不能把请求发过去。沿着注册、组装、健康与发布逐步推进，看看哪一个条件真正打开了调度入口。</p>
+            <p class="post-card-stats">2026年11月11日 · 15 分钟 · 4202 字 · MOFANG</p>
           </a>
           <div class="post-card-keywords"><button class="post-keyword-chip" data-keyword="pymotor" type="button">PyMotor</button><button class="post-keyword-chip" data-keyword="inference-systems" type="button">推理框架</button><button class="post-keyword-chip" data-keyword="pd-disagg" type="button">PD 分离</button></div>
         </article>
 
-        <article class="post-card" data-category="inference" data-keywords="pymotor inference-systems pd-disagg" data-date="2026-11-11" data-title="PyMotor 源码阅读（2）｜一次请求的完整执行链">
+        <article class="post-card" data-category="inference" data-keywords="pymotor inference-systems pd-disagg" data-date="2026-11-11" data-title="PyMotor · Prefill 结束后，谁把请求交给 Decode">
           <a href="posts/inference/pymotor-02-request.html" class="post-card-link">
             <div class="post-meta-row"><span class="post-tag">Inference · PyMotor 02</span></div>
-            <h3 class="post-title">PyMotor 源码阅读（2）｜一次请求的完整执行链</h3>
-            <p class="post-excerpt">沿非流式 HANDOFF 请求逐步追踪入口、tokenization、路由策略、P/D 协议适配和响应清理，再对照 TRIGGER、BOOTSTRAP 与混部路径。</p>
-            <p class="post-card-stats">2026年11月11日 · 14 分钟 · 4171 字 · MOFANG</p>
+            <h3 class="post-title">PyMotor · Prefill 结束后，谁把请求交给 Decode</h3>
+            <p class="post-excerpt">把请求 R1 停在每一个阶段，查看请求上下文、P/D 资源和交接票据。再切换原生协议，观察哪些步骤必须等待，哪些步骤由引擎并发协调。</p>
+            <p class="post-card-stats">2026年11月11日 · 15 分钟 · 4294 字 · MOFANG</p>
           </a>
           <div class="post-card-keywords"><button class="post-keyword-chip" data-keyword="pymotor" type="button">PyMotor</button><button class="post-keyword-chip" data-keyword="inference-systems" type="button">推理框架</button><button class="post-keyword-chip" data-keyword="pd-disagg" type="button">PD 分离</button></div>
         </article>
 
-        <article class="post-card" data-category="inference" data-keywords="pymotor inference-systems pd-disagg" data-date="2026-11-11" data-title="PyMotor 源码阅读（3）｜调度策略与共享内存并发记账">
+        <article class="post-card" data-category="inference" data-keywords="pymotor inference-systems pd-disagg" data-date="2026-11-11" data-title="PyMotor · 两个 Worker，同一份负载">
           <a href="posts/inference/pymotor-03-scheduler-shm.html" class="post-card-link">
             <div class="post-meta-row"><span class="post-tag">Inference · PyMotor 03</span></div>
-            <h3 class="post-title">PyMotor 源码阅读（3）｜调度策略与共享内存并发记账</h3>
-            <p class="post-excerpt">从负载模型和四种调度策略进入 Worker 本地选点、CAS 竞争重选、seqlock 成员快照与 generation 校验，解释分配和释放怎样保持一致。</p>
-            <p class="post-card-stats">2026年11月11日 · 14 分钟 · 4147 字 · MOFANG</p>
+            <h3 class="post-title">PyMotor · 两个 Worker，同一份负载</h3>
+            <p class="post-excerpt">两名 Worker 都读到负载 100，同时想增加 20。亲手安排读取和提交顺序，观察一次失败的 CAS 怎样改变下一轮选择，以及请求结束后如何把账还清。</p>
+            <p class="post-card-stats">2026年11月11日 · 15 分钟 · 4269 字 · MOFANG</p>
           </a>
           <div class="post-card-keywords"><button class="post-keyword-chip" data-keyword="pymotor" type="button">PyMotor</button><button class="post-keyword-chip" data-keyword="inference-systems" type="button">推理框架</button><button class="post-keyword-chip" data-keyword="pd-disagg" type="button">PD 分离</button></div>
         </article>
 
-        <article class="post-card" data-category="inference" data-keywords="pymotor inference-systems pd-disagg" data-date="2026-11-11" data-title="PyMotor 源码阅读（4）｜缓存亲和与分层前缀索引">
+        <article class="post-card" data-category="inference" data-keywords="pymotor inference-systems pd-disagg" data-date="2026-11-11" data-title="PyMotor · 有缓存的节点，就该优先吗">
           <a href="posts/inference/pymotor-04-kv-affinity.html" class="post-card-link">
             <div class="post-meta-row"><span class="post-tag">Inference · PyMotor 04</span></div>
-            <h3 class="post-title">PyMotor 源码阅读（4）｜缓存亲和与分层前缀索引</h3>
-            <p class="post-excerpt">把 KV 事件、连续前缀、NPU/CPU/Disk 覆盖、介质加权、负载评分与回退连成闭环，手算一次选路，并设计可验证收益的对照实验。</p>
-            <p class="post-card-stats">2026年11月11日 · 16 分钟 · 4795 字 · MOFANG</p>
+            <h3 class="post-title">PyMotor · 有缓存的节点，就该优先吗</h3>
+            <p class="post-excerpt">缓存最多的 A、负载较低的 B、尚未积累缓存的 C，应该接收哪条请求？调整负载与介质权重，找到选路发生改变的那一刻，再回到连续前缀索引与真实提交量。</p>
+            <p class="post-card-stats">2026年11月11日 · 17 分钟 · 4913 字 · MOFANG</p>
           </a>
           <div class="post-card-keywords"><button class="post-keyword-chip" data-keyword="pymotor" type="button">PyMotor</button><button class="post-keyword-chip" data-keyword="inference-systems" type="button">推理框架</button><button class="post-keyword-chip" data-keyword="pd-disagg" type="button">PD 分离</button></div>
         </article>
 
-        <article class="post-card" data-category="inference" data-keywords="pymotor inference-systems pd-disagg" data-date="2026-11-11" data-title="PyMotor 源码阅读（5）｜流式响应、重调度与精度探测">
+        <article class="post-card" data-category="inference" data-keywords="pymotor inference-systems pd-disagg" data-date="2026-11-11" data-title="PyMotor · 已经输出两个 token，还能重试吗">
           <a href="posts/inference/pymotor-05-stream-recovery.html" class="post-card-link">
             <div class="post-meta-row"><span class="post-tag">Inference · PyMotor 05</span></div>
-            <h3 class="post-title">PyMotor 源码阅读（5）｜流式响应、重调度与精度探测</h3>
-            <p class="post-excerpt">从响应提交边界深入 attempt、token 重放、取消和负载释放，区分上游错误与实例熔断，并串起精度抽样、检查、探测和告警。</p>
-            <p class="post-card-stats">2026年11月11日 · 17 分钟 · 4986 字 · MOFANG</p>
+            <h3 class="post-title">PyMotor · 已经输出两个 token，还能重试吗</h3>
+            <p class="post-excerpt">把故障放在响应头之前、响应头之后和可见内容之后。相同的上游断连，会遇到不同的 HTTP 与重放边界；沿一次 attempt 的结束过程，检查响应和负载怎样收尾。</p>
+            <p class="post-card-stats">2026年11月11日 · 18 分钟 · 5121 字 · MOFANG</p>
           </a>
           <div class="post-card-keywords"><button class="post-keyword-chip" data-keyword="pymotor" type="button">PyMotor</button><button class="post-keyword-chip" data-keyword="inference-systems" type="button">推理框架</button><button class="post-keyword-chip" data-keyword="pd-disagg" type="button">PD 分离</button></div>
         </article>
 
-        <article class="post-card" data-category="inference" data-keywords="pymotor inference-systems pd-disagg" data-date="2026-11-11" data-title="PyMotor 源码阅读（6）｜NodeManager 与原生引擎运行时">
+        <article class="post-card" data-category="inference" data-keywords="pymotor inference-systems pd-disagg" data-date="2026-11-11" data-title="PyMotor · 进程活着，服务就健康吗">
           <a href="posts/inference/pymotor-06-node-manager.html" class="post-card-link">
             <div class="post-meta-row"><span class="post-tag">Inference · PyMotor 06</span></div>
-            <h3 class="post-title">PyMotor 源码阅读（6）｜NodeManager 与原生引擎运行时</h3>
-            <p class="post-excerpt">跟踪 LaunchContext 到原生进程的转换，拆解服务注册、后端配置、进程监督、心跳、虚推和 FT 代理，理解本地恢复的执行边界。</p>
-            <p class="post-card-stats">2026年11月11日 · 16 分钟 · 4725 字 · MOFANG</p>
+            <h3 class="post-title">PyMotor · 进程活着，服务就健康吗</h3>
+            <p class="post-excerpt">让进程、健康接口、小型推理请求和容量等待给出不同信号，看看 NodeManager 能观察到什么。再进入启动规格、服务监督与恢复保护窗口，理解本地执行的边界。</p>
+            <p class="post-card-stats">2026年11月11日 · 16 分钟 · 4800 字 · MOFANG</p>
           </a>
           <div class="post-card-keywords"><button class="post-keyword-chip" data-keyword="pymotor" type="button">PyMotor</button><button class="post-keyword-chip" data-keyword="inference-systems" type="button">推理框架</button><button class="post-keyword-chip" data-keyword="pd-disagg" type="button">PD 分离</button></div>
         </article>
 
-        <article class="post-card" data-category="inference" data-keywords="pymotor inference-systems pd-disagg" data-date="2026-11-11" data-title="PyMotor 源码阅读（7）｜大 EP 实例的故障恢复">
+        <article class="post-card" data-category="inference" data-keywords="pymotor inference-systems pd-disagg" data-date="2026-11-11" data-title="PyMotor · 一个 DP 故障，怎样保住剩下的实例">
           <a href="posts/inference/pymotor-07-ep-fault-tolerance.html" class="post-card-link">
             <div class="post-meta-row"><span class="post-tag">Inference · PyMotor 07</span></div>
-            <h3 class="post-title">PyMotor 源码阅读（7）｜大 EP 实例的故障恢复</h3>
-            <p class="post-excerpt">从硬件与软件证据进入恢复规划，逐步分析 DP 缩容的 guard、status、apply、finalize，解释幸存端点视图、退役管理和主备恢复。</p>
-            <p class="post-card-stats">2026年11月11日 · 16 分钟 · 4564 字 · MOFANG</p>
+            <h3 class="post-title">PyMotor · 一个 DP 故障，怎样保住剩下的实例</h3>
+            <p class="post-excerpt">在四个 DP 中选择一个故障 rank，逐步执行撤流、引擎恢复和幸存者发布。试着让撤流失败，或在成功后再做一次全量同步，检查故障端点会不会重新出现。</p>
+            <p class="post-card-stats">2026年11月11日 · 16 分钟 · 4603 字 · MOFANG</p>
           </a>
           <div class="post-card-keywords"><button class="post-keyword-chip" data-keyword="pymotor" type="button">PyMotor</button><button class="post-keyword-chip" data-keyword="inference-systems" type="button">推理框架</button><button class="post-keyword-chip" data-keyword="pd-disagg" type="button">PD 分离</button></div>
         </article>
 
-        <article class="post-card" data-category="inference" data-keywords="pymotor inference-systems pd-disagg" data-date="2026-11-11" data-title="PyMotor 源码阅读（8）｜观测、验证与项目复盘">
+        <article class="post-card" data-category="inference" data-keywords="pymotor inference-systems pd-disagg" data-date="2026-11-11" data-title="PyMotor · TTFT 变慢，先看哪一段">
           <a href="posts/inference/pymotor-08-observability.html" class="post-card-link">
             <div class="post-meta-row"><span class="post-tag">Inference · PyMotor 08</span></div>
-            <h3 class="post-title">PyMotor 源码阅读（8）｜观测、验证与项目复盘</h3>
-            <p class="post-excerpt">沿引擎指标、语义聚合、容量规划和 Trace 建立验证体系，补齐公共设施、构建与测试地图，再将源码理解组织成有证据的技术表达。</p>
-            <p class="post-card-stats">2026年11月11日 · 17 分钟 · 4990 字 · MOFANG</p>
+            <h3 class="post-title">PyMotor · TTFT 变慢，先看哪一段</h3>
+            <p class="post-excerpt">把一次请求的等待和计算时间拆开调整，再把两端点的命中计数合并。通过这些可复算的证据，连接指标、Trace、调度日志与源码，准备能经得起追问的项目讲述。</p>
+            <p class="post-card-stats">2026年11月11日 · 17 分钟 · 5015 字 · MOFANG</p>
           </a>
           <div class="post-card-keywords"><button class="post-keyword-chip" data-keyword="pymotor" type="button">PyMotor</button><button class="post-keyword-chip" data-keyword="inference-systems" type="button">推理框架</button><button class="post-keyword-chip" data-keyword="pd-disagg" type="button">PD 分离</button></div>
         </article>

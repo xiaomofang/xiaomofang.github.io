@@ -6,83 +6,37 @@
   <script>(function(){try{var s=localStorage.getItem("yichuan-theme");document.documentElement.setAttribute("data-theme",s||(matchMedia("(prefers-color-scheme: dark)").matches?"night":"day"));}catch(e){}})();</script>
   <link rel="stylesheet" href="../../styles.css?v=64" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous" />
-  <title>PyMotor 源码阅读（0）｜系统全景与源码阅读路线</title>
+  <title>PyMotor 00 · 把一条请求放进 PyMotor</title>
   <meta name="description" content="从一次用户请求和一次实例生命周期出发，建立 Controller、Coordinator、NodeManager、Engine 与 KV Conductor 的关系，理解大 EP、DP 端点和状态归属。" />
+  <link rel="stylesheet" href="../../assets/pymotor/reader.css?v=1" />
 </head>
 <body class="pymotor-post">
-  <div class="ambient" aria-hidden="true"><span class="orb orb-a"></span><span class="orb orb-b"></span></div><canvas id="star-canvas"></canvas>
-  <header class="site-header"><div class="header-inner"><a href="../../index.html" class="logo"><span class="logo-dot"></span><span class="logo-text">MOFANG</span></a><div class="header-actions"><nav class="site-nav"><a href="../../index.html">← 首页</a></nav><button id="theme-toggle" class="theme-toggle" type="button" aria-label="切换主题"><span class="icon-sun">☀️</span><span class="icon-moon">🌙</span></button></div></div></header>
-  <main class="site-main"><article class="post-page">
+
+  <header class="site-header"><div class="header-inner"><a href="../../index.html" class="logo"><span class="logo-dot"></span><span class="logo-text">MOFANG</span></a><div class="header-actions"><nav class="site-nav"><a href="../../index.html">← 首页</a></nav><button id="theme-toggle" class="theme-toggle" type="button" aria-label="切换主题">切换日夜</button></div></div></header>
+  <main class="site-main"><div class="pm-reader-layout"><aside class="pm-rail"><details open><summary>PyMotor · 阅读路径</summary><ol><li><a href="pymotor-00-overview.html" aria-current="page"><span>00</span><span>系统全景</span></a></li><li><a href="pymotor-01-startup.html"><span>01</span><span>实例上线</span></a></li><li><a href="pymotor-02-request.html"><span>02</span><span>请求编排</span></a></li><li><a href="pymotor-03-scheduler-shm.html"><span>03</span><span>并发调度</span></a></li><li><a href="pymotor-04-kv-affinity.html"><span>04</span><span>缓存亲和</span></a></li><li><a href="pymotor-05-stream-recovery.html"><span>05</span><span>流式恢复</span></a></li><li><a href="pymotor-06-node-manager.html"><span>06</span><span>节点运行时</span></a></li><li><a href="pymotor-07-ep-fault-tolerance.html"><span>07</span><span>大 EP 恢复</span></a></li><li><a href="pymotor-08-observability.html"><span>08</span><span>观测与复盘</span></a></li></ol><small>从一次执行理解系统，再用条件变化检验理解。</small></details></aside><article class="post-page">
     <header class="post-page-header">
-      <p class="post-page-category">Inference · PyMotor 源码阅读 00</p>
-      <h1 class="post-page-title">PyMotor 源码阅读（0）｜系统全景与源码阅读路线</h1>
-      <p class="post-lead">从一次用户请求和一次实例生命周期出发，建立 Controller、Coordinator、NodeManager、Engine 与 KV Conductor 的关系，理解大 EP、DP 端点和状态归属。本文对照 <a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/README.md" target="_blank" rel="noopener noreferrer">MindIE-PyMotor 841e50df 源码</a>。</p>
-      <div class="post-page-keywords" aria-label="关键词"><a class="post-keyword-chip" href="../../index.html?keyword=pymotor">PyMotor</a><a class="post-keyword-chip" href="../../index.html?keyword=inference-systems">推理框架</a><a class="post-keyword-chip" href="../../index.html?keyword=pd-disagg">PD 分离</a></div>
-      <p class="post-page-meta" data-date="2026-11-11" data-author="MOFANG" data-minutes=""></p>
-    </header>
-    <details class="pymotor-series-menu" open><summary>PyMotor 源码阅读系列 · 1 / 9</summary><ol><li><a href="pymotor-00-overview.html" aria-current="page"><span>00</span> 系统全景与源码阅读路线</a></li>
-<li><a href="pymotor-01-startup.html"><span>01</span> 配置、注册与实例上线</a></li>
-<li><a href="pymotor-02-request.html"><span>02</span> 一次请求的完整执行链</a></li>
-<li><a href="pymotor-03-scheduler-shm.html"><span>03</span> 调度策略与共享内存并发记账</a></li>
-<li><a href="pymotor-04-kv-affinity.html"><span>04</span> 缓存亲和与分层前缀索引</a></li>
-<li><a href="pymotor-05-stream-recovery.html"><span>05</span> 流式响应、重调度与精度探测</a></li>
-<li><a href="pymotor-06-node-manager.html"><span>06</span> NodeManager 与原生引擎运行时</a></li>
-<li><a href="pymotor-07-ep-fault-tolerance.html"><span>07</span> 大 EP 实例的故障恢复</a></li>
-<li><a href="pymotor-08-observability.html"><span>08</span> 观测、验证与项目复盘</a></li></ol></details>
-    <div class="logic-map" aria-label="本文逻辑路线"><div class="map-node map-node--start"><span>1</span><strong>服务问题</strong></div><div class="map-arrow" aria-hidden="true">→</div><div class="map-node map-node--ar"><span>2</span><strong>资源对象</strong></div><div class="map-arrow" aria-hidden="true">→</div><div class="map-node map-node--par"><span>3</span><strong>状态归属</strong></div><div class="map-arrow" aria-hidden="true">→</div><div class="map-node map-node--conv"><span>4</span><strong>阅读路线</strong></div></div>
-    <nav class="pymotor-toc" aria-label="本文目录"><strong>本文目录</strong><ol><li><a href="#system-question">一、先问一个能串起全项目的问题</a></li><li><a href="#component-map">二、五个角色怎样协作</a></li><li><a href="#resource-model">三、先认识贯穿各模块的资源对象</a></li><li><a href="#state-ownership">四、进程边界决定状态归谁所有</a></li><li><a href="#directory-route">五、把目录压缩成三条阅读路线</a></li><li><a href="#study-plan">六、如何把阅读变成可复述的理解</a></li></ol></nav>
-    <section class="post-page-content">
-<h2 id="system-question">一、先问一个能串起全项目的问题</h2>
-<h3>1.1 从一个模型进程到一个推理服务</h3>
+<p class="pm-kicker">PYMOTOR / 系统剖面 00</p>
+<h1 class="post-page-title">把一条请求放进 PyMotor</h1>
+<p class="post-lead">一条请求到来时，引擎已经在哪里等它？先在图里切换推理、实例管理和缓存索引三条路径，再点击组件，观察每一份状态由谁负责。后面的源码阅读，就从这些交点展开。</p>
+<p class="post-page-meta" data-date="2026-11-11" data-author="MOFANG" data-minutes=""></p>
+<p class="pm-source-note">对照 <a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/README.md">源码 841e50df</a> · 演示中的时间与负载用于解释机制</p>
+</header>
+
+
+    <div id="experiment" class="pm-lab" data-pm-lab="overview"><p>正在准备交互讲解。下面可继续阅读完整源码解析。</p></div>
+<details class="pm-toc"><summary>沿源码继续阅读</summary><ol><li><a href="#system-question">先问一个能串起全项目的问题</a></li><li><a href="#component-map">五个角色怎样协作</a></li><li><a href="#resource-model">先认识贯穿各模块的资源对象</a></li><li><a href="#state-ownership">进程边界决定状态归谁所有</a></li><li><a href="#directory-route">把目录压缩成三条阅读路线</a></li><li><a href="#study-plan">如何把阅读变成可复述的理解</a></li><li><a href="#interview-check">把机制讲清楚</a></li></ol></details>
+<section class="post-page-content">
+<h2 id="system-question">先问一个能串起全项目的问题</h2>
+<h3>从一个模型进程到一个推理服务</h3>
 <p>设想一套已经能运行模型的 vLLM 引擎。输入 prompt，执行 Prefill，循环 Decode，返回生成结果。模型执行的最短闭环已经成立。接下来把它扩展到多个节点，新的问题会连续出现。多个 Pod 怎样认识彼此，哪个节点成为通信入口，哪些引擎负责 Prefill，哪些负责 Decode，请求由谁选路，某个 DP 失败后哪些入口仍能使用，这些问题共同构成了 Motor 的工作范围。</p>
 <p>MindIE Motor 把原生引擎组织成具有生命周期、调度规则和恢复机制的服务。阅读时可以持续跟踪一个问题——一条用户请求如何找到一组已经准备好的引擎，并在结束时留下正确的系统状态。这个问题会经过配置、部署、注册、资源发布、阶段编排、负载记账和故障恢复，恰好覆盖项目的主要模块。</p>
-<h3>1.2 一次请求与一次实例生命周期</h3>
+<h3>一次请求与一次实例生命周期</h3>
 <p>请求的生命周期通常从接入开始，到响应结束和资源清理结束。实例的生命周期更长，从节点注册开始，经历组装、启动、健康检查、上线、暂停、故障和删除。一个运行中的实例会处理很多请求。把这两条时间线分别画出来，再找交点，会比按目录逐个阅读更容易建立因果关系。</p>
 <div class="callout">
 <strong>本系列的阅读单位是状态变化。</strong>每进入一个函数，都记录调用者、输入、读写的状态、输出和失败收尾。这样可以从文件之间的跳转恢复出系统行为。</div>
 
-<h2 id="component-map">二、五个角色怎样协作</h2>
-<figure class="diagram-figure">
-<svg viewBox="0 0 840 430" role="img" aria-label="PyMotor 请求路径与实例管理路径">
-<defs>
-<marker id="pm-overview-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
-<path d="M0 0 L8 4 L0 8 Z" class="d-accent-blue"/>
-</marker>
-</defs>
-<text x="28" y="30" class="d-title">请求选择可用端点，控制面维护端点的来源</text>
-<rect x="28" y="66" width="148" height="72" rx="10" class="d-box-blue"/>
-<text x="102" y="96" text-anchor="middle" class="d-label">客户端</text>
-<text x="102" y="120" text-anchor="middle" class="d-muted">HTTP / SSE</text>
-<rect x="230" y="66" width="176" height="72" rx="10" class="d-box-blue"/>
-<text x="318" y="96" text-anchor="middle" class="d-label">Coordinator</text>
-<text x="318" y="120" text-anchor="middle" class="d-muted">选点与阶段编排</text>
-<rect x="465" y="66" width="148" height="72" rx="10" class="d-box-orange"/>
-<text x="539" y="96" text-anchor="middle" class="d-label">P 引擎</text>
-<text x="539" y="120" text-anchor="middle" class="d-muted">Prefill</text>
-<rect x="670" y="66" width="142" height="72" rx="10" class="d-box-orange"/>
-<text x="741" y="96" text-anchor="middle" class="d-label">D 引擎</text>
-<text x="741" y="120" text-anchor="middle" class="d-muted">Decode</text>
-<line x1="176" y1="102" x2="222" y2="102" class="d-arrow-blue" marker-end="url(#pm-overview-arrow)"/>
-<line x1="406" y1="102" x2="457" y2="102" class="d-arrow-blue" marker-end="url(#pm-overview-arrow)"/>
-<line x1="613" y1="102" x2="662" y2="102" class="d-arrow-orange" marker-end="url(#pm-overview-arrow)"/>
-<text x="640" y="156" text-anchor="middle" class="d-muted">KV 经 Connector 交接</text>
-<rect x="230" y="220" width="176" height="72" rx="10" class="d-box-purple"/>
-<text x="318" y="250" text-anchor="middle" class="d-label">Controller</text>
-<text x="318" y="274" text-anchor="middle" class="d-muted">实例状态与恢复</text>
-<rect x="465" y="220" width="216" height="72" rx="10" class="d-box-purple"/>
-<text x="573" y="250" text-anchor="middle" class="d-label">NodeManager</text>
-<text x="573" y="274" text-anchor="middle" class="d-muted">启动与健康事实</text>
-<line x1="318" y1="220" x2="318" y2="146" class="d-arrow-blue" marker-end="url(#pm-overview-arrow)"/>
-<text x="210" y="183" class="d-muted">成员事件</text>
-<line x1="406" y1="256" x2="457" y2="256" class="d-arrow-purple" marker-end="url(#pm-overview-arrow)"/>
-<line x1="573" y1="220" x2="573" y2="166" class="d-arrow-purple" marker-end="url(#pm-overview-arrow)"/>
-<rect x="230" y="345" width="176" height="62" rx="10" class="d-box-blue"/>
-<text x="318" y="383" text-anchor="middle" class="d-label">KV Conductor</text>
-<text x="465" y="370" class="d-muted">引擎事件 → 前缀位置索引</text>
-<text x="465" y="395" class="d-muted">请求查询 → 命中信息 → 评分</text>
-</svg>
-<figcaption>上方表示阶段依赖。HANDOFF 中 P 的交接信息经 Coordinator 注入 D 请求，张量传输由引擎与 Connector 执行。</figcaption>
-</figure>
+<h2 id="component-map">五个角色怎样协作</h2>
+
 <table class="decision-table">
 <thead>
 <tr>
@@ -122,26 +76,26 @@
 <p>普通推理时，Coordinator 直接连接引擎业务端口。NodeManager 通过管理路径影响这些端口的生命周期。缓存亲和启用后，Worker 查询 Conductor 获得选路信息。三种网络访问承载不同的数据，阅读日志时需要先判断它属于哪条路径。</p>
 <aside class="aside-card">后续文章中出现的 Scheduler 指 Motor 的请求端点选择器。引擎内部的批处理调度器与 MoE 专家选择器，分别需要继续追踪引擎和模型执行代码。</aside>
 
-<h2 id="resource-model">三、先认识贯穿各模块的资源对象</h2>
-<h3>3.1 Instance、Pod、Endpoint 与 Device</h3>
+<h2 id="resource-model">先认识贯穿各模块的资源对象</h2>
+<h3>Instance、Pod、Endpoint 与 Device</h3>
 <p>
 <code>Instance</code> 表达一个逻辑协作实例，保存角色、并行配置、NodeManager 列表和端点集合。<code>Endpoint</code> 表达可定位的引擎入口，携带 IP、业务端口、设备信息和状态。默认多端点模式通常把 endpoint 身份关联到全局 DP rank。一个 Pod 可以提供多个端点，一个实例也可以跨越多个 Pod。</p>
 <p>跨节点执行时，一些节点参与计算但以 <code>headless</code> 方式运行。业务候选集合通过 <code>get_all_endpoints()</code> 过滤这类端点。关闭多端点等部署模式还可能由一个 HTTP 入口承载引擎内部多个 DP，因此阅读时应以配置和访问器为准。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/common/resources/instance.py">资源对象与端点访问器</a>
 </p>
-<h3>3.2 一个可以手算的并行例子</h3>
+<h3>一个可以手算的并行例子</h3>
 <p>取一个教学拓扑，PCP 与 PP 都为 1。P 侧配置 DP1、TP16，D 侧配置 DP8、TP2，并开启 EP。Motor 内部对常规并行配置采用以下规模关系。</p>
 <div class="math-block">\[W=D\times C\times T\times P,\qquad W_{\mathrm{local}}=C\times T\times P\]</div>
 <p>这里 D、C、T、P 分别表示 DP、PCP、TP、PP 的规模。P 侧为 1×1×16×1=16，D 侧为 8×1×2×1=16。当前 <code>ParallelConfig</code> 在 <code>enable_ep=True</code> 时把内部 ep_size 设为 world_size。启用 EP 后，应结合引擎如何组织这些 rank 理解专家布局，额外再乘一次 EP 会重复计算设备规模。</p>
 <p>在默认多端点模式下，D 侧可提供 8 个 DP 入口。请求选中其中一个入口后，MoE 专家阶段仍可能依赖同一并行域的其他 rank。这个协作关系决定了故障处理有时需要以整个 Instance 为边界。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/common/resources/instance.py">ParallelConfig 与 Instance</a>
 </p>
-<h3>3.3 请求也有根身份与尝试身份</h3>
+<h3>请求也有根身份与尝试身份</h3>
 <p>
 <code>RequestInfo</code> 随请求携带原始数据、token、时间点和追踪信息。请求可能在传输失败后进入下一次内部尝试，<code>AttemptContext</code> 保存该次尝试的 P/D 资源、任务和释放标记。把根请求和尝试分开，才能准确说明某个端点分配属于哪一轮，以及重试之前应该清理哪些状态。</p>
 <div class="callout">
 <strong>先画对象，再读业务。</strong>纸上分别画出 Instance→Endpoint→Device，以及 RequestInfo→AttemptContext→ScheduledResource。后面的调用链会不断在这两组对象之间建立关系。</div>
 
-<h2 id="state-ownership">四、进程边界决定状态归谁所有</h2>
-<h3>4.1 Coordinator 内部有多个进程</h3>
+<h2 id="state-ownership">进程边界决定状态归谁所有</h2>
+<h3>Coordinator 内部有多个进程</h3>
 <p>Coordinator 的父 Daemon 组织 Mgmt、Obs 和多个 Inference Worker。Mgmt 先启动，使控制通信和共享内存准备好，其他进程再连接。SchedulerServer 位于 Mgmt 内，Worker 的 SchedulerClient 本地执行选点并通过 Rust 共享内存提交高频负载变化。当前架构可以沿着启动函数直接验证。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/daemon/coordinator_daemon.py">CoordinatorDaemon.run</a>
 </p>
 <table class="decision-table">
@@ -185,13 +139,13 @@
 </tr>
 </tbody>
 </table>
-<h3>4.2 看见多个 InstanceManager 时怎样判断职责</h3>
+<h3>看见多个 InstanceManager 时怎样判断职责</h3>
 <p>Controller 的 InstanceManager 管实例生命状态，Coordinator 的同名对象维护路由成员视图，Worker 还缓存用于本地选路的数据。它们通过消息与版本衔接。继续追问“谁能决定状态”和“谁只是消费状态”，就能解释为什么控制面修改之后，请求侧还需要一次传播过程。</p>
 <p>ZMQ 承载成员同步与控制消息，共享内存承载高频负载变化，HTTP 承载注册、管理和引擎推理。etcd 用于选主、锁和状态持久化。把通信方式与状态归属放在一起读，才能解释丢通知、进程退出和切主时如何恢复视图。</p>
 <aside class="aside-card">识别进程边界后再理解单例。线程安全单例在各进程中分别创建，跨 Worker 的一致性需要显式通信或共享内存机制。</aside>
 
-<h2 id="directory-route">五、把目录压缩成三条阅读路线</h2>
-<h3>5.1 请求执行线</h3>
+<h2 id="directory-route">把目录压缩成三条阅读路线</h2>
+<h3>请求执行线</h3>
 <pre>
 <code>InferenceServer
   → dispatch.handle_request
@@ -202,7 +156,7 @@
   → 响应整理 → 负载释放 → 请求记录回收</code>
 </pre>
 <p>第一遍只读单 prompt、非流式的 HANDOFF。这样每个阶段都有明确的输入输出，能先看懂 P/D 协同的骨架。第二遍再加入 token-only、Render、流式提交和协议分支，避免一开始进入大量异常和兼容代码。</p>
-<h3>5.2 实例上线线</h3>
+<h3>实例上线线</h3>
 <pre>
 <code>用户配置 → Deployer → boot.sh → 角色 main
   → NodeManager 注册 → Controller 组装
@@ -211,7 +165,7 @@
   → EventPusher → Mgmt → Worker 候选集合</code>
 </pre>
 <p>这一条线解释请求到达之前的准备工作。进程启动、原生健康检查通过、实例进入 ACTIVE、Worker 看见可用端点，分别有自己的完成条件。沿这些条件读源码，可以识别“启动成功”究竟指哪一层。</p>
-<h3>5.3 故障恢复线</h3>
+<h3>故障恢复线</h3>
 <pre>
 <code>请求错误 / 健康异常 / 引擎 FT / 硬件证据
   → 请求级取消与重试，或实例撤流
@@ -264,25 +218,33 @@
 <div class="callout">
 <strong>每轮只扩大一个维度。</strong>先沿成功路径明确对象和顺序，再增加并发、重试和拓扑变化。复杂性逐步加入，已经建立的调用关系就能持续复用。</div>
 
-<h2 id="study-plan">六、如何把阅读变成可复述的理解</h2>
-<h3>6.1 九篇文章的递进关系</h3>
+<h2 id="study-plan">如何把阅读变成可复述的理解</h2>
+<h3>九篇文章的递进关系</h3>
 <p>第 1 篇从配置与注册追到上线，建立资源来源。第 2 篇跟踪完整请求，建立阶段关系。第 3 篇进入调度与共享内存，解释多个 Worker 的竞争。第 4 篇连接缓存索引和负载收益。第 5 篇处理流式、取消、重试和精度探测。第 6 篇下沉到 NodeManager 的原生进程管理。第 7 篇重新回到 Controller，理解大 EP 恢复。第 8 篇用指标、测试和复盘建立验证证据。</p>
-<h3>6.2 每篇留下一个可以检查的产出</h3>
+<h3>每篇留下一个可以检查的产出</h3>
 <p>最短练习是给一个请求起名 R1，记录它的 req_id、attempt、P/D endpoint 和每次负载增减。再给一个实例起名 I1，记录各节点什么时候注册，什么时候启动，哪个心跳导致它上线。最后模拟一个 DP 异常，标出请求侧、控制器和引擎各自做什么。三张时序图会把阅读中的零散函数连接起来。</p>
 <p>测试可以作为第二份接口文档。先看 fixture 构造了什么对象，再看断言确认什么行为，最后回到实现寻找保障。读测试时无需立刻准备真实模型环境；实际执行测试则遵守仓库的 <code>tests/run_tests.sh</code> 入口，并区分通过、跳过和真实硬件覆盖。</p>
-<h3>6.3 从源码理解走向技术表达</h3>
+<h3>从源码理解走向技术表达</h3>
 <p>项目介绍可以围绕“请求如何找到引擎、引擎如何变成服务、服务失败后如何恢复”展开。个人经历则进一步说明自己完成了部署、压测、排障、实验还是代码修改。每项性能结论都要保留模型、硬件、并行配置、输入输出长度、并发、基线与统计口径。后续文章中的算例用于解释公式，实际收益需要实验记录支撑。</p>
 <aside class="aside-card">本系列对照源码提交 <code>841e50df</code>，写作日期为 2026 年 11 月 11 日。公开代码可能继续演进，定位时同时保留版本和符号名。当前内容来自静态源码阅读，集群吞吐、精度和恢复时间要通过相应环境验证。</aside>
 
-      <div class="essay-ending">接下来沿着配置、注册与实例上线继续追踪对象和状态。</div>
-      <section class="references-section" aria-label="源码与延伸阅读"><h2>源码与延伸阅读</h2><ol class="reference-list"><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/common/resources/instance.py" target="_blank" rel="noopener noreferrer">motor/common/resources/instance.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/daemon/coordinator_daemon.py" target="_blank" rel="noopener noreferrer">motor/coordinator/daemon/coordinator_daemon.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="llm-inference-prefill-decode-bottleneck-analysis.html">LLM 推理性能分析</a><span>配合阅读 Prefill、Decode、并行维度与服务指标。</span></li><li><a href="mooncake-architecture-overview.html">Mooncake 架构与源码阅读地图</a><span>继续追踪引擎之外的 KV 存储和传输机制。</span></li></ol></section>
+
+      <section class="pm-interview" aria-label="面试自检"><h2 id="interview-check">把机制讲清楚</h2><p>先自己回答，再展开核对。把答案落到对象、状态和代码位置上。</p><details><summary>用户请求会先经过 NodeManager 吗？</summary><p>普通推理由 Coordinator 连接引擎业务端口。NodeManager 经管理路径启动和监督引擎，上报的健康事实会通过 Controller 影响候选集合。</p><p class="pm-answer-hook">继续追问 · 把请求路径与管理路径分别画出，再说明它们在可用端点处相交。</p></details>
+<details><summary>Instance 和 Endpoint 各表达什么？</summary><p>Instance 表达一组协作引擎的逻辑资源，保存并行配置、节点与能力。Endpoint 表达可定位的业务入口。默认多端点模式关联 DP rank，headless 等节点参与执行但会被业务访问器过滤。</p><p class="pm-answer-hook">继续追问 · 用一个 DP8、TP2 的实例说明逻辑实例、业务入口和设备 rank。</p></details>
+<details><summary>大 EP 的工作体现在哪里？</summary><p>Motor 负责并行参数传递、节点组装、端点选路和故障恢复编排。专家分发、通信域调整与模型执行还要跟进引擎和设备后端。设备规模应结合 DP×PCP×TP×PP 及引擎布局理解。</p><p class="pm-answer-hook">继续追问 · 挑一个 DP rank，追它从配置到原生启动参数的全过程。</p></details>
+</section>
+<details class="pm-reference-fold"><summary>源码与扩展阅读</summary><section class="references-section" aria-label="源码与延伸阅读"><h2>源码与延伸阅读</h2><ol class="reference-list"><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/common/resources/instance.py" target="_blank" rel="noopener noreferrer">motor/common/resources/instance.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/daemon/coordinator_daemon.py" target="_blank" rel="noopener noreferrer">motor/coordinator/daemon/coordinator_daemon.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="llm-inference-prefill-decode-bottleneck-analysis.html">LLM 推理性能分析</a><span>配合阅读 Prefill、Decode、并行维度与服务指标。</span></li><li><a href="mooncake-architecture-overview.html">Mooncake 架构与源码阅读地图</a><span>继续追踪引擎之外的 KV 存储和传输机制。</span></li></ol></section></details>
       <nav class="pymotor-next" aria-label="前后篇"><a href="pymotor-01-startup.html">下一篇 · 配置、注册与实例上线 →</a></nav>
     </section>
     <section class="comments-section" id="comments" aria-label="Discussion"><div class="comments-header"><h2>Discussion</h2></div><div id="utterances-container" class="utterances-container"></div><noscript>请启用 JavaScript 查看评论。</noscript></section>
-  </article></main>
+  </article></div></main>
   <footer class="site-footer"><span class="footer-credit">© 2026 by <a href="../../index.html">MOFANG</a></span></footer>
   <script src="../../app.js?v=46"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" crossorigin="anonymous"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js" crossorigin="anonymous" onload="renderMathInElement(document.querySelector('.post-page-content'),{delimiters:[{left:'\\[',right:'\\]',display:true},{left:'\\(',right:'\\)',display:false}],throwOnError:false});"></script>
+<script defer src="../../assets/pymotor/labs-lifecycle.js?v=1"></script>
+<script defer src="../../assets/pymotor/labs-scheduling.js?v=1"></script>
+<script defer src="../../assets/pymotor/labs-reliability.js?v=1"></script>
+<script defer src="../../assets/pymotor/reader.js?v=1"></script>
 </body>
 </html>

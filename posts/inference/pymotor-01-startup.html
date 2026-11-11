@@ -6,37 +6,31 @@
   <script>(function(){try{var s=localStorage.getItem("yichuan-theme");document.documentElement.setAttribute("data-theme",s||(matchMedia("(prefers-color-scheme: dark)").matches?"night":"day"));}catch(e){}})();</script>
   <link rel="stylesheet" href="../../styles.css?v=64" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous" />
-  <title>PyMotor 源码阅读（1）｜配置、注册与实例上线</title>
+  <title>PyMotor 01 · 一个引擎，怎样成为可调度资源</title>
   <meta name="description" content="沿配置、部署、注册、实例组装和心跳状态机追踪一个新节点，解释启动命令怎样成为可调度端点，以及成员变更如何传播到 Worker。" />
+  <link rel="stylesheet" href="../../assets/pymotor/reader.css?v=1" />
 </head>
 <body class="pymotor-post">
-  <div class="ambient" aria-hidden="true"><span class="orb orb-a"></span><span class="orb orb-b"></span></div><canvas id="star-canvas"></canvas>
-  <header class="site-header"><div class="header-inner"><a href="../../index.html" class="logo"><span class="logo-dot"></span><span class="logo-text">MOFANG</span></a><div class="header-actions"><nav class="site-nav"><a href="../../index.html">← 首页</a></nav><button id="theme-toggle" class="theme-toggle" type="button" aria-label="切换主题"><span class="icon-sun">☀️</span><span class="icon-moon">🌙</span></button></div></div></header>
-  <main class="site-main"><article class="post-page">
+
+  <header class="site-header"><div class="header-inner"><a href="../../index.html" class="logo"><span class="logo-dot"></span><span class="logo-text">MOFANG</span></a><div class="header-actions"><nav class="site-nav"><a href="../../index.html">← 首页</a></nav><button id="theme-toggle" class="theme-toggle" type="button" aria-label="切换主题">切换日夜</button></div></div></header>
+  <main class="site-main"><div class="pm-reader-layout"><aside class="pm-rail"><details open><summary>PyMotor · 阅读路径</summary><ol><li><a href="pymotor-00-overview.html"><span>00</span><span>系统全景</span></a></li><li><a href="pymotor-01-startup.html" aria-current="page"><span>01</span><span>实例上线</span></a></li><li><a href="pymotor-02-request.html"><span>02</span><span>请求编排</span></a></li><li><a href="pymotor-03-scheduler-shm.html"><span>03</span><span>并发调度</span></a></li><li><a href="pymotor-04-kv-affinity.html"><span>04</span><span>缓存亲和</span></a></li><li><a href="pymotor-05-stream-recovery.html"><span>05</span><span>流式恢复</span></a></li><li><a href="pymotor-06-node-manager.html"><span>06</span><span>节点运行时</span></a></li><li><a href="pymotor-07-ep-fault-tolerance.html"><span>07</span><span>大 EP 恢复</span></a></li><li><a href="pymotor-08-observability.html"><span>08</span><span>观测与复盘</span></a></li></ol><small>从一次执行理解系统，再用条件变化检验理解。</small></details></aside><article class="post-page">
     <header class="post-page-header">
-      <p class="post-page-category">Inference · PyMotor 源码阅读 01</p>
-      <h1 class="post-page-title">PyMotor 源码阅读（1）｜配置、注册与实例上线</h1>
-      <p class="post-lead">沿配置、部署、注册、实例组装和心跳状态机追踪一个新节点，解释启动命令怎样成为可调度端点，以及成员变更如何传播到 Worker。本文对照 <a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/README.md" target="_blank" rel="noopener noreferrer">MindIE-PyMotor 841e50df 源码</a>。</p>
-      <div class="post-page-keywords" aria-label="关键词"><a class="post-keyword-chip" href="../../index.html?keyword=pymotor">PyMotor</a><a class="post-keyword-chip" href="../../index.html?keyword=inference-systems">推理框架</a><a class="post-keyword-chip" href="../../index.html?keyword=pd-disagg">PD 分离</a></div>
-      <p class="post-page-meta" data-date="2026-11-11" data-author="MOFANG" data-minutes=""></p>
-    </header>
-    <details class="pymotor-series-menu"><summary>PyMotor 源码阅读系列 · 2 / 9</summary><ol><li><a href="pymotor-00-overview.html"><span>00</span> 系统全景与源码阅读路线</a></li>
-<li><a href="pymotor-01-startup.html" aria-current="page"><span>01</span> 配置、注册与实例上线</a></li>
-<li><a href="pymotor-02-request.html"><span>02</span> 一次请求的完整执行链</a></li>
-<li><a href="pymotor-03-scheduler-shm.html"><span>03</span> 调度策略与共享内存并发记账</a></li>
-<li><a href="pymotor-04-kv-affinity.html"><span>04</span> 缓存亲和与分层前缀索引</a></li>
-<li><a href="pymotor-05-stream-recovery.html"><span>05</span> 流式响应、重调度与精度探测</a></li>
-<li><a href="pymotor-06-node-manager.html"><span>06</span> NodeManager 与原生引擎运行时</a></li>
-<li><a href="pymotor-07-ep-fault-tolerance.html"><span>07</span> 大 EP 实例的故障恢复</a></li>
-<li><a href="pymotor-08-observability.html"><span>08</span> 观测、验证与项目复盘</a></li></ol></details>
-    <div class="logic-map" aria-label="本文逻辑路线"><div class="map-node map-node--start"><span>1</span><strong>配置入口</strong></div><div class="map-arrow" aria-hidden="true">→</div><div class="map-node map-node--ar"><span>2</span><strong>节点注册</strong></div><div class="map-arrow" aria-hidden="true">→</div><div class="map-node map-node--par"><span>3</span><strong>实例组装</strong></div><div class="map-arrow" aria-hidden="true">→</div><div class="map-node map-node--conv"><span>4</span><strong>成员发布</strong></div></div>
-    <nav class="pymotor-toc" aria-label="本文目录"><strong>本文目录</strong><ol><li><a href="#config">一、配置要穿过哪些层才能生效</a></li><li><a href="#boot">二、容器角色怎样找到应用入口</a></li><li><a href="#register">三、NodeManager 怎样描述自己</a></li><li><a href="#assemble">四、从多个节点组装逻辑实例</a></li><li><a href="#publish">五、健康如何变成可调度能力</a></li><li><a href="#read">六、把公共设施接回这条启动链</a></li></ol></nav>
-    <section class="post-page-content">
+<p class="pm-kicker">PYMOTOR / 系统剖面 01</p>
+<h1 class="post-page-title">一个引擎，怎样成为可调度资源</h1>
+<p class="post-lead">容器已经启动，模型也正在加载，Coordinator 却还不能把请求发过去。沿着注册、组装、健康与发布逐步推进，看看哪一个条件真正打开了调度入口。</p>
+<p class="post-page-meta" data-date="2026-11-11" data-author="MOFANG" data-minutes=""></p>
+<p class="pm-source-note">对照 <a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/README.md">源码 841e50df</a> · 演示中的时间与负载用于解释机制</p>
+</header>
+
+
+    <div id="experiment" class="pm-lab" data-pm-lab="startup"><p>正在准备交互讲解。下面可继续阅读完整源码解析。</p></div>
+<details class="pm-toc"><summary>沿源码继续阅读</summary><ol><li><a href="#config">配置要穿过哪些层才能生效</a></li><li><a href="#boot">容器角色怎样找到应用入口</a></li><li><a href="#register">NodeManager 怎样描述自己</a></li><li><a href="#assemble">从多个节点组装逻辑实例</a></li><li><a href="#publish">健康如何变成可调度能力</a></li><li><a href="#read">把公共设施接回这条启动链</a></li><li><a href="#interview-check">把机制讲清楚</a></li></ol></details>
+<section class="post-page-content">
 <p>向一个分布式推理服务发送请求之前，集群必须先知道模型在哪里、哪些节点属于同一组、哪个地址能接收请求。PyMotor 将这件事拆成配置解析、节点注册、实例组装、进程启动、健康判断和资源发布。沿着这条启动链阅读，能够把部署文件与日后看到的每一个 HTTP endpoint 联系起来。</p>
 <p>本文以普通 vLLM 多端点部署为主线。涉及跨节点、单 HTTP 多 DP、主备和快照恢复时，会说明额外的条件。配置、状态和事件都以本系列对应的源码修订为依据。</p>
 
-<h2 id="config">一、配置要穿过哪些层才能生效</h2>
-<h3>1.1 部署资源、Motor 配置与原生引擎参数</h3>
+<h2 id="config">配置要穿过哪些层才能生效</h2>
+<h3>部署资源、Motor 配置与原生引擎参数</h3>
 <p>部署配置包含不同层次的决策。实例数量与每实例 Pod 数决定资源组织，DP、TP、PP 等决定模型执行拓扑，调度策略与超时则决定服务行为。读到某个配置项时，首先找它的消费方。一个值可能被 generator 写进环境变量，也可能进入 NodeManager 的端点配置，最后成为原生引擎启动参数。</p>
 <p>
 <code>examples/deployer/deploy.py</code> 负责组织部署，<code>lib/config_validator.py</code> 校验组合，<code>lib/generator/</code> 生成各组件资源。<code>config/</code> 中的组件配置类与引擎 resolver 则把部署输入转换为运行时对象。这一条数据流值得在阅读笔记里单独画出来。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/examples/deployer/deploy.py">部署入口源码</a>
@@ -101,7 +95,7 @@
 </tr>
 </tbody>
 </table>
-<h3>1.2 Resolver 如何处理新旧配置</h3>
+<h3>Resolver 如何处理新旧配置</h3>
 <p>
 <code>config/resolver.py</code> 递归把键名中的连字符归一化成下划线，再通过引擎适配器把原生参数映射为 Motor 内部字段。配置同时包含新 <code>engine_config</code> 和历史 <code>model_config</code> 时，前者优先，冲突会记录日志。并行配置中的 world size 由解析结果重新计算。这说明调试时需要检查解析后的值，原始文件中的同名项未必是最终值。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/config/resolver.py">Resolver 与引擎参数映射</a>
 </p>
@@ -109,86 +103,58 @@
 <div class="math-block">\[W_{\mathrm{endpoint}}=\mathrm{PCP}\times\mathrm{TP}\times\mathrm{PP}=2,\qquad W=\mathrm{DP}\times W_{\mathrm{endpoint}}=8.\]</div>
 <aside class="aside-card">阅读配置时选三个参数做纵向追踪即可。将 <code>tp_size</code> 追到原生 CLI，将 <code>job_name</code> 追到实例聚合，将业务端口追到 Endpoint。这样能先建立跨模块的关系，再逐个补齐配置项。</aside>
 
-<h2 id="boot">二、容器角色怎样找到应用入口</h2>
-<h3>2.1 boot.sh 是部署与源码之间的桥</h3>
+<h2 id="boot">容器角色怎样找到应用入口</h2>
+<h3>boot.sh 是部署与源码之间的桥</h3>
 <p>
 <code>startup/boot.sh</code> 根据 ROLE 分发到角色脚本。prefill、decode、union、encode 进入引擎角色脚本，最终启动 NodeManager。controller 和 coordinator 分别进入各自 Python main。组合角色把多个组件放进同一容器，可选角色还包括 Render、KV Conductor 与 KV 存储服务。</p>
 <p>因此，读部署脚本时应检查“最终执行哪个 main、传入哪个配置路径、设置哪些运行环境”。将所有 shell 辅助函数都读完才进入 Python，会让主线被大量准备逻辑打散。先从 ROLE 分发跳到明确的 Python 入口，再返回查需要的参数来源。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/examples/deployer/startup/boot.sh">角色启动分发</a>
 </p>
-<h3>2.2 Application 提供长期运行的骨架</h3>
+<h3>Application 提供长期运行的骨架</h3>
 <p>Controller 和 NodeManager 复用 <code>common/app/application.py</code> 的生命周期能力，包括模块注册、配置监听、信号处理、后台循环和停止。Controller 装配 Assembler、InstanceManager、EventPusher、API，以及按配置启用的 FaultManager 和观测模块。NodeManager 装配服务监督和 API，配置包含引擎服务时再启用注册、心跳相关模块。</p>
 <p>这使“一个组件”成为若干协作模块的集合。部分模块有自己的后台线程，部分逻辑要等待外部启动指令，阅读时应继续追构造、start 和 stop 的实际调用。主备配置又会影响哪些模块当前能工作，所以生命周期应和角色状态一起看。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/common/app/application.py">应用生命周期骨架</a>
 </p>
 <div class="callout">从部署完成到可接请求，中间至少经历应用启动、引擎启动、健康确认和服务视图发布四个里程碑。每个阶段都应有自己的观察点。</div>
 
-<h2 id="register">三、NodeManager 怎样描述自己</h2>
-<h3>3.1 RegisterMsg 是本地事实的第一份合同</h3>
+<h2 id="register">NodeManager 怎样描述自己</h2>
+<h3>RegisterMsg 是本地事实的第一份合同</h3>
 <p>
 <code>RegisterManager._gen_register_msg()</code> 从本地配置采集 job、模型、角色、引擎类型、协议能力、FT 能力、业务端口、并行配置、设备数量和跨节点信息，组织成 <code>RegisterMsg</code>。ranktable 的准备也在注册链中衔接，具体硬件路径会影响它的需要程度。</p>
 <p>消息的作用是让 Controller 回答三个问题。这个节点属于哪组实例，能够暴露哪些端点，是否具备与其他节点一致的执行和恢复能力。公共消息定义在 <code>common/resources/http_msg_spec.py</code>，最好先读字段，再读消息生成代码。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/node_manager/core/register_manager.py">注册消息生成与上报</a>
 </p>
-<h3>3.2 注册重试与 API 就绪之间的关系</h3>
+<h3>注册重试与 API 就绪之间的关系</h3>
 <p>NodeManager 在注册前等待自己的管理 API 就绪。这样 Controller 很快下发启动命令时，本地端口已经能够接收。源码中的等待存在超时分支，超时会记录问题并继续尝试注册，因此不能仅凭“进入注册循环”推断管理 API 已经可用。</p>
 <p>注册失败后，当前实现从 2 秒开始指数退避，间隔最多增长到 32 秒，并持续尝试直到成功。手算失败后的等待序列为 2、4、8、16、32、32 秒。这个设计让控制器稍晚启动时节点能够自行接入，同时降低持续故障时的重复请求频率。重复注册还需要 Controller 端做幂等处理，单靠客户端重试无法保证实例结构正确。</p>
 <aside class="aside-card">阅读网络边界时同时检查双方。客户端告诉你何时重试、发送什么，服务端告诉你重复消息会怎样改变状态。将这两端作为一组阅读，能够解释“注册成功却重复启动”一类问题。</aside>
 
-<h2 id="assemble">四、从多个节点组装逻辑实例</h2>
-<h3>4.1 job_name、instance_id 和 endpoint_id</h3>
+<h2 id="assemble">从多个节点组装逻辑实例</h2>
+<h3>job_name、instance_id 和 endpoint_id</h3>
 <p>
 <code>InstanceAssembler.register()</code> 按 <code>job_name</code> 聚合同一个逻辑作业的节点。第一次注册建立 Instance 并分配运行身份，后续节点补充 NodeManager 和 Endpoint。它会检查同一实例的 FT 能力快照是否一致，并处理重复 Pod 注册、正在组装与已经组装等状态。</p>
 <p>这三个身份要分开记。job_name 负责聚合，instance_id 标记这次运行的实例，endpoint_id 关联引擎业务入口及 DP rank。一个作业重建之后可能获得新的运行身份，后续删除和恢复操作需要携带正确身份，才能避免旧事件影响新实例。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/controller/core/instance_assembler.py">实例注册与组装</a>
 </p>
-<figure class="diagram-figure">
-<svg viewBox="0 0 840 330" role="img" aria-label="节点注册到实例可服务的启动链">
-<rect x="24" y="24" width="230" height="70" rx="12" class="d-box-blue"/>
-<text x="139" y="52" text-anchor="middle" class="d-label">NodeManager 注册</text>
-<text x="139" y="77" text-anchor="middle" class="d-muted">角色 / 端点 / 并行 / 能力</text>
-<text x="278" y="65" class="d-label">→</text>
-<rect x="306" y="24" width="230" height="70" rx="12" class="d-box-orange"/>
-<text x="421" y="52" text-anchor="middle" class="d-label">Assembler 组装</text>
-<text x="421" y="77" text-anchor="middle" class="d-muted">齐备 / master / rank</text>
-<text x="560" y="65" class="d-label">→</text>
-<rect x="588" y="24" width="228" height="70" rx="12" class="d-box-purple"/>
-<text x="702" y="52" text-anchor="middle" class="d-label">NM 启动引擎</text>
-<text x="702" y="77" text-anchor="middle" class="d-muted">LaunchSpec → 进程</text>
-<text x="702" y="134" text-anchor="middle" class="d-label">↓</text>
-<rect x="588" y="172" width="228" height="70" rx="12" class="d-box-blue"/>
-<text x="702" y="201" text-anchor="middle" class="d-label">健康心跳</text>
-<text x="702" y="225" text-anchor="middle" class="d-muted">端点事实</text>
-<text x="560" y="214" class="d-label">←</text>
-<rect x="306" y="172" width="230" height="70" rx="12" class="d-box-orange"/>
-<text x="421" y="201" text-anchor="middle" class="d-label">InstanceManager</text>
-<text x="421" y="225" text-anchor="middle" class="d-muted">ACTIVE → READY 事件</text>
-<text x="278" y="214" class="d-label">←</text>
-<rect x="24" y="172" width="230" height="70" rx="12" class="d-box-purple"/>
-<text x="139" y="201" text-anchor="middle" class="d-label">Coordinator 成员</text>
-<text x="139" y="225" text-anchor="middle" class="d-muted">Mgmt → Worker 可调度</text>
-<text x="420" y="296" text-anchor="middle" class="d-muted">启动成功、健康确认、资源发布分别建立不同保证</text>
-</svg>
-<figcaption>注册把本地节点拼成实例，心跳和发布再把实例转成请求可以使用的资源。</figcaption>
-</figure>
-<h3>4.2 齐备条件与 headless</h3>
+
+<h3>齐备条件与 headless</h3>
 <p>
 <code>_assemble_instance()</code> 先过滤异常端点，再判断期望端点或节点是否齐备。普通路径与 nnodes 大于 1 的跨节点路径具有不同条件。当前跨节点多端点分支按 DP size 与 nnodes 的乘积判断预期 NM 数，这个公式需要在对应分支的语境中理解。</p>
 <p>跨节点组的从节点可以被标记为 <code>headless</code>。它们继续参与分布式执行，普通请求选择则通过 <code>get_all_endpoints()</code> 过滤这些入口。组装完成后，Assembler 汇总 master、ranktable、node rank 等信息，下发 <code>StartCmdMsg</code>。快照恢复还会携带已有主节点身份，并检查该节点仍然属于当前注册集合。</p>
 <div class="callout">逻辑实例承载协作计算的整体身份，Endpoint 承载可访问入口。headless、单 HTTP 多 DP 与跨节点模式都会改变二者的映射，读者应依据实际配置画对象关系。</div>
 
-<h2 id="publish">五、健康如何变成可调度能力</h2>
-<h3>5.1 生命周期状态与观察者事件</h3>
+<h2 id="publish">健康如何变成可调度能力</h2>
+<h3>生命周期状态与观察者事件</h3>
 <p>NM 执行启动命令后，原生进程仍需要完成权重加载、通信初始化和健康确认。HeartbeatManager 将端点事实报告给 Controller，InstanceManager 综合端点状态和心跳时效，推进 INITIAL、ACTIVE、INACTIVE、PAUSED、DELETED 等状态。</p>
 <p>实例进入 ACTIVE 后可以触发 <code>INSTANCE_READY</code> 观察者事件。状态是对象当前所处阶段，事件是通知其他模块发生了什么变化。把二者分开，才能读懂同一次状态转移为何同时影响请求成员、故障策略和告警。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/controller/core/instance_manager.py">实例状态机与观察者通知</a>
 </p>
 <p>可以把最短状态路径写成 INITIAL 到 ACTIVE，再由端点异常或心跳超时进入 INACTIVE。服务恢复正常后，满足相应条件的实例可以回到 ACTIVE，持续失效则可能进入 DELETED。PAUSED 提供显式暂停语义，也需要考虑暂停期间异常与超时怎样处理。完整转移表还包含恢复编排与强制隔离的保护，所以手工推演时要同时标注“这个实例是否正在恢复”。</p>
 <p>例如，某实例刚被恢复流程撤流，此时一个迟到的正常心跳到达。只按单次心跳恢复服务，会让正在重建的实例重新接流。源码中的额外约束用于协调健康事实与恢复事务。由此可见，心跳是状态机的重要输入，状态机还要考虑当前动作是否允许发布服务能力。</p>
-<h3>5.2 从观察者队列到 Worker 本地视图</h3>
+<h3>从观察者队列到 Worker 本地视图</h3>
 <p>EventPusher 将事件转换为 ADD、DEL、PAUSE、RESUME 等操作，经过队列发送给 Coordinator 的实例刷新接口。将网络发送放进消费者，有助于避免状态机处理直接被慢网络阻塞。失败后还会安排对账与同步，具体空集合和实例身份条件需要读分支。</p>
 <p>Coordinator Mgmt 接收刷新后更新成员视图和共享内存，并向 Worker 发布变更。Worker 应用增量或进行全量同步。发布订阅通知有丢失窗口，版本检查与重新拉取提供补偿。因此，Controller 的“已经 ACTIVE”与某个 Worker 的“已经看到新实例”可能存在短暂时间差。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/controller/core/event_pusher.py">实例事件发送与对账</a>
 </p>
 <p>可以手工演练一次两节点注册。第一节点到达时记录“组装中”，第二节点到达后满足齐备条件，两个 NM 收到各自启动指令。随后分别汇报健康，Controller 发布 READY 事件，Mgmt 更新成员版本，Worker 获得新端点。若只看到第二步便开始压测，请求仍可能遇到无可用拓扑。这个例子解释了启动过程为何必须分阶段观测。</p>
 <aside class="aside-card">Controller 的 InstanceManager 维护生命周期权威，Coordinator 的同名模块维护调度成员视图，Worker 还有自己的缓存。阅读同名类时先标注所在进程和状态归属，能够减少跨模块跳转中的混淆。</aside>
 
-<h2 id="read">六、把公共设施接回这条启动链</h2>
-<h3>6.1 每个工具模块对应一个运行责任</h3>
+<h2 id="read">把公共设施接回这条启动链</h2>
+<h3>每个工具模块对应一个运行责任</h3>
 <table class="decision-table">
 <thead>
 <tr>
@@ -264,20 +230,28 @@
 </table>
 <p>部署配套中的 probe、prestop、日志收集、配置模板、补丁工具和 TUI 也可以据此分类。probe 让外部系统观察生命周期，prestop 协调退出，模板和补丁准备可运行环境，TUI 展示操作状态。它们服务于相同主线，第一轮可先沿实际调用读到边界，再回头展开实现。</p>
 <p>配置监听也要追到最后一层。文件变化被 watcher 发现后，应用会传播更新，但已用于创建原生进程的并行参数通常需要新的启动过程。某些模块还在构造时保存配置快照。因此“配置文件已经更新”“Python 配置对象已经更新”“当前引擎按新参数运行”是不同观察点。选择一个无状态运行参数和一个并行参数分别追踪，能够看清热更新边界。</p>
-<h3>6.2 源码阅读与练习</h3>
+<h3>源码阅读与练习</h3>
 <p>建议依次阅读 <code>resolver.py</code>、<code>boot.sh</code>、<code>RegisterMsg</code>、<code>RegisterManager._gen_register_msg()</code>、<code>InstanceAssembler.register()</code> 和 <code>_assemble_instance()</code>，然后进入 <code>InstanceManager</code> 的转移表、<code>EventPusher.update()</code> 与 Mgmt 的 <code>apply_refresh()</code>。对应测试优先看 <code>test_instance_assembler.py</code>、<code>test_instance_manager.py</code>、<code>test_event_pusher.py</code> 和配置解析测试。</p>
 <p>练习时画一张六列纸表，分别记录“时间、节点、输入消息、Controller 状态、发布事件、Worker 可见资源”。让一个节点重复注册一次，让一个启动命令失败一次，再让 Worker 漏掉一次增量通知。能解释每个场景如何恢复到一致状态，就已经把配置、控制和请求三层连接起来了。</p>
 <div class="callout">本篇的完成标准是亲手追完一个参数和一个资源身份。参数从配置进入启动命令，资源身份从 RegisterMsg 进入 Instance，再进入 Worker 的候选集合。</div>
 
-      <div class="essay-ending">接下来沿着一次请求的完整执行链继续追踪对象和状态。</div>
-      <section class="references-section" aria-label="源码与延伸阅读"><h2>源码与延伸阅读</h2><ol class="reference-list"><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/examples/deployer/deploy.py" target="_blank" rel="noopener noreferrer">examples/deployer/deploy.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/config/resolver.py" target="_blank" rel="noopener noreferrer">motor/config/resolver.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/examples/deployer/startup/boot.sh" target="_blank" rel="noopener noreferrer">examples/deployer/startup/boot.sh</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/common/app/application.py" target="_blank" rel="noopener noreferrer">motor/common/app/application.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/node_manager/core/register_manager.py" target="_blank" rel="noopener noreferrer">motor/node_manager/core/register_manager.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/controller/core/instance_assembler.py" target="_blank" rel="noopener noreferrer">motor/controller/core/instance_assembler.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/controller/core/instance_manager.py" target="_blank" rel="noopener noreferrer">motor/controller/core/instance_manager.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/controller/core/event_pusher.py" target="_blank" rel="noopener noreferrer">motor/controller/core/event_pusher.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="llm-inference-prefill-decode-bottleneck-analysis.html">LLM 推理性能分析</a><span>配合阅读 Prefill、Decode、并行维度与服务指标。</span></li><li><a href="mooncake-architecture-overview.html">Mooncake 架构与源码阅读地图</a><span>继续追踪引擎之外的 KV 存储和传输机制。</span></li></ol></section>
+
+      <section class="pm-interview" aria-label="面试自检"><h2 id="interview-check">把机制讲清楚</h2><p>先自己回答，再展开核对。把答案落到对象、状态和代码位置上。</p><details><summary>为什么进程启动后仍然不能接流量？</summary><p>原生进程启动、健康检查通过、实例进入 ACTIVE、Coordinator 获得可用成员是连续的多个条件。任一步尚未完成，都可能使请求侧没有合法目标。</p><p class="pm-answer-hook">继续追问 · 列出每一步的事实来源、决定者和通知消费者。</p></details>
+<details><summary>Worker 漏收一次成员通知会怎样？</summary><p>通知加快成员变化传播，版本检查和必要的全量同步帮助 Worker 重新对齐视图。最终分配还通过共享内存检查槽位身份和阻断状态。</p><p class="pm-answer-hook">继续追问 · 解释控制通知与提交边界检查各承担什么保证。</p></details>
+<details><summary>如何确认某个配置真的生效？</summary><p>先找配置解析和优先级，再追 generator 或运行配置的消费方，最后检查 LaunchSpec 与原生 CLI。运行参数和热更新能力要分别核对。</p><p class="pm-answer-hook">继续追问 · 选 tp_size、job_name 和业务端口做三条纵向追踪。</p></details>
+</section>
+<details class="pm-reference-fold"><summary>源码与扩展阅读</summary><section class="references-section" aria-label="源码与延伸阅读"><h2>源码与延伸阅读</h2><ol class="reference-list"><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/examples/deployer/deploy.py" target="_blank" rel="noopener noreferrer">examples/deployer/deploy.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/config/resolver.py" target="_blank" rel="noopener noreferrer">motor/config/resolver.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/examples/deployer/startup/boot.sh" target="_blank" rel="noopener noreferrer">examples/deployer/startup/boot.sh</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/common/app/application.py" target="_blank" rel="noopener noreferrer">motor/common/app/application.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/node_manager/core/register_manager.py" target="_blank" rel="noopener noreferrer">motor/node_manager/core/register_manager.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/controller/core/instance_assembler.py" target="_blank" rel="noopener noreferrer">motor/controller/core/instance_assembler.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/controller/core/instance_manager.py" target="_blank" rel="noopener noreferrer">motor/controller/core/instance_manager.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/controller/core/event_pusher.py" target="_blank" rel="noopener noreferrer">motor/controller/core/event_pusher.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="llm-inference-prefill-decode-bottleneck-analysis.html">LLM 推理性能分析</a><span>配合阅读 Prefill、Decode、并行维度与服务指标。</span></li><li><a href="mooncake-architecture-overview.html">Mooncake 架构与源码阅读地图</a><span>继续追踪引擎之外的 KV 存储和传输机制。</span></li></ol></section></details>
       <nav class="pymotor-next" aria-label="前后篇"><a href="pymotor-00-overview.html">← 上一篇 · 系统全景与源码阅读路线</a><a href="pymotor-02-request.html">下一篇 · 一次请求的完整执行链 →</a></nav>
     </section>
     <section class="comments-section" id="comments" aria-label="Discussion"><div class="comments-header"><h2>Discussion</h2></div><div id="utterances-container" class="utterances-container"></div><noscript>请启用 JavaScript 查看评论。</noscript></section>
-  </article></main>
+  </article></div></main>
   <footer class="site-footer"><span class="footer-credit">© 2026 by <a href="../../index.html">MOFANG</a></span></footer>
   <script src="../../app.js?v=46"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" crossorigin="anonymous"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js" crossorigin="anonymous" onload="renderMathInElement(document.querySelector('.post-page-content'),{delimiters:[{left:'\\[',right:'\\]',display:true},{left:'\\(',right:'\\)',display:false}],throwOnError:false});"></script>
+<script defer src="../../assets/pymotor/labs-lifecycle.js?v=1"></script>
+<script defer src="../../assets/pymotor/labs-scheduling.js?v=1"></script>
+<script defer src="../../assets/pymotor/labs-reliability.js?v=1"></script>
+<script defer src="../../assets/pymotor/reader.js?v=1"></script>
 </body>
 </html>

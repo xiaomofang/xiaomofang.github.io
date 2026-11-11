@@ -6,74 +6,47 @@
   <script>(function(){try{var s=localStorage.getItem("yichuan-theme");document.documentElement.setAttribute("data-theme",s||(matchMedia("(prefers-color-scheme: dark)").matches?"night":"day"));}catch(e){}})();</script>
   <link rel="stylesheet" href="../../styles.css?v=64" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous" />
-  <title>PyMotor 源码阅读（5）｜流式响应、重调度与精度探测</title>
+  <title>PyMotor 05 · 已经输出两个 token，还能重试吗</title>
   <meta name="description" content="从响应提交边界深入 attempt、token 重放、取消和负载释放，区分上游错误与实例熔断，并串起精度抽样、检查、探测和告警。" />
+  <link rel="stylesheet" href="../../assets/pymotor/reader.css?v=1" />
 </head>
 <body class="pymotor-post">
-  <div class="ambient" aria-hidden="true"><span class="orb orb-a"></span><span class="orb orb-b"></span></div><canvas id="star-canvas"></canvas>
-  <header class="site-header"><div class="header-inner"><a href="../../index.html" class="logo"><span class="logo-dot"></span><span class="logo-text">MOFANG</span></a><div class="header-actions"><nav class="site-nav"><a href="../../index.html">← 首页</a></nav><button id="theme-toggle" class="theme-toggle" type="button" aria-label="切换主题"><span class="icon-sun">☀️</span><span class="icon-moon">🌙</span></button></div></div></header>
-  <main class="site-main"><article class="post-page">
+
+  <header class="site-header"><div class="header-inner"><a href="../../index.html" class="logo"><span class="logo-dot"></span><span class="logo-text">MOFANG</span></a><div class="header-actions"><nav class="site-nav"><a href="../../index.html">← 首页</a></nav><button id="theme-toggle" class="theme-toggle" type="button" aria-label="切换主题">切换日夜</button></div></div></header>
+  <main class="site-main"><div class="pm-reader-layout"><aside class="pm-rail"><details open><summary>PyMotor · 阅读路径</summary><ol><li><a href="pymotor-00-overview.html"><span>00</span><span>系统全景</span></a></li><li><a href="pymotor-01-startup.html"><span>01</span><span>实例上线</span></a></li><li><a href="pymotor-02-request.html"><span>02</span><span>请求编排</span></a></li><li><a href="pymotor-03-scheduler-shm.html"><span>03</span><span>并发调度</span></a></li><li><a href="pymotor-04-kv-affinity.html"><span>04</span><span>缓存亲和</span></a></li><li><a href="pymotor-05-stream-recovery.html" aria-current="page"><span>05</span><span>流式恢复</span></a></li><li><a href="pymotor-06-node-manager.html"><span>06</span><span>节点运行时</span></a></li><li><a href="pymotor-07-ep-fault-tolerance.html"><span>07</span><span>大 EP 恢复</span></a></li><li><a href="pymotor-08-observability.html"><span>08</span><span>观测与复盘</span></a></li></ol><small>从一次执行理解系统，再用条件变化检验理解。</small></details></aside><article class="post-page">
     <header class="post-page-header">
-      <p class="post-page-category">Inference · PyMotor 源码阅读 05</p>
-      <h1 class="post-page-title">PyMotor 源码阅读（5）｜流式响应、重调度与精度探测</h1>
-      <p class="post-lead">从响应提交边界深入 attempt、token 重放、取消和负载释放，区分上游错误与实例熔断，并串起精度抽样、检查、探测和告警。本文对照 <a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/README.md" target="_blank" rel="noopener noreferrer">MindIE-PyMotor 841e50df 源码</a>。</p>
-      <div class="post-page-keywords" aria-label="关键词"><a class="post-keyword-chip" href="../../index.html?keyword=pymotor">PyMotor</a><a class="post-keyword-chip" href="../../index.html?keyword=inference-systems">推理框架</a><a class="post-keyword-chip" href="../../index.html?keyword=pd-disagg">PD 分离</a></div>
-      <p class="post-page-meta" data-date="2026-11-11" data-author="MOFANG" data-minutes=""></p>
-    </header>
-    <details class="pymotor-series-menu"><summary>PyMotor 源码阅读系列 · 6 / 9</summary><ol><li><a href="pymotor-00-overview.html"><span>00</span> 系统全景与源码阅读路线</a></li>
-<li><a href="pymotor-01-startup.html"><span>01</span> 配置、注册与实例上线</a></li>
-<li><a href="pymotor-02-request.html"><span>02</span> 一次请求的完整执行链</a></li>
-<li><a href="pymotor-03-scheduler-shm.html"><span>03</span> 调度策略与共享内存并发记账</a></li>
-<li><a href="pymotor-04-kv-affinity.html"><span>04</span> 缓存亲和与分层前缀索引</a></li>
-<li><a href="pymotor-05-stream-recovery.html" aria-current="page"><span>05</span> 流式响应、重调度与精度探测</a></li>
-<li><a href="pymotor-06-node-manager.html"><span>06</span> NodeManager 与原生引擎运行时</a></li>
-<li><a href="pymotor-07-ep-fault-tolerance.html"><span>07</span> 大 EP 实例的故障恢复</a></li>
-<li><a href="pymotor-08-observability.html"><span>08</span> 观测、验证与项目复盘</a></li></ol></details>
-    <div class="logic-map" aria-label="本文逻辑路线"><div class="map-node map-node--start"><span>1</span><strong>响应提交</strong></div><div class="map-arrow" aria-hidden="true">→</div><div class="map-node map-node--ar"><span>2</span><strong>尝试状态</strong></div><div class="map-arrow" aria-hidden="true">→</div><div class="map-node map-node--par"><span>3</span><strong>重试与隔离</strong></div><div class="map-arrow" aria-hidden="true">→</div><div class="map-node map-node--conv"><span>4</span><strong>精度检测</strong></div></div>
-    <nav class="pymotor-toc" aria-label="本文目录"><strong>本文目录</strong><ol><li><a href="#stream-contract">一、流式返回让请求拥有多个提交边界</a></li><li><a href="#attempt-lifecycle">二、根请求和 attempt 怎样组织任务</a></li><li><a href="#token-replay">三、可见输出之后怎样继续生成</a></li><li><a href="#error-cancel">四、错误分类、取消与负载回收怎样衔接</a></li><li><a href="#circuit">五、从一个请求失败扩大到实例熔断</a></li><li><a href="#precision">六、输出异常检测怎样接入同一条请求链</a></li><li><a href="#stream-reading">七、从模块目录组织自己的阅读与验证</a></li></ol></nav>
-    <section class="post-page-content">
-<h2 id="stream-contract">一、流式返回让请求拥有多个提交边界</h2>
-<h3>1.1 从一次中途断开的生成开始</h3>
+<p class="pm-kicker">PYMOTOR / 系统剖面 05</p>
+<h1 class="post-page-title">已经输出两个 token，还能重试吗</h1>
+<p class="post-lead">把故障放在响应头之前、响应头之后和可见内容之后。相同的上游断连，会遇到不同的 HTTP 与重放边界；沿一次 attempt 的结束过程，检查响应和负载怎样收尾。</p>
+<p class="post-page-meta" data-date="2026-11-11" data-author="MOFANG" data-minutes=""></p>
+<p class="pm-source-note">对照 <a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/README.md">源码 841e50df</a> · 演示中的时间与负载用于解释机制</p>
+</header>
+
+
+    <div id="experiment" class="pm-lab" data-pm-lab="streaming"><p>正在准备交互讲解。下面可继续阅读完整源码解析。</p></div>
+<details class="pm-toc"><summary>沿源码继续阅读</summary><ol><li><a href="#stream-contract">流式返回让请求拥有多个提交边界</a></li><li><a href="#attempt-lifecycle">根请求和 attempt 怎样组织任务</a></li><li><a href="#token-replay">可见输出之后怎样继续生成</a></li><li><a href="#error-cancel">错误分类、取消与负载回收怎样衔接</a></li><li><a href="#circuit">从一个请求失败扩大到实例熔断</a></li><li><a href="#precision">输出异常检测怎样接入同一条请求链</a></li><li><a href="#stream-reading">从模块目录组织自己的阅读与验证</a></li><li><a href="#interview-check">把机制讲清楚</a></li></ol></details>
+<section class="post-page-content">
+<h2 id="stream-contract">流式返回让请求拥有多个提交边界</h2>
+<h3>从一次中途断开的生成开始</h3>
 <p>沿着非流式 HANDOFF 已经可以看清 P、ticket、D 和资源释放。将 <code>stream</code> 改为 true 后，客户端会在整个请求完成前看到输出。如果 D 连接在第两个可见 token 之后断开，系统必须知道客户端已经看过什么、引擎还在执行什么，以及下一次尝试应该从哪个状态继续。</p>
 <p>这时至少有三种时刻需要分别记录。上游各阶段接受请求，意味着可以满足响应提交屏障。向 ASGI 发送 HTTP 响应头，意味着状态码已经进入发送流程。真正向客户端发送首个 body，又决定了用户是否可能已经观察到内容。源码通过 <code>StreamCommitController</code>、<code>CommitAwareStreamingResponse</code> 和 Router 的 <code>_stream_body_sent</code> 分别处理这些状态。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/router/stream_response.py">流式提交控制</a>
 </p>
-<h3>1.2 readiness 屏障保护什么</h3>
+<h3>readiness 屏障保护什么</h3>
 <p>
 <code>StreamCommitController</code> 保存本次 attempt 的编号、所需 ready parts 以及 ready/committed 事件。旧 attempt 的迟到 ready 通知会被忽略。<code>CommitAwareStreamingResponse</code> 同时等待上游生成器终止和 readiness，若屏障满足前失败，仍有机会返回带正确 HTTP 状态的 JSON 错误。屏障满足后开始发送响应头，随后 stream pump 才把 body 继续交给客户端。</p>
-<figure class="diagram-figure">
-<svg viewBox="0 0 840 290" role="img" aria-label="流式响应从上游接受到响应头及首个内容的三个边界">
-<rect x="24" y="45" width="176" height="82" rx="10" class="d-box-blue"/>
-<text x="112" y="76" text-anchor="middle" class="d-label">上游阶段接受</text>
-<text x="112" y="103" text-anchor="middle" class="d-muted">ready parts 齐备</text>
-<line x1="200" y1="86" x2="230" y2="86" class="d-arrow"/>
-<rect x="232" y="45" width="176" height="82" rx="10" class="d-box-orange"/>
-<text x="320" y="76" text-anchor="middle" class="d-label">提交响应头</text>
-<text x="320" y="103" text-anchor="middle" class="d-muted">HTTP response start</text>
-<line x1="408" y1="86" x2="438" y2="86" class="d-arrow"/>
-<rect x="440" y="45" width="176" height="82" rx="10" class="d-box-purple"/>
-<text x="528" y="76" text-anchor="middle" class="d-label">首个 body 发出</text>
-<text x="528" y="103" text-anchor="middle" class="d-muted">可见输出进度</text>
-<line x1="616" y1="86" x2="646" y2="86" class="d-arrow"/>
-<rect x="648" y="45" width="168" height="82" rx="10" class="d-box-blue"/>
-<text x="732" y="76" text-anchor="middle" class="d-label">结束与回收</text>
-<text x="732" y="103" text-anchor="middle" class="d-muted">完成或中途失败</text>
-<text x="420" y="185" text-anchor="middle" class="d-label">同一个错误发生在不同边界，返回方式与重试条件随之变化</text>
-<text x="420" y="223" text-anchor="middle" class="d-muted">先读 stream_response，再进入 Router 的流式 attempt 循环</text>
-</svg>
-<figcaption>响应提交与可见输出分别影响协议错误处理和恢复选择，读流式代码时应保留这两条状态线。</figcaption>
-</figure>
+
 <aside class="aside-card">
 <strong>第一遍阅读问题</strong>
 <p>在 <code>_stream_response()</code> 中标出 <code>ready_to_commit</code>、<code>mark_commit_started()</code>、<code>mark_committed()</code>，再看 <code>_pump_stream()</code> 如何等待 committed。把它们画成时序，比只搜索 StreamingResponse 更容易理解错误边界。</p>
 </aside>
 
-<h2 id="attempt-lifecycle">二、根请求和 attempt 怎样组织任务</h2>
-<h3>2.1 一条用户请求可以经历多次内部执行</h3>
+<h2 id="attempt-lifecycle">根请求和 attempt 怎样组织任务</h2>
+<h3>一条用户请求可以经历多次内部执行</h3>
 <p>
 <code>PDDispatchSession</code> 保存根请求 id 和 attempt 序号。每次建立 <code>AttemptContext</code> 时，分配新的 pair_id，并保存这次尝试的 P/D 资源、异步任务、派发和完成标志、释放标志、停止锁等。这样，当 attempt 1 已经被终止而 attempt 2 正在生成时，系统仍能辨认旧请求的回调与清理动作。</p>
 <p>状态枚举包含 CREATED、DISPATCHING、ACTIVE、FIRST_VISIBLE、DONE、STOPPING、STOPPED。<code>transition()</code> 对 DONE 与停止态有专门保护，终止后的尝试不能被普通进展重新推进。阅读这些枚举时，应同时查看改变它们的调用位置，尤其是流式生成器、错误处理和 finally 清理。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/router/dispatch_session.py">Session 与 AttemptContext</a>
 </p>
-<h3>2.2 请求执行与端点连接共同影响取消</h3>
+<h3>请求执行与端点连接共同影响取消</h3>
 <p>Attempt 会把取消回调登记到 HTTP 连接池，并在 P/D 阶段结束后解除相应登记。HANDOFF 延后选择 D 时，还要等 D client 真正进入连接池再登记 D canceller。端点被移除或连接池清理时，仍在这个端点上的请求可以收到取消信号，而每次尝试的 pair_id 用于区分登记。</p>
 <p>
 <code>cancel()</code> 只取消属于本次尝试、仍未完成且并非当前任务的 P/D task，并等待它们收敛。<code>needs_abort()</code> 则根据“已经派发但尚未完成”判断是否需要向原生引擎发 abort。取消本地协程、关闭 HTTP 连接以及请求引擎中止，是几个有联系的动作，执行顺序要根据具体协议适配器查看。</p>
@@ -82,14 +55,14 @@
 <p>把根请求记录在 Worker RequestManager，把 P/D task 记录在 AttemptContext，把负载总量记录在 SHM，把真实 KV 记录在引擎或存储后端。随后分析客户端断开时，哪些记录需要本层清理，哪些需要通过协议或引擎生命周期继续处理。</p>
 </aside>
 
-<h2 id="token-replay">三、可见输出之后怎样继续生成</h2>
-<h3>3.1 token 身份决定能否构造重放输入</h3>
+<h2 id="token-replay">可见输出之后怎样继续生成</h2>
+<h3>token 身份决定能否构造重放输入</h3>
 <p>
 <code>Rescheduler.process_stream_chunk()</code> 解析 SSE 内容，保存原始 prompt token 与累计输出 token。若已经出现可见输出，却缺少与之对应的 token ids，它会将重放进度标记为不完整。收到 finish_reason 或 DONE 后也会记录流已结束。恢复判断因此需要同时检查功能开关、token 缓存完整性、流结束状态和请求合同。</p>
 <p>
 <code>can_resume_after_visible_output()</code> 要求具有 prompt 和输出 token 缓存，通常还要求单 choice。Chat 请求会进一步经过 <code>completions_retry_eligible_for_chat_request()</code>，检查 tools、logprobs、多模态片段、结构化 response_format 等条件。读到这里就能理解为什么“缓存了几个字符串”不足以保证语义一致的续接。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/router/rescheduler/rescheduler.py">token 重放计划与资格判断</a>
 </p>
-<h3>3.2 一次可以手算的续接</h3>
+<h3>一次可以手算的续接</h3>
 <p>假设原始输入 token 为 [11,12,13]，客户端输出预算为 5。第一轮已输出 [21,22]，随后发生可重试的连接故障。在完整缓存且请求类型受支持时，下一轮使用 [11,12,13,21,22] 作为 prompt，并将后续输出预算调整为 3。已有两个 token 留在客户端，新的模型执行将它们作为历史上下文继续。</p>
 <pre>
 <code>教学伪代码
@@ -100,7 +73,7 @@
 剩余输出预算       5 - 2 = 3</code>
 </pre>
 <p>源码的预算调整还带有至少 1 的边界保护，是否执行到该路径受结束状态和资格判断约束。Chat 入口重放会转为 Completions 的 token-id prompt，<code>completion_to_chat.py</code> 再把结果恢复成客户端期待的 Chat 形状。请求字段的移除、预算字段优先级和响应 id/role 等适配，都属于协议连续性的一部分。</p>
-<h3>3.3 重试前还要考虑提交与 Render 状态</h3>
+<h3>重试前还要考虑提交与 Render 状态</h3>
 <p>
 <code>UnifiedPDRouter._generate_stream_response()</code> 逐次建立 attempt，并与 Render streaming session 协调。失败处理既检查是否还能重试，也判断是否可以进入混部重启或续接路径。首个 body 尚未发出时，可以考虑从头重试。已经发出内容时，需要满足重放条件，避免再次输出已观察到的内容或破坏客户端响应结构。</p>
 <aside class="aside-card">
@@ -108,17 +81,17 @@
 <p>先分析单 prompt、单 choice、纯文本的例子，再进入工具调用、多模态和 token-only 分支。将每个资格检查解释成一个具体反例，能够更准确地理解系统支持的恢复范围。</p>
 </aside>
 
-<h2 id="error-cancel">四、错误分类、取消与负载回收怎样衔接</h2>
-<h3>4.1 可重试与可计入熔断分别判断</h3>
+<h2 id="error-cancel">错误分类、取消与负载回收怎样衔接</h2>
+<h3>可重试与可计入熔断分别判断</h3>
 <p>
 <code>upstream_error.py</code> 定义了携带状态码、响应体、必要响应头和阶段信息的 <code>UpstreamHTTPError</code>。它还分别提供重试判断和熔断判断。当前可重试 HTTP 集合包含 408、425、429、500、502、503、504，传输层还有连接、读写和协议错误等类型。上游 4xx 通常不会累计为实例故障，5xx 可计入。因而 429 可以具备重试机会，同时避免惩罚实例健康。</p>
 <p>客户端主动断连和内部取消也需要携带明确原因。<code>_process_response_error()</code> 会将取消理由转换为请求取消异常，取消类异常不会继续成为普通重试。流式 response 监听 <code>http.disconnect</code>，整体 deadline 超时则携带 infer timeout 原因取消上游任务。两者都要停止工作，但返回语义与告警含义不同。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/router/upstream_error.py">上游错误合同</a>
 </p>
-<h3>4.2 在不同阶段向客户端表达错误</h3>
+<h3>在不同阶段向客户端表达错误</h3>
 <p>响应尚未提交时，代码优先保留完整上游错误的状态码和正文，传输超时对应 504，其他传输异常通常对应 502。上游错误体若超过大小限制而截断，则改用完整可解析的错误封装。响应已经提交后，通过 SSE 错误帧表达失败并结束流，状态码的表达空间已经不同。</p>
 <p>这要求流式测试通过真正的 ASGI 调用验证 HTTP response start，而不能只迭代 body_iterator。源码保留兼容直接迭代的接口，同时用 single-consumer 检查防止同一原始生成器被两种消费方式同时读取。测试入口不同，会观察到不同的协议时序。</p>
 <p>可以用两个细小反例检验这一设计。第一个例子中，上游连接建立成功后立即返回 400，此时应保留参数错误语义，调用者能够依据状态码修正输入。第二个例子中，HTTP 200 已经发出，随后 D 的读连接断开，客户端需要从事件流中的错误对象知道生成没有正常完成。把这两个错误统一写成一个空输出，会丢失决定下一步行动的信息。</p>
-<h3>4.3 清理也有并发顺序</h3>
+<h3>清理也有并发顺序</h3>
 <p>
 <code>BaseRouter._manage_request_context()</code> 在 finally 中使用取消屏蔽作用域，等待必要清理并删除请求记录。<code>_reclaim_residual_workloads()</code> 先等待尚未结束的后台释放，再弹出残余负载。若后台释放已经更新 SHM、但本地记录还未完成确认，此时直接再次回收就可能重复扣账。源码因此明确协调 drain、确认和残余处理。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/router/strategies/base.py">请求上下文与残余负载回收</a>
 </p>
@@ -127,12 +100,12 @@
 <p>给第一次 attempt 分配 P 负载 100、D 负载 80，令 P 已完成、D 输出两个 token 后断连。标出 P 的后台释放、D 的停止、重放计划、新 attempt 分配和根请求最终清理，逐项检查每笔实际提交量怎样被结算。</p>
 </aside>
 
-<h2 id="circuit">五、从一个请求失败扩大到实例熔断</h2>
-<h3>5.1 Mgmt 汇总跨 Worker 的实例证据</h3>
+<h2 id="circuit">从一个请求失败扩大到实例熔断</h2>
+<h3>Mgmt 汇总跨 Worker 的实例证据</h3>
 <p>Worker 通过 <code>report_cb_event()</code> 把成功或可计入的失败发给 Mgmt。<code>CircuitBreakerManager</code> 以 instance_id 为键保存连续失败数、触发次数和当前恢复等待时间。任一端点的失败可能使整个协作实例进入 open，这与大 EP 实例内部的耦合边界有关。</p>
 <p>当连续失败达到配置阈值时，Mgmt 先把该实例 SHM 槽位设为 BLOCKED，再通知 Worker 更新本地状态。这样尚未收到通知的 Worker，在 CAS 分配入口仍然能遇到阻断检查。连续成功会清零失败数，已有在途请求的成功也可能触发提前恢复。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/domain/circuit_breaker.py">实例级熔断状态</a>、<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/scheduler/runtime/scheduler_server.py">SHM 阻断与状态广播</a>
 </p>
-<h3>5.2 定时器到期还要主动探测</h3>
+<h3>定时器到期还要主动探测</h3>
 <p>恢复等待时间按触发次数指数增加，并受上限约束。Mgmt 的恢复任务到期后，会检查实例仍在可用池中，并要求所有可调度端点的原生 health 返回成功，之后才解除阻断。探测失败则延长等待并安排下一次探测。若成员已经由 Controller 移除，相关恢复状态应随之清理。</p>
 <p>当前领域对象显式状态为 open/closed，探测由运行时组织。阅读时应对照真实枚举、定时任务和池成员检查，再描述状态机。请求重试、实例熔断、Controller 实例恢复处在不同范围，各自的证据和完成条件需要分别记录。</p>
 <p>构造一条连续结果序列也能帮助理解计数。设本次配置的失败阈值为三，报告顺序是失败、失败、成功、失败、失败、失败。中间的成功清除了前两次连续失败，最后三个失败才触发本轮隔离。若 open 后还有已经在途的请求成功返回，运行时可以提前关闭并取消恢复计时。这个行为依赖跨 Worker 消息到达时机，测试要同时检查共享阻断标志和后续通知。</p>
@@ -141,18 +114,18 @@
 <p>假设 Worker A 已收到 open，Worker B 还保留旧成员视图。追 B 的 CAS 检查能否挡住分配，再追 Controller 删除实例后恢复定时器怎样退出。这个例子串起广播延迟、共享状态和成员生命周期。</p>
 </aside>
 
-<h2 id="precision">六、输出异常检测怎样接入同一条请求链</h2>
-<h3>6.1 先领取抽样资格，再收集额外字段</h3>
+<h2 id="precision">输出异常检测怎样接入同一条请求链</h2>
+<h3>先领取抽样资格，再收集额外字段</h3>
 <p>HTTP 成功仅提供传输层和服务层事实，输出异常检测还需要 token 与 logprob 信息。<code>SampleController.claim_sample()</code> 在发送引擎请求前按 D 实例领取抽样窗口，生产调用通过调度客户端进入 Mgmt 统一协调，避免多个 Worker 在同一窗口重复抽样。调用失败时放弃本次资格，测试场景才使用本地状态。</p>
 <p>
 <code>router/precision_sample/request.py</code> 注入采样所需字段，<code>response.py</code> 提取 token/logprob，<code>sample_builder.py</code> 构造包含 P/D 身份、prompt/output token、对齐 logprob 与 trace 信息的 <code>DecodeSample</code>。给客户端返回结果之前，还需要按照客户端原始合同去掉仅为内部检查添加的字段。样本检查由被跟踪的后台任务执行，关闭时取消并排空。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/fault_tolerance/precision/sample_controller.py">抽样入口与后台生命周期</a>
 </p>
-<h3>6.2 检查器失败也有独立语义</h3>
+<h3>检查器失败也有独立语义</h3>
 <p>
 <code>checker.py</code> 定义 <code>CheckResult</code>，同时保存 has_issue 和 valid。缺失 logprob、长度不对齐或检查器内部异常时，valid 可以为 false，这类样本不会推进异常或正常连续计数。msprobe detector 使用进程内单例，工作在线程中执行，并通过进程内锁保护其可变状态。</p>
 <p>
 <code>PrecisionReporter</code> 按 P/D group 组织检查与结果上报，生产路径把连续异常、连续正常以及告警动作状态交给全局调度状态协调。达到动作条件后，<code>InternalRouterProbe</code> 构造固定问答，通过相同 Router 与 Scheduler 路径，定向到触发异常的 P/D group。探测自身关闭 sampling_manager，避免再次生成抽样链。</p>
-<h3>6.3 探测结果继续进入告警闭环</h3>
+<h3>探测结果继续进入告警闭环</h3>
 <p>
 <code>PrecisionAlarm.execute()</code> 在 raise 路径运行探测，将异常计数、探测失败数和实例信息组织为告警发给 Controller。clear 路径需要原告警的 moi，确保解除动作对应同一告警身份。Reporter 跟踪动作结果，避免跨 Worker 重复探测或错误地清除其他告警。<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/fault_tolerance/precision/reporter.py">Reporter 状态衔接</a>、<a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/fault_tolerance/alarm/precision_alarm.py">探测与告警动作</a>
 </p>
@@ -163,7 +136,7 @@
 <p>这里提供运行时输出异常检查与固定问答探测。准备项目讲述时，应另行记录 GPQA、MMLU 等任务精度评估的数据集、版本和结果，保持检测机制与任务评测各自清晰。</p>
 </aside>
 
-<h2 id="stream-reading">七、从模块目录组织自己的阅读与验证</h2>
+<h2 id="stream-reading">从模块目录组织自己的阅读与验证</h2>
 <table class="decision-table">
 <thead>
 <tr>
@@ -261,15 +234,23 @@
 <p>完成一张带响应边界的 attempt 时序图，以及四种故障的行为表。能够从客户端观察一路追到任务、账本和实例状态后，再进入下一篇的 NodeManager 本地运行时与 Controller 恢复编排。</p>
 </aside>
 
-      <div class="essay-ending">接下来沿着NodeManager 与原生引擎运行时继续追踪对象和状态。</div>
-      <section class="references-section" aria-label="源码与延伸阅读"><h2>源码与延伸阅读</h2><ol class="reference-list"><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/router/stream_response.py" target="_blank" rel="noopener noreferrer">motor/coordinator/router/stream_response.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/router/dispatch_session.py" target="_blank" rel="noopener noreferrer">motor/coordinator/router/dispatch_session.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/router/rescheduler/rescheduler.py" target="_blank" rel="noopener noreferrer">motor/coordinator/router/rescheduler/rescheduler.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/router/upstream_error.py" target="_blank" rel="noopener noreferrer">motor/coordinator/router/upstream_error.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/router/strategies/base.py" target="_blank" rel="noopener noreferrer">motor/coordinator/router/strategies/base.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/domain/circuit_breaker.py" target="_blank" rel="noopener noreferrer">motor/coordinator/domain/circuit_breaker.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/scheduler/runtime/scheduler_server.py" target="_blank" rel="noopener noreferrer">motor/coordinator/scheduler/runtime/scheduler_server.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/fault_tolerance/precision/sample_controller.py" target="_blank" rel="noopener noreferrer">motor/coordinator/fault_tolerance/precision/sample_controller.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/fault_tolerance/precision/reporter.py" target="_blank" rel="noopener noreferrer">motor/coordinator/fault_tolerance/precision/reporter.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/fault_tolerance/alarm/precision_alarm.py" target="_blank" rel="noopener noreferrer">motor/coordinator/fault_tolerance/alarm/precision_alarm.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/tests/coordinator/router/test_stream_response.py" target="_blank" rel="noopener noreferrer">tests/coordinator/router/test_stream_response.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/tests/coordinator/router/test_rescheduler.py" target="_blank" rel="noopener noreferrer">tests/coordinator/router/test_rescheduler.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="llm-inference-prefill-decode-bottleneck-analysis.html">LLM 推理性能分析</a><span>配合阅读 Prefill、Decode、并行维度与服务指标。</span></li><li><a href="mooncake-architecture-overview.html">Mooncake 架构与源码阅读地图</a><span>继续追踪引擎之外的 KV 存储和传输机制。</span></li></ol></section>
+
+      <section class="pm-interview" aria-label="面试自检"><h2 id="interview-check">把机制讲清楚</h2><p>先自己回答，再展开核对。把答案落到对象、状态和代码位置上。</p><details><summary>发过响应头与发过可见内容有什么区别？</summary><p>HTTP 状态和响应头一旦发送便形成协议提交边界。可见内容发送后，客户端还拥有已输出前缀。后续内部重试必须分别遵守 HTTP 合同与内容续接约束。</p><p class="pm-answer-hook">继续追问 · 说明何时还能替换错误状态，何时必须保持已输出前缀。</p></details>
+<details><summary>流式重试需要哪些条件？</summary><p>已经输出内容时，需要可用且完整的 token 缓存、受支持的请求形态、剩余预算和响应适配。多 prompt、多 choice、工具调用等合同需要分别核对。</p><p class="pm-answer-hook">继续追问 · 把缓存 token 拼入下一轮输入，并计算剩余生成预算。</p></details>
+<details><summary>客户端取消为什么要单独分类？</summary><p>取消会触发当前任务和连接的收尾，并按记录释放负载。它与引擎传输故障的归因不同，直接累计到引擎熔断会影响其他请求的可用候选。</p><p class="pm-answer-hook">继续追问 · 沿 upstream_error、AttemptContext 和 RequestManager 找到处理边界。</p></details>
+</section>
+<details class="pm-reference-fold"><summary>源码与扩展阅读</summary><section class="references-section" aria-label="源码与延伸阅读"><h2>源码与延伸阅读</h2><ol class="reference-list"><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/router/stream_response.py" target="_blank" rel="noopener noreferrer">motor/coordinator/router/stream_response.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/router/dispatch_session.py" target="_blank" rel="noopener noreferrer">motor/coordinator/router/dispatch_session.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/router/rescheduler/rescheduler.py" target="_blank" rel="noopener noreferrer">motor/coordinator/router/rescheduler/rescheduler.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/router/upstream_error.py" target="_blank" rel="noopener noreferrer">motor/coordinator/router/upstream_error.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/router/strategies/base.py" target="_blank" rel="noopener noreferrer">motor/coordinator/router/strategies/base.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/domain/circuit_breaker.py" target="_blank" rel="noopener noreferrer">motor/coordinator/domain/circuit_breaker.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/scheduler/runtime/scheduler_server.py" target="_blank" rel="noopener noreferrer">motor/coordinator/scheduler/runtime/scheduler_server.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/fault_tolerance/precision/sample_controller.py" target="_blank" rel="noopener noreferrer">motor/coordinator/fault_tolerance/precision/sample_controller.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/fault_tolerance/precision/reporter.py" target="_blank" rel="noopener noreferrer">motor/coordinator/fault_tolerance/precision/reporter.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/fault_tolerance/alarm/precision_alarm.py" target="_blank" rel="noopener noreferrer">motor/coordinator/fault_tolerance/alarm/precision_alarm.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/tests/coordinator/router/test_stream_response.py" target="_blank" rel="noopener noreferrer">tests/coordinator/router/test_stream_response.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/tests/coordinator/router/test_rescheduler.py" target="_blank" rel="noopener noreferrer">tests/coordinator/router/test_rescheduler.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="llm-inference-prefill-decode-bottleneck-analysis.html">LLM 推理性能分析</a><span>配合阅读 Prefill、Decode、并行维度与服务指标。</span></li><li><a href="mooncake-architecture-overview.html">Mooncake 架构与源码阅读地图</a><span>继续追踪引擎之外的 KV 存储和传输机制。</span></li></ol></section></details>
       <nav class="pymotor-next" aria-label="前后篇"><a href="pymotor-04-kv-affinity.html">← 上一篇 · 缓存亲和与分层前缀索引</a><a href="pymotor-06-node-manager.html">下一篇 · NodeManager 与原生引擎运行时 →</a></nav>
     </section>
     <section class="comments-section" id="comments" aria-label="Discussion"><div class="comments-header"><h2>Discussion</h2></div><div id="utterances-container" class="utterances-container"></div><noscript>请启用 JavaScript 查看评论。</noscript></section>
-  </article></main>
+  </article></div></main>
   <footer class="site-footer"><span class="footer-credit">© 2026 by <a href="../../index.html">MOFANG</a></span></footer>
   <script src="../../app.js?v=46"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" crossorigin="anonymous"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js" crossorigin="anonymous" onload="renderMathInElement(document.querySelector('.post-page-content'),{delimiters:[{left:'\\[',right:'\\]',display:true},{left:'\\(',right:'\\)',display:false}],throwOnError:false});"></script>
+<script defer src="../../assets/pymotor/labs-lifecycle.js?v=1"></script>
+<script defer src="../../assets/pymotor/labs-scheduling.js?v=1"></script>
+<script defer src="../../assets/pymotor/labs-reliability.js?v=1"></script>
+<script defer src="../../assets/pymotor/reader.js?v=1"></script>
 </body>
 </html>
