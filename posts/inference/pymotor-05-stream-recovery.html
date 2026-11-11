@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous" />
   <title>PyMotor 05 · 已经输出两个 token，还能重试吗</title>
   <meta name="description" content="从响应提交边界深入 attempt、token 重放、取消和负载释放，区分上游错误与实例熔断，并串起精度抽样、检查、探测和告警。" />
-  <link rel="stylesheet" href="../../assets/pymotor/reader.css?v=1" />
+  <link rel="stylesheet" href="../../assets/pymotor/reader.css?v=2" />
 </head>
 <body class="pymotor-post">
 
@@ -235,10 +235,33 @@
 </aside>
 
 
-      <section class="pm-interview" aria-label="面试自检"><h2 id="interview-check">把机制讲清楚</h2><p>先自己回答，再展开核对。把答案落到对象、状态和代码位置上。</p><details><summary>发过响应头与发过可见内容有什么区别？</summary><p>HTTP 状态和响应头一旦发送便形成协议提交边界。可见内容发送后，客户端还拥有已输出前缀。后续内部重试必须分别遵守 HTTP 合同与内容续接约束。</p><p class="pm-answer-hook">继续追问 · 说明何时还能替换错误状态，何时必须保持已输出前缀。</p></details>
-<details><summary>流式重试需要哪些条件？</summary><p>已经输出内容时，需要可用且完整的 token 缓存、受支持的请求形态、剩余预算和响应适配。多 prompt、多 choice、工具调用等合同需要分别核对。</p><p class="pm-answer-hook">继续追问 · 把缓存 token 拼入下一轮输入，并计算剩余生成预算。</p></details>
-<details><summary>客户端取消为什么要单独分类？</summary><p>取消会触发当前任务和连接的收尾，并按记录释放负载。它与引擎传输故障的归因不同，直接累计到引擎熔断会影响其他请求的可用候选。</p><p class="pm-answer-hook">继续追问 · 沿 upstream_error、AttemptContext 和 RequestManager 找到处理边界。</p></details>
-</section>
+      <section class="pm-interview" aria-label="面试自检"><h2 id="interview-check">把机制讲清楚</h2><p>先自行作答，再展开查看参考回答、源码定位与追问解析。把答案落到对象、状态和代码位置上。</p><details><summary>发过响应头与发过可见内容有什么区别？</summary>
+<div class="pm-reference-answer">
+<p class="pm-answer-label">参考回答</p>
+<p>发送响应头后，客户端已经获得 HTTP 状态与协议合同。发送可见正文后，客户端又拥有一段输出前缀。StreamCommitController 先等待所需上游阶段就绪，CommitAwareStreamingResponse 随后发送响应头，再允许 stream pump 输出正文。</p>
+<p>源码把 readiness 也作为语义提交边界，需要留意刚就绪但响应头尚未发送的窄窗口。首 body 前的普通传输重试仍可建立新 attempt，已有可见输出后，续接要满足 token 重放条件。已经提交响应的终态错误通过流内错误合同结束。</p>
+<p class="pm-answer-source">源码定位 · <a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/router/stream_response.py">StreamCommitController 与 CommitAwareStreamingResponse._stream_response()</a></p>
+<p class="pm-answer-hook">继续追问 · 说明何时还能替换错误状态，何时必须保持已输出前缀。</p>
+<p class="pm-followup-answer">追问参考 · 屏障尚未满足且响应未提交时，上游最终失败仍可返回对应 HTTP 错误状态。响应头发送后保持已提交状态，正文发送后还要保持客户端已经观察到的内容前缀。混部整次 restart 另受 commit_sealed 门槛限制。</p>
+</div></details>
+<details><summary>流式重试需要哪些条件？</summary>
+<div class="pm-reference-answer">
+<p class="pm-answer-label">参考回答</p>
+<p>先判断错误是否可重试，并确认仍有传输重试次数。可见输出之后，Rescheduler 还要求续接开关已启用、prompt 与累计输出 token 缓存存在、进度完整且流未结束，n 必须为 1。Chat 请求会继续校验工具、logprobs、多模态和结构化格式等限制。</p>
+<p>满足资格后，用原 prompt 与累计生成 token IDs 构造下一轮输入。Chat 入口转为 Completions 的 token-id prompt，再适配回客户端响应形状。预算根据累计输出调整，当前下发 max_tokens 至少为 1，其字段边界还要与流完成状态一起解释。</p>
+<p class="pm-answer-source">源码定位 · <a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/router/rescheduler/rescheduler.py">Rescheduler.can_resume_after_visible_output()、build_retry_plan() 与 apply_retry_plan()</a></p>
+<p class="pm-answer-hook">继续追问 · 把缓存 token 拼入下一轮输入，并计算剩余生成预算。</p>
+<p class="pm-followup-answer">追问参考 · 原 prompt 为 [11,12,13]，已输出 [21,22]，预算为 5，重放输入成为 [11,12,13,21,22]，后续预算为 3。旧输出保留在客户端，后续内容接着发送。若已经缺失可见片段的 token IDs，重放进度会被标记不完整。</p>
+</div></details>
+<details><summary>客户端取消为什么要单独分类？</summary>
+<div class="pm-reference-answer">
+<p class="pm-answer-label">参考回答</p>
+<p>客户端取消表达用户已离开，处理目标是停止无用工作并收尾。代码沿取消原因传播 CLIENT_DISCONNECT，流式响应监听断开并取消生成任务。上游传输失败则另行判断是否重试、是否报告实例故障，归因错误会影响其他请求可用的候选集合。</p>
+<p>AttemptContext 保存本次任务和资源，停止路径取消相关任务并释放分配。RequestManager 记录当前 Worker 中请求及尝试对应的实际负载。根上下文在取消屏蔽范围内等待后台释放，再回收残余账目并删除请求记录，减少中途取消造成的遗漏和重复扣账。</p>
+<p class="pm-answer-source">源码定位 · <a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/router/strategies/base.py">BaseRouter._manage_request_context() 与 _reclaim_residual_workloads()</a></p>
+<p class="pm-answer-hook">继续追问 · 沿 upstream_error、AttemptContext 和 RequestManager 找到处理边界。</p>
+<p class="pm-followup-answer">追问参考 · upstream_error 判断重试与熔断资格，AttemptContext.stop()/cancel() 停止任务，RequestManager 配合根上下文清账。客户端断开后停止上游，不当作实例故障重试。可重试超时可进入新 attempt，参数类 4xx 通常不重试，也不报告为实例熔断故障。</p>
+</div></details></section>
 <details class="pm-reference-fold"><summary>源码与扩展阅读</summary><section class="references-section" aria-label="源码与延伸阅读"><h2>源码与延伸阅读</h2><ol class="reference-list"><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/router/stream_response.py" target="_blank" rel="noopener noreferrer">motor/coordinator/router/stream_response.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/router/dispatch_session.py" target="_blank" rel="noopener noreferrer">motor/coordinator/router/dispatch_session.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/router/rescheduler/rescheduler.py" target="_blank" rel="noopener noreferrer">motor/coordinator/router/rescheduler/rescheduler.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/router/upstream_error.py" target="_blank" rel="noopener noreferrer">motor/coordinator/router/upstream_error.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/router/strategies/base.py" target="_blank" rel="noopener noreferrer">motor/coordinator/router/strategies/base.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/domain/circuit_breaker.py" target="_blank" rel="noopener noreferrer">motor/coordinator/domain/circuit_breaker.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/scheduler/runtime/scheduler_server.py" target="_blank" rel="noopener noreferrer">motor/coordinator/scheduler/runtime/scheduler_server.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/fault_tolerance/precision/sample_controller.py" target="_blank" rel="noopener noreferrer">motor/coordinator/fault_tolerance/precision/sample_controller.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/fault_tolerance/precision/reporter.py" target="_blank" rel="noopener noreferrer">motor/coordinator/fault_tolerance/precision/reporter.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/fault_tolerance/alarm/precision_alarm.py" target="_blank" rel="noopener noreferrer">motor/coordinator/fault_tolerance/alarm/precision_alarm.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/tests/coordinator/router/test_stream_response.py" target="_blank" rel="noopener noreferrer">tests/coordinator/router/test_stream_response.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/tests/coordinator/router/test_rescheduler.py" target="_blank" rel="noopener noreferrer">tests/coordinator/router/test_rescheduler.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="llm-inference-prefill-decode-bottleneck-analysis.html">LLM 推理性能分析</a><span>配合阅读 Prefill、Decode、并行维度与服务指标。</span></li><li><a href="mooncake-architecture-overview.html">Mooncake 架构与源码阅读地图</a><span>继续追踪引擎之外的 KV 存储和传输机制。</span></li></ol></section></details>
       <nav class="pymotor-next" aria-label="前后篇"><a href="pymotor-04-kv-affinity.html">← 上一篇 · 缓存亲和与分层前缀索引</a><a href="pymotor-06-node-manager.html">下一篇 · NodeManager 与原生引擎运行时 →</a></nav>
     </section>

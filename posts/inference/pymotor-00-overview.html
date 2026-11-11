@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous" />
   <title>PyMotor 00 · 把一条请求放进 PyMotor</title>
   <meta name="description" content="从一次用户请求和一次实例生命周期出发，建立 Controller、Coordinator、NodeManager、Engine 与 KV Conductor 的关系，理解大 EP、DP 端点和状态归属。" />
-  <link rel="stylesheet" href="../../assets/pymotor/reader.css?v=1" />
+  <link rel="stylesheet" href="../../assets/pymotor/reader.css?v=2" />
 </head>
 <body class="pymotor-post">
 
@@ -229,9 +229,39 @@
 <aside class="aside-card">本系列对照源码提交 <code>841e50df</code>，写作日期为 2026 年 11 月 11 日。公开代码可能继续演进，定位时同时保留版本和符号名。当前内容来自静态源码阅读，集群吞吐、精度和恢复时间要通过相应环境验证。</aside>
 
 
-      <section class="pm-interview" aria-label="面试自检"><h2 id="interview-check">把机制讲清楚</h2><p>先自己回答，再展开核对。把答案落到对象、状态和代码位置上。</p><details><summary>用户请求会先经过 NodeManager 吗？</summary><p>普通推理由 Coordinator 连接引擎业务端口。NodeManager 经管理路径启动和监督引擎，上报的健康事实会通过 Controller 影响候选集合。</p><p class="pm-answer-hook">继续追问 · 把请求路径与管理路径分别画出，再说明它们在可用端点处相交。</p></details>
-<details><summary>Instance 和 Endpoint 各表达什么？</summary><p>Instance 表达一组协作引擎的逻辑资源，保存并行配置、节点与能力。Endpoint 表达可定位的业务入口。默认多端点模式关联 DP rank，headless 等节点参与执行但会被业务访问器过滤。</p><p class="pm-answer-hook">继续追问 · 用一个 DP8、TP2 的实例说明逻辑实例、业务入口和设备 rank。</p></details>
-<details><summary>大 EP 的工作体现在哪里？</summary><p>Motor 负责并行参数传递、节点组装、端点选路和故障恢复编排。专家分发、通信域调整与模型执行还要跟进引擎和设备后端。设备规模应结合 DP×PCP×TP×PP 及引擎布局理解。</p><p class="pm-answer-hook">继续追问 · 挑一个 DP rank，追它从配置到原生启动参数的全过程。</p></details>
+      <section class="pm-interview" aria-label="面试自检"><h2 id="interview-check">把机制讲清楚</h2><p>先自行作答，再展开查看参考回答、源码定位与追问解析。把答案落到对象、状态和代码位置上。</p><details>
+<summary>用户请求会先经过 NodeManager 吗？</summary>
+<div class="pm-reference-answer">
+<p class="pm-answer-label">参考回答</p>
+<p>普通推理由 Coordinator 的 Inference Worker 接入。dispatch 建立请求上下文，Router 选择资源，再由 HTTP client 连接引擎业务端口。HANDOFF 请求先调用 P，再把交接信息带给 D，生成结果经 Coordinator 返回客户端。</p>
+<p>NodeManager 位于实例管理链路。它将启动和恢复指令落实为本地进程操作，采集健康事实并向 Controller 上报。Controller 再把可服务实例发布到 Coordinator。因而排查业务错误时，要同时核对实际引擎目标与它的生命周期状态。两条链路通过实例和端点身份关联，便于定位故障。</p>
+<p class="pm-answer-source">源码定位 · <a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/router/strategies/base.py" target="_blank" rel="noopener noreferrer">BaseRouter.forward_request()</a></p>
+<p class="pm-answer-hook">继续追问 · 把请求路径与管理路径分别画出，再说明它们在可用端点处相交。</p>
+<p class="pm-followup-answer"><strong>追问参考</strong> 画业务线时连接客户端、Coordinator、P/D 引擎。画管理线时连接 NodeManager、Controller 和 Coordinator 成员视图。两条线在可调度端点处相交，节点代理改变端点是否可用，请求侧消费这个结果。</p>
+</div>
+</details>
+<details>
+<summary>Instance 和 Endpoint 各表达什么？</summary>
+<div class="pm-reference-answer">
+<p class="pm-answer-label">参考回答</p>
+<p>Instance 表达一个协作推理实例，保存角色、并行配置、节点代理与端点集合。Endpoint 表达可定位的业务入口，包含地址、端口、设备和健康信息。Controller 负责实例生命状态，Coordinator 依据发布后的端点视图选择请求目标。</p>
+<p>默认多端点模式把 endpoint 身份关联到 DP rank。一个实例可以跨 Pod，一个 Pod 也可以暴露多个端点。headless 端点参与分布式计算，但普通 get_all_endpoints() 会过滤它们；单 HTTP 入口模式则要进一步检查引擎内部的 DP 布局。</p>
+<p class="pm-answer-source">源码定位 · <a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/common/resources/instance.py" target="_blank" rel="noopener noreferrer">Instance.get_all_endpoints()</a></p>
+<p class="pm-answer-hook">继续追问 · 用一个 DP8、TP2 的实例说明逻辑实例、业务入口和设备 rank。</p>
+<p class="pm-followup-answer"><strong>追问参考</strong> 取 PCP=PP=1，DP8、TP2 的内部设备规模为 16。默认可形成八个 DP 业务入口，每个入口由 TP2 的设备组支持。开启 EP 后，专家阶段仍可能跨这些 rank 协作，HTTP 入口数和独立完整模型副本数应分别解释。</p>
+</div>
+</details>
+<details>
+<summary>大 EP 的工作体现在哪里？</summary>
+<div class="pm-reference-answer">
+<p class="pm-answer-label">参考回答</p>
+<p>Motor 在大 EP 场景管理并行配置、节点组装、DP 业务入口和恢复编排。ParallelConfig 描述内部规模，Assembler 汇总节点与 rank 信息，NodeManager 生成原生启动规格，Coordinator 再按端点选择请求。故障恢复还要把累计退役 rank 与幸存服务视图同步起来。</p>
+<p>专家选择、通信域及模型执行继续由原生引擎和设备后端落实。讲项目时，应明确自己解释的是服务组织层还是执行层。当前内部 world_size 按 DP、PCP、TP、PP 相乘，启用 EP 后的 ep_size 来源于这一规模，设备数量需要结合真实引擎布局确认。</p>
+<p class="pm-answer-source">源码定位 · <a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/node_manager/core/services/native_engine/service.py" target="_blank" rel="noopener noreferrer">NativeEngineService._pull()</a></p>
+<p class="pm-answer-hook">继续追问 · 挑一个 DP rank，追它从配置到原生启动参数的全过程。</p>
+<p class="pm-followup-answer"><strong>追问参考</strong> 从注册与组装得到的 Endpoint.id 进入 StartCmd，NM 构造 LaunchContext.dp_rank，再经 backend 配置转换成为原生 data_parallel_rank。master 地址、可见设备与业务端口也沿同一规格链传入，最后由 supervisor 启动进程。</p>
+</div>
+</details>
 </section>
 <details class="pm-reference-fold"><summary>源码与扩展阅读</summary><section class="references-section" aria-label="源码与延伸阅读"><h2>源码与延伸阅读</h2><ol class="reference-list"><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/common/resources/instance.py" target="_blank" rel="noopener noreferrer">motor/common/resources/instance.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/daemon/coordinator_daemon.py" target="_blank" rel="noopener noreferrer">motor/coordinator/daemon/coordinator_daemon.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="llm-inference-prefill-decode-bottleneck-analysis.html">LLM 推理性能分析</a><span>配合阅读 Prefill、Decode、并行维度与服务指标。</span></li><li><a href="mooncake-architecture-overview.html">Mooncake 架构与源码阅读地图</a><span>继续追踪引擎之外的 KV 存储和传输机制。</span></li></ol></section></details>
       <nav class="pymotor-next" aria-label="前后篇"><a href="pymotor-01-startup.html">下一篇 · 配置、注册与实例上线 →</a></nav>

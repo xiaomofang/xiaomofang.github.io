@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous" />
   <title>PyMotor 03 · 两个 Worker，同一份负载</title>
   <meta name="description" content="从负载模型和四种调度策略进入 Worker 本地选点、CAS 竞争重选、seqlock 成员快照与 generation 校验，解释分配和释放怎样保持一致。" />
-  <link rel="stylesheet" href="../../assets/pymotor/reader.css?v=1" />
+  <link rel="stylesheet" href="../../assets/pymotor/reader.css?v=2" />
 </head>
 <body class="pymotor-post">
 
@@ -235,10 +235,33 @@
 <div class="callout">本篇应留下两张图。第一张是过滤、评分、提交、记录、释放的执行链，第二张是两个 Worker 的竞争时序。它们共同说明调度的性能路径和正确性边界。</div>
 
 
-      <section class="pm-interview" aria-label="面试自检"><h2 id="interview-check">把机制讲清楚</h2><p>先自己回答，再展开核对。把答案落到对象、状态和代码位置上。</p><details><summary>CAS 成功是否代表请求生命周期已经正确？</summary><p>CAS 确认一次负载比较更新成功。随后还需要记录请求实际提交量，并在取消、失败和结束时按记录释放；本地记录失败时需要补偿。</p><p class="pm-answer-hook">继续追问 · 沿提交、记录、转发、释放四个阶段各找一个失败分支。</p></details>
-<details><summary>score、matched、committed 为什么不同？</summary><p>score 用于候选排序，matched 表示缓存收益模型中的匹配量，committed 表示实际增加的调度负载。普通 D、亲和 P/U、轮转等路径还采用不同的需求估计。</p><p class="pm-answer-hook">继续追问 · 用同一请求写出输入长度、评分和账本增量。</p></details>
-<details><summary>多个 Coordinator 共享一份负载吗？</summary><p>当前共享内存作用于同一 Coordinator 的进程组。多个 Coordinator 各有自己的运行时。解释部署时必须说明负载视图的作用范围。</p><p class="pm-answer-hook">继续追问 · 在进程图上圈出共享段的边界。</p></details>
-</section>
+      <section class="pm-interview" aria-label="面试自检"><h2 id="interview-check">把机制讲清楚</h2><p>先自行作答，再展开查看参考回答、源码定位与追问解析。把答案落到对象、状态和代码位置上。</p><details><summary>CAS 成功是否代表请求生命周期已经正确？</summary>
+<div class="pm-reference-answer">
+<p class="pm-answer-label">参考回答</p>
+<p>CAS 成功只确认共享内存中的一次负载比较更新。后续还要把最终端点和实际提交量写入当前 Worker 的 RequestManager，再转发推理请求。共享账本与请求记录属于两个状态载体，本地记录被取消或写入失败时，prepare_resource() 会尝试回滚刚提交的负载。</p>
+<p>请求结束或失败时，Router 停止本次 attempt，并按记录释放。根请求在取消屏蔽范围内等待后台释放，再回收残余账目并删除请求记录。释放确认顺序避免正常释放和残余回收重复扣减，补偿失败仍需观察日志与恢复机制。</p>
+<p class="pm-answer-source">源码定位 · <a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/router/strategies/base.py">BaseRouter.prepare_resource()、_rollback_allocated_workload() 与 _manage_request_context()</a></p>
+<p class="pm-answer-hook">继续追问 · 沿提交、记录、转发、释放四个阶段各找一个失败分支。</p>
+<p class="pm-followup-answer">追问参考 · 提交可能遇到 CHANGED，需刷新重选。记录可能被取消，需补偿已提交量。转发可能超时，需停止任务并判断重试。释放可能未确认，需检查在途释放与残余记录，避免同一笔负载重复扣减。</p>
+</div></details>
+<details><summary>score、matched、committed 为什么不同？</summary>
+<div class="pm-reference-answer">
+<p class="pm-answer-label">参考回答</p>
+<p>score 服务于候选排序，matched 表示亲和路径按介质权重折算的前缀命中量，committed 表示最终端点实际增加的调度负载。先按评分提出候选，再经过可用性检查与 CAS，最后记录提交量。竞争重选后，候选与评分都可能变化。</p>
+<p>当前 P/U 亲和路径提交 max(0, I−M)，overlap_credit 则影响排序成本。普通 D 路径使用请求体字节长度作为需求代理，轮转还可提交零 token 增量。因此需要结合角色、candidate_policy 和调用阶段解释这些字段。</p>
+<p class="pm-answer-source">源码定位 · <a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/scheduler/runtime/scheduler_client.py">AsyncSchedulerClient._committed_workload_for() 与 select_and_allocate()</a></p>
+<p class="pm-answer-hook">继续追问 · 用同一请求写出输入长度、评分和账本增量。</p>
+<p class="pm-followup-answer">追问参考 · 设 I=8192、加权 M=3072、端点负载 L=1000，unified 各评分系数取 1，初选 score=(8192−3072)+1000=6120，提交量为 5120。把 overlap_credit 改为 0.5，score 变为 7656，提交量仍为 5120。</p>
+</div></details>
+<details><summary>多个 Coordinator 共享一份负载吗？</summary>
+<div class="pm-reference-answer">
+<p class="pm-answer-label">参考回答</p>
+<p>当前共享内存服务于同一个 Coordinator 的进程组。Mgmt 管理成员与槽位，Inference Worker 读取成员视图和负载，并在本地完成候选选择与 CAS 提交。多个 Coordinator 拥有各自的运行时，说明部署时必须给出负载视图的作用范围。</p>
+<p>这份共享段保存端点身份、代际、阻断标志和负载计数。seqlock 保护成员快照，CAS 处理并发负载变化，generation 识别槽位复用。Controller 的实例状态、Worker 的请求记录和 Conductor 的前缀索引另有各自的状态归属。</p>
+<p class="pm-answer-source">源码定位 · <a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/scheduler/runtime/scheduler_client.py">AsyncSchedulerClient.select_and_allocate() 与共享负载访问</a></p>
+<p class="pm-answer-hook">继续追问 · 在进程图上圈出共享段的边界。</p>
+<p class="pm-followup-answer">追问参考 · 在一个 Coordinator 的进程图中圈住 Mgmt 及连接它的 Inference Worker，把共享段画在圈内。Controller、NodeManager 和 Conductor 画在圈外。再画第二个 Coordinator 及独立共享段，说明两边视图可能存在差异。</p>
+</div></details></section>
 <details class="pm-reference-fold"><summary>源码与扩展阅读</summary><section class="references-section" aria-label="源码与延伸阅读"><h2>源码与延伸阅读</h2><ol class="reference-list"><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/scheduler/runtime/scheduler_client.py" target="_blank" rel="noopener noreferrer">motor/coordinator/scheduler/runtime/scheduler_client.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/config/coordinator.py" target="_blank" rel="noopener noreferrer">motor/config/coordinator.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/scheduler/policy/dynamic_bucket.py" target="_blank" rel="noopener noreferrer">motor/coordinator/scheduler/policy/dynamic_bucket.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/scheduler/policy/load_balance.py" target="_blank" rel="noopener noreferrer">motor/coordinator/scheduler/policy/load_balance.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/domain/workload_calculator.py" target="_blank" rel="noopener noreferrer">motor/coordinator/domain/workload_calculator.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/scheduler/runtime/workload_shm/layout.py" target="_blank" rel="noopener noreferrer">motor/coordinator/scheduler/runtime/workload_shm/layout.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/scheduler/allocate_arbitration.py" target="_blank" rel="noopener noreferrer">motor/coordinator/scheduler/allocate_arbitration.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/router/strategies/base.py" target="_blank" rel="noopener noreferrer">motor/coordinator/router/strategies/base.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="llm-inference-prefill-decode-bottleneck-analysis.html">LLM 推理性能分析</a><span>配合阅读 Prefill、Decode、并行维度与服务指标。</span></li><li><a href="mooncake-architecture-overview.html">Mooncake 架构与源码阅读地图</a><span>继续追踪引擎之外的 KV 存储和传输机制。</span></li></ol></section></details>
       <nav class="pymotor-next" aria-label="前后篇"><a href="pymotor-02-request.html">← 上一篇 · 一次请求的完整执行链</a><a href="pymotor-04-kv-affinity.html">下一篇 · 缓存亲和与分层前缀索引 →</a></nav>
     </section>

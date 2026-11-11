@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous" />
   <title>PyMotor 02 · Prefill 结束后，谁把请求交给 Decode</title>
   <meta name="description" content="沿非流式 HANDOFF 请求逐步追踪入口、tokenization、路由策略、P/D 协议适配和响应清理，再对照 TRIGGER、BOOTSTRAP 与混部路径。" />
-  <link rel="stylesheet" href="../../assets/pymotor/reader.css?v=1" />
+  <link rel="stylesheet" href="../../assets/pymotor/reader.css?v=2" />
 </head>
 <body class="pymotor-post">
 
@@ -251,9 +251,39 @@
 <div class="callout">本篇的阅读产出是一条带状态归属的调用链。HTTP body、RequestInfo、AttemptContext、ScheduledResource、handoff ticket 和最终响应应当各有位置，异常路径也应能沿同一张图返回。</div>
 
 
-      <section class="pm-interview" aria-label="面试自检"><h2 id="interview-check">把机制讲清楚</h2><p>先自己回答，再展开核对。把答案落到对象、状态和代码位置上。</p><details><summary>HANDOFF 为什么可以延后选择 D？</summary><p>D 请求需要 P 返回的交接信息。Prefill 结束后再依据当前 D 负载选点，可以使 D 的记账窗口贴近实际执行阶段，减少长 Prefill 过早占用调度负载。</p><p class="pm-answer-hook">继续追问 · 标出 P 完成、发起释放、释放确认和选择 D 四个时间点。</p></details>
-<details><summary>交接票据与 KV 张量各经过哪里？</summary><p>P 返回的 kv_transfer_params 经适配器校验，作为 handoff_ticket 注入 D 请求。实际 KV 的加载与传输由引擎、Connector 和配置的后端执行。</p><p class="pm-answer-hook">继续追问 · 跟踪 PrefillMetadata 里的元数据，再说明实际数据流。</p></details>
-<details><summary>切换引擎为什么需要 Adapter？</summary><p>Router 组织阶段顺序和生命周期，Adapter 约束原生请求及响应字段。HANDOFF、TRIGGER 和 BOOTSTRAP 有不同的等待和同步关系，候选还必须满足引擎与协议能力。</p><p class="pm-answer-hook">继续追问 · 用 P/D 执行先后和同步信息比较三种模式。</p></details>
+      <section class="pm-interview" aria-label="面试自检"><h2 id="interview-check">把机制讲清楚</h2><p>先自行作答，再展开查看参考回答、源码定位与追问解析。把答案落到对象、状态和代码位置上。</p><details>
+<summary>HANDOFF 为什么可以延后选择 D？</summary>
+<div class="pm-reference-answer">
+<p class="pm-answer-label">参考回答</p>
+<p>HANDOFF 中，D 执行需要 P 返回有效交接信息，资源选择可以靠近进入 Decode 的时刻进行。当前 _create_attempt() 允许先取得 P，P 完成后再经 _ensure_handoff_decode_resource() 申请兼容 D。这样能参考较新的 D 负载，并缩短提前占用 D 账本的窗口。</p>
+<p>这属于阶段编排与负载记账的选择，并不表示 P 返回后已完成全部数据传输。D 请求携带票据，Connector 继续落实 KV 使用。还应检查当前 attempt 是否已经有 D 资源，延后分配函数会在资源已存在时直接返回，避免重复申请。</p>
+<p class="pm-answer-source">源码定位 · <a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/router/strategies/unified_pd.py" target="_blank" rel="noopener noreferrer">_run_handoff_nonstream_attempt() / _ensure_handoff_decode_resource()</a></p>
+<p class="pm-answer-hook">继续追问 · 标出 P 完成、发起释放、释放确认和选择 D 四个时间点。</p>
+<p class="pm-followup-answer"><strong>追问参考</strong> 实际顺序是 P 完成、提交 P 的后台释放任务、开始延后选择 D。释放确认可能与 D 分配并行，不能把发起释放当作共享账本已经扣减。请求结束时还要等待在途释放，再进行残余记录回收。</p>
+</div>
+</details>
+<details>
+<summary>交接票据与 KV 张量各经过哪里？</summary>
+<div class="pm-reference-answer">
+<p class="pm-answer-label">参考回答</p>
+<p>P 响应中的 kv_transfer_params 先经过 VllmProtocolAdapter 校验，再保存为 PrefillMetadata.handoff_ticket。构造 D 请求时，Adapter 把这份票据复制到请求体。Coordinator 因而负责传递协议元数据，并保持同一次 attempt 的 P/D 关联。</p>
+<p>实际 KV 数据由引擎、Connector 及配置的传输或存储后端处理。HTTP 成功还要满足交接合同，当前解析会要求非空参数及正确的 do_remote_prefill 标记。说明字段含义时，应结合所用 Connector 的约定，避免从一份票据推导所有后端的数据路径。进一步分析时，还要记录引擎版本和当前启用的传输后端。</p>
+<p class="pm-answer-source">源码定位 · <a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/router/adapters/pd_protocol.py" target="_blank" rel="noopener noreferrer">PrefillMetadata / VllmProtocolAdapter.parse_prefill_response()</a></p>
+<p class="pm-answer-hook">继续追问 · 跟踪 PrefillMetadata 里的元数据，再说明实际数据流。</p>
+<p class="pm-followup-answer"><strong>追问参考</strong> PrefillMetadata 保存 handoff_ticket 和可选 usage。票据描述继续执行所需的远端 KV 交接参数，usage 保存统计信息。其后可追 build_decode_request() 如何注入参数，再进入具体 Connector 确认地址、块身份与数据搬运。</p>
+</div>
+</details>
+<details>
+<summary>切换引擎为什么需要 Adapter？</summary>
+<div class="pm-reference-answer">
+<p class="pm-answer-label">参考回答</p>
+<p>Router 负责选择资源、组织阶段、等待任务、处理失败和释放负载。Adapter 将通用阶段转换成原生 API 与 body，统一请求身份、交接字段、P 响应校验和必要的 abort 请求。这样更换引擎协议时，可以集中检查消息合同，同时保留公共生命周期处理。</p>
+<p>Adapter 也需要结合实例宣告的引擎类型和调度能力使用。配置了一个名称，仍需确认 P/D 两端能够按同一协议协作。阅读时先识别 coordination mode，再追构造请求、解析结果和停止尝试的调用顺序，才能说明兼容边界。</p>
+<p class="pm-answer-source">源码定位 · <a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/router/adapters/pd_protocol.py" target="_blank" rel="noopener noreferrer">PDProtocolAdapter / CoordinationMode</a></p>
+<p class="pm-answer-hook">继续追问 · 用 P/D 执行先后和同步信息比较三种模式。</p>
+<p class="pm-followup-answer"><strong>追问参考</strong> HANDOFF 先等 P 返回票据，再发 D；TRIGGER 先发 D，由 D 回调当前 Worker 的 metaserver 触发 P；BOOTSTRAP 为 P/D 准备共同的 host、port、room 信息并协同执行。三者的同步条件决定资源准备和失败清理方式。</p>
+</div>
+</details>
 </section>
 <details class="pm-reference-fold"><summary>源码与扩展阅读</summary><section class="references-section" aria-label="源码与延伸阅读"><h2>源码与延伸阅读</h2><ol class="reference-list"><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/daemon/coordinator_daemon.py" target="_blank" rel="noopener noreferrer">motor/coordinator/daemon/coordinator_daemon.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/api_server/inference_server.py" target="_blank" rel="noopener noreferrer">motor/coordinator/api_server/inference_server.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/router/dispatch.py" target="_blank" rel="noopener noreferrer">motor/coordinator/router/dispatch.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/render/tokenization_service.py" target="_blank" rel="noopener noreferrer">motor/coordinator/render/tokenization_service.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/router/strategies/unified_pd.py" target="_blank" rel="noopener noreferrer">motor/coordinator/router/strategies/unified_pd.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/router/adapters/pd_protocol.py" target="_blank" rel="noopener noreferrer">motor/coordinator/router/adapters/pd_protocol.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/router/strategies/base.py" target="_blank" rel="noopener noreferrer">motor/coordinator/router/strategies/base.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="llm-inference-prefill-decode-bottleneck-analysis.html">LLM 推理性能分析</a><span>配合阅读 Prefill、Decode、并行维度与服务指标。</span></li><li><a href="mooncake-architecture-overview.html">Mooncake 架构与源码阅读地图</a><span>继续追踪引擎之外的 KV 存储和传输机制。</span></li></ol></section></details>
       <nav class="pymotor-next" aria-label="前后篇"><a href="pymotor-01-startup.html">← 上一篇 · 配置、注册与实例上线</a><a href="pymotor-03-scheduler-shm.html">下一篇 · 调度策略与共享内存并发记账 →</a></nav>

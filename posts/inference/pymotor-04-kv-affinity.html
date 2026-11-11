@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous" />
   <title>PyMotor 04 · 有缓存的节点，就该优先吗</title>
   <meta name="description" content="把 KV 事件、连续前缀、NPU/CPU/Disk 覆盖、介质加权、负载评分与回退连成闭环，手算一次选路，并设计可验证收益的对照实验。" />
-  <link rel="stylesheet" href="../../assets/pymotor/reader.css?v=1" />
+  <link rel="stylesheet" href="../../assets/pymotor/reader.css?v=2" />
 </head>
 <body class="pymotor-post">
 
@@ -325,10 +325,33 @@ M=\min\!\left(I,\operatorname{round}\left[b(w_nB_n+w_cB_c+w_dB_d)\right]\right),
 </aside>
 
 
-      <section class="pm-interview" aria-label="面试自检"><h2 id="interview-check">把机制讲清楚</h2><p>先自己回答，再展开核对。把答案落到对象、状态和代码位置上。</p><details><summary>为什么出现相同 token 块仍可能无法复用？</summary><p>KV 与前文相关，匹配需要从一致的前缀路径开始，并确认具体 worker 持有这条连续路径。跨介质续接还要保持合法的实例、DP 与父块身份关系。</p><p class="pm-answer-hook">继续追问 · 比较 A→B→C 与 A→Q→C 的连续覆盖。</p></details>
-<details><summary>为什么命中更多，选路却转向另一个端点？</summary><p>默认 unified 把加权命中折算成剩余 Prefill 成本，再加入当前端点负载。高命中端点已有大量排队工作时，另一个端点可能获得更低评分。</p><p class="pm-answer-hook">继续追问 · 改变负载，手算两个端点评分交叉的位置。</p></details>
-<details><summary>怎么证明亲和调度带来了收益？</summary><p>在至少两个合格 P 端点上，用一致请求序列和缓存预热比较 LB、纯亲和与 unified。把最终 scheduled 端点、引擎复用、查询耗时和客户端 TTFT 连成证据链。</p><p class="pm-answer-hook">继续追问 · 补充错误率、吞吐与各 DP 分布，解释热点和查询开销。</p></details>
-</section>
+      <section class="pm-interview" aria-label="面试自检"><h2 id="interview-check">把机制讲清楚</h2><p>先自行作答，再展开查看参考回答、源码定位与追问解析。把答案落到对象、状态和代码位置上。</p><details><summary>为什么出现相同 token 块仍可能无法复用？</summary>
+<div class="pm-reference-answer">
+<p class="pm-answer-label">参考回答</p>
+<p>因果自回归模型的 KV 与此前上下文相关。查询要从一致的根前缀开始，沿块路径逐层确认。中途出现差异后，后面再次出现同一块内容，也需要重新检查它所属的上下文路径。模型、tokenization 和事件块粒度同样需要对齐。</p>
+<p>Conductor 的 find_matches_detailed() 同时维护仍持有当前路径的 worker 集合，记录每个 worker 的最长连续覆盖。HBM 到 CPU/Disk 的续接还要校验实例、DP 与父块身份关系，避免把不同端点的上下段拼成虚假命中。</p>
+<p class="pm-answer-source">源码定位 · <a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/kv_conductor/src/concurrent_tree.rs">ConcurrentRadixTree.find_matches_detailed()</a></p>
+<p class="pm-answer-hook">继续追问 · 比较 A→B→C 与 A→Q→C 的连续覆盖。</p>
+<p class="pm-followup-answer">追问参考 · 以请求 A→B→C 为查询目标，持有 A→B→C 的 worker 连续命中 3 块，持有 A→Q→C 的 worker 只命中首块 A。若每块 128 token，对应覆盖分别为 384 和 128。相同的 C 无法跨过前面的差异继续累计。</p>
+</div></details>
+<details><summary>为什么命中更多，选路却转向另一个端点？</summary>
+<div class="pm-reference-answer">
+<p class="pm-answer-label">参考回答</p>
+<p>默认 unified 先把 NPU、CPU、Disk 的去重贡献按权重折成 M，再计算 C=max(0,I−overlap_credit×M)，最后以剩余成本和端点当前负载的加权和评分。缓存收益可以降低计算估计，已有工作也会提高等待压力，两项共同影响选择。</p>
+<p>初选读取端点负载，CAS 竞争后的仲裁可能使用更新视图与实例平均压力。最终提交量依据选中端点的 I−M 记录，评分权重与提交量分别计算。分析目的端点时，应查看成功提交的 scheduled 日志，并核对 fast_path、repicked 和 policy。</p>
+<p class="pm-answer-source">源码定位 · <a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/scheduler/policy/kv_cache_affinity.py">KvCacheAffinityPolicy._collect_load_candidates() 与 _select_with_load()</a></p>
+<p class="pm-answer-hook">继续追问 · 改变负载，手算两个端点评分交叉的位置。</p>
+<p class="pm-followup-answer">追问参考 · 沿本文算例取 A 的 M=7168、B 的 M=3072，B 负载固定 1000，其他系数为 1。A 评分为 1024+L_A，B 为 6120，交点 L_A=5096。A 高于这个值时 B 更优，低于时 A 更优。这计算的是初选口径。</p>
+</div></details>
+<details><summary>怎么证明亲和调度带来了收益？</summary>
+<div class="pm-reference-answer">
+<p class="pm-answer-label">参考回答</p>
+<p>先确保至少有两个合格 P 端点，让选路存在实际选择空间。固定模型、硬件、并行配置、输入输出长度、请求序列和缓存预热条件，对比普通负载均衡、纯亲和与 unified，并覆盖冷缓存、热前缀和高并发热点场景。</p>
+<p>验证要沿同一个 req_id 串起 token、Conductor 覆盖、最终 scheduled 端点、引擎实际复用和客户端首 token。命中率升高只说明其中一个环节变化，还要把查询、排队、加载和生成成本放回端到端延迟，重复实验并交换执行顺序。</p>
+<p class="pm-answer-source">源码定位 · <a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/scheduler/runtime/scheduler_client.py">AsyncSchedulerClient.select_and_allocate() 中的最终 scheduled 日志</a></p>
+<p class="pm-answer-hook">继续追问 · 补充错误率、吞吐与各 DP 分布，解释热点和查询开销。</p>
+<p class="pm-followup-answer">追问参考 · 同时报告成功吞吐、错误率、TTFT 的 P50/P95/P99、查询耗时和各 DP 分布。若命中提高但尾延迟变差，应检查请求是否集中热点、CPU/Disk 加载是否昂贵，以及查询开销是否超过节省的 Prefill 计算。</p>
+</div></details></section>
 <details class="pm-reference-fold"><summary>源码与扩展阅读</summary><section class="references-section" aria-label="源码与延伸阅读"><h2>源码与延伸阅读</h2><ol class="reference-list"><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/scheduler/policy/kv_cache_affinity.py" target="_blank" rel="noopener noreferrer">motor/coordinator/scheduler/policy/kv_cache_affinity.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/kv_conductor/src/concurrent_tree.rs" target="_blank" rel="noopener noreferrer">motor/kv_conductor/src/concurrent_tree.rs</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/api_client/conductor_api_client.py" target="_blank" rel="noopener noreferrer">motor/coordinator/api_client/conductor_api_client.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/kv_conductor/src/events/pool.rs" target="_blank" rel="noopener noreferrer">motor/kv_conductor/src/events/pool.rs</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/kv_conductor/src/indexer/mod.rs" target="_blank" rel="noopener noreferrer">motor/kv_conductor/src/indexer/mod.rs</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/config/coordinator.py" target="_blank" rel="noopener noreferrer">motor/config/coordinator.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/scheduler/runtime/scheduler_client.py" target="_blank" rel="noopener noreferrer">motor/coordinator/scheduler/runtime/scheduler_client.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/coordinator/scheduler/allocate_arbitration.py" target="_blank" rel="noopener noreferrer">motor/coordinator/scheduler/allocate_arbitration.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/tests/coordinator/scheduler/test_kv_cache_affinity.py" target="_blank" rel="noopener noreferrer">tests/coordinator/scheduler/test_kv_cache_affinity.py</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="https://gitcode.com/Ascend/MindIE-PyMotor/blob/841e50dfa0b67ebe8f5da292669df4179f690ab1/motor/kv_conductor/src/indexer/tests.rs" target="_blank" rel="noopener noreferrer">motor/kv_conductor/src/indexer/tests.rs</a><span>对照版本 841e50df，按正文中的符号定位实现与调用方。</span></li><li><a href="llm-inference-prefill-decode-bottleneck-analysis.html">LLM 推理性能分析</a><span>配合阅读 Prefill、Decode、并行维度与服务指标。</span></li><li><a href="mooncake-architecture-overview.html">Mooncake 架构与源码阅读地图</a><span>继续追踪引擎之外的 KV 存储和传输机制。</span></li></ol></section></details>
       <nav class="pymotor-next" aria-label="前后篇"><a href="pymotor-03-scheduler-shm.html">← 上一篇 · 调度策略与共享内存并发记账</a><a href="pymotor-05-stream-recovery.html">下一篇 · 流式响应、重调度与精度探测 →</a></nav>
     </section>
