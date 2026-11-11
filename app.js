@@ -6,6 +6,7 @@
   let searchQuery = "";
 
   const KEYWORD_LABELS = {
+    transformer: "Transformer",
     "vllm-ascend": "vLLM × Ascend",
     parallelism: "并行与通信",
     pymotor: "PyMotor",

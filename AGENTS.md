@@ -68,4 +68,5 @@ powershell -ExecutionPolicy Bypass -File .\deploy.ps1 "commit message"
 2. 用 app.js 相同算法核算字数（SVG 文字计入、公式/代码不计）
 3. `index.html` 新增卡片：`data-category` / `data-keywords`（对应 app.js 的 `KEYWORD_LABELS`）/ `data-date` / `data-title` + 摘要 + 统计行
 4. 检查关键词 chip 链接与 `index.html` 的 keyword 按钮一一对应
+   - 关键词可以按文章主题新增，不限于现有列表；新增时同步 `app.js` 的 `KEYWORD_LABELS`、首页筛选按钮，以及对应文章和卡片的标签。
 5. 运行 deploy.ps1 推送
