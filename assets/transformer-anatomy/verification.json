@@ -1,0 +1,25 @@
+{
+  "status": "passed",
+  "dtype": "float64",
+  "numpy_version": "2.5.1",
+  "checks": [
+    "full_vs_token_decode",
+    "full_vs_chunked_prefill",
+    "cache_shape",
+    "future_isolation",
+    "gqa_group_mapping",
+    "rope_norm_and_shift",
+    "online_softmax_four_block_sizes",
+    "softmax_shift_and_mask",
+    "kv_capacity_formula"
+  ],
+  "max_absolute_errors": {
+    "one_token": 2.886579864025407e-15,
+    "unequal_chunks": 2.220446049250313e-15,
+    "causal_future_isolation": 0.0,
+    "gqa_head_mapping": 0.0,
+    "rope_common_shift": 8.881784197001252e-16,
+    "online_softmax": 2.220446049250313e-16
+  },
+  "limitations": "未训练模型；NumPy 数学参考，未测试 GPU/NPU 性能或低精度内核。"
+}

@@ -1,0 +1,2649 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="night">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <script>(function(){try{var saved=localStorage.getItem('yichuan-theme');document.documentElement.setAttribute('data-theme',saved||(matchMedia('(prefers-color-scheme: dark)').matches?'night':'day'));}catch(e){}})();</script>
+  <link rel="stylesheet" href="../../styles.css?v=72" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous" />
+  <title>Transformer 结构剖析：从基础模块到推理框架 · MOFANG</title>
+  <meta name="description" content="从高中数学出发，逐步拆解 tokenizer、QKV、Softmax、RoPE、RMSNorm、SwiGLU，再连接 KV Cache、FlashAttention、分页调度、量化、MoE、MLA 与并行。含 10 组交互实验、36 道面试题和可运行参考实现。" />
+  <link rel="canonical" href="https://xiaomofang.github.io/posts/basic/transformer-anatomy.html" />
+</head>
+<body class="transformer-post">
+  <header class="site-header">
+<div class="header-inner">
+<a href="../../index.html" class="logo">
+<span class="logo-dot">
+</span>
+<span class="logo-text">MOFANG</span>
+</a>
+<div class="header-actions">
+<nav class="site-nav">
+<a href="../../index.html">首页</a>
+<a href="#interview">面试题库</a>
+</nav>
+<button id="theme-toggle" class="theme-toggle" type="button" aria-label="切换日夜主题">切换日夜</button>
+</div>
+</div>
+</header>
+  <main class="site-main">
+<div class="tf-layout">
+    <aside class="tf-rail">
+<details open>
+<summary>阅读目录 · 27 章</summary>
+<ol>
+<li>
+<a href="#start" data-toc="start">
+<span>00</span> 先看全图</a>
+</li>
+<li>
+<a href="#language" data-toc="language">
+<span>01</span> 语言模型</a>
+</li>
+<li>
+<a href="#math" data-toc="math">
+<span>02</span> 数学工具箱</a>
+</li>
+<li>
+<a href="#tokenizer" data-toc="tokenizer">
+<span>03</span> Tokenizer</a>
+</li>
+<li>
+<a href="#embedding" data-toc="embedding">
+<span>04</span> Embedding</a>
+</li>
+<li>
+<a href="#architecture" data-toc="architecture">
+<span>05</span> 架构全景</a>
+</li>
+<li>
+<a href="#attention" data-toc="attention">
+<span>06</span> 注意力</a>
+</li>
+<li>
+<a href="#heads" data-toc="heads">
+<span>07</span> 多头注意力</a>
+</li>
+<li>
+<a href="#position" data-toc="position">
+<span>08</span> 位置</a>
+</li>
+<li>
+<a href="#norm" data-toc="norm">
+<span>09</span> Residual 与 Norm</a>
+</li>
+<li>
+<a href="#ffn" data-toc="ffn">
+<span>10</span> FFN 与激活函数</a>
+</li>
+<li>
+<a href="#learning" data-toc="learning">
+<span>11</span> 输出与学习</a>
+</li>
+<li>
+<a href="#walkthrough" data-toc="walkthrough">
+<span>12</span> 走完一层</a>
+</li>
+<li>
+<a href="#cache" data-toc="cache">
+<span>13</span> KV Cache</a>
+</li>
+<li>
+<a href="#flash" data-toc="flash">
+<span>14</span> FlashAttention</a>
+</li>
+<li>
+<a href="#paging" data-toc="paging">
+<span>15</span> 分页缓存与请求调度</a>
+</li>
+<li>
+<a href="#roofline" data-toc="roofline">
+<span>16</span> 算量与带宽</a>
+</li>
+<li>
+<a href="#quantization" data-toc="quantization">
+<span>17</span> 低精度与量化</a>
+</li>
+<li>
+<a href="#moe" data-toc="moe">
+<span>18</span> MoE</a>
+</li>
+<li>
+<a href="#mla" data-toc="mla">
+<span>19</span> MLA</a>
+</li>
+<li>
+<a href="#evolution" data-toc="evolution">
+<span>20</span> 演变地图</a>
+</li>
+<li>
+<a href="#parallel" data-toc="parallel">
+<span>21</span> 跨设备执行</a>
+</li>
+<li>
+<a href="#production" data-toc="production">
+<span>22</span> 生产排障</a>
+</li>
+<li>
+<a href="#reference" data-toc="reference">
+<span>23</span> 可运行参考</a>
+</li>
+<li>
+<a href="#interview" data-toc="interview">
+<span>24</span> 面试题库</a>
+</li>
+<li>
+<a href="#exercises" data-toc="exercises">
+<span>25</span> 动手练习</a>
+</li>
+<li>
+<a href="#sources" data-toc="sources">
+<span>26</span> 参考资料</a>
+</li>
+</ol>
+</details>
+</aside>
+    <article class="post-page transformer-article">
+      <header class="post-page-header">
+        <p class="post-page-category">Basic Knowledge · Transformer</p>
+        <h1 class="post-page-title">Transformer 结构剖析：<br />从基础模块到推理框架</h1>
+        <p class="post-lead">先看懂一枚向量如何寻找信息，再看懂一台机器如何服务许多条序列。本文沿着 <a href="https://jalammar.github.io/illustrated-transformer/">The Illustrated Transformer</a> 与 <a href="https://arxiv.org/abs/1706.03762">原始论文</a>的线索，从高中数学开始，逐步走到现代 Decoder 的计算与推理系统的取舍。</p>
+        <div class="post-page-keywords">
+<a class="post-keyword-chip" href="../../index.html?keyword=attention">Attention 加速</a>
+<a class="post-keyword-chip" href="../../index.html?keyword=inference-systems">推理框架</a>
+<a class="post-keyword-chip" href="../../index.html?keyword=rope">RoPE · 位置编码</a>
+<a class="post-keyword-chip" href="../../index.html?keyword=parallelism">并行与通信</a>
+</div>
+        <p class="post-page-meta" data-date="2026-11-11" data-author="MOFANG" data-minutes="">2026年11月11日 · MOFANG</p>
+        <p class="tf-source-note">10 组交互实验 · 36 道面试题 · 10 道练习。资料核对：2026-11-11。图和数值为教学构造，参考实现已验证数学与缓存语义。</p>
+        <div class="tf-jumps">
+<a href="#language">从基础开始</a>
+<a href="#cache">直达推理系统</a>
+<a href="#interview">进入面试题库</a>
+</div>
+      </header>
+      <section class="post-page-content">
+<div class="tf-chapter" id="start">
+<h2>导读、先看全图：这份教程怎样读</h2>
+<p class="tf-chapter-subtitle">从一句话出发，把直觉、公式、代码和推理服务连起来。</p>
+<p class="lead">Transformer 可以先理解成一条反复加工信息的流水线：把文字变成数字，让不同位置交换信息，让每个位置加工信息，最后预测下一个 token。工程师还要再问一句：这些数字在哪里存、搬了几次、怎样同时服务很多人？</p>
+<p>这份教程面向两种起点：只学过高中数学的读者，以及需要解释模型、排查精度、分析性能的 AI Infra / 推理框架工程师。你不必先会线性代数。遇到一个新符号，我们先给它一个具体含义，再给公式，最后说明公式在机器上怎样执行。</p>
+<details class="tf-reading-path">
+<summary>建议的阅读路线</summary>
+<ol>
+<li>
+<b>第一遍，建立直觉：</b>读第 1—5 章，再玩注意力、激活函数、RoPE 三个实验。暂时跳过推导框。</li>
+<li>
+<b>第二遍，看懂计算：</b>读第 6—12 章，用纸笔核对小例子，沿着张量形状走完一层。</li>
+<li>
+<b>第三遍，准备面试：</b>读第 13—22 章，运行参考实现，再不看答案回答第 23 章的问题。</li>
+</ol>
+</details>
+<p>本文沿着语言模型 → tokenizer → 架构 → 基础模块 → 注意力 → 完整模块示例 → 现代改进 → MoE 展开。图和数值均为独立构造的教学示意，不代表某个训练模型的真实注意力或实测性能。</p>
+<h3>始终分清三个层次</h3>
+<div class="tf-table-wrap">
+<table class="decision-table">
+<thead>
+<tr>
+<th>层次</th>
+<th>回答的问题</th>
+<th>例子</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>数学定义</td>
+<td>要计算哪个函数？</td>
+<td>softmax(QKᵀ / √dₖ)V</td>
+</tr>
+<tr>
+<td>模型结构</td>
+<td>选了什么模块、多少层、如何训练？</td>
+<td>Pre-Norm、RoPE、GQA、SwiGLU</td>
+</tr>
+<tr>
+<td>执行系统</td>
+<td>怎样在硬件上高效而正确地算？</td>
+<td>FlashAttention、分页缓存、调度、并行</td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>有些改进改变模型函数，有些只改变等价计算的组织方式。这个区别贯穿整篇教程：把 FlashAttention 当成新模型，或把 MoE 当成调度开关，都会误解优化的边界。</p>
+<h3>一个最小的共同语言</h3>
+<p>
+<b>参数</b>是训练得到、普通推理期间保持不变的数字；<b>激活</b>是本次输入计算出的中间数字；<b>超参数</b>是层数、宽度等设计选择；<b>缓存</b>是为了复用而留下的中间结果。KV Cache 会增长，并不表示模型正在学习新权重。</p>
+<div class="callout">
+<b>资料与范围。</b>以 Jay Alammar 的原文作为入门线索，以原始论文、作者模型卡和框架官方文档核对技术细节。资料核对日期为 2026-11-11。演进章节选取有代表性的公开路线，不将某个模型的设置当成所有 Transformer 的统一标准。这里的面试训练覆盖原理与分析方法，实际岗位仍会考具体框架、硬件和项目经验。</div>
+<p class="source">阅读起点：<a href="https://jalammar.github.io/illustrated-transformer/">The Illustrated Transformer</a>；结构基准：<a href="https://arxiv.org/abs/1706.03762">Attention Is All You Need</a>。<a href="https://blog.csdn.net/yujianmin1990/article/details/85221271">中文译文</a>可对照阅读，技术结论以一手资料为准。</p>
+</div>
+<div class="tf-chapter" id="language">
+<h2>一、语言模型：把“接下来是什么”变成数学问题</h2>
+<p class="tf-chapter-subtitle">概率、训练目标，以及为什么生成看起来一字一句。</p>
+<h3>1.1 从接龙开始</h3>
+<p>给出“天空是”，你可能接“蓝色的”，也可能接“灰蒙蒙的”。语言模型不必一开始就选唯一答案，而是给词表中的候选项打分，得到一个概率分布。真实模型处理的是 token，可能是一个字、词的一部分、标点或若干字节。</p>
+<div class="math-block">\[p(\text{下一个 token}\mid\text{已有 token})\]</div>
+<p class="tf-math-note">竖线 | 读作“在……条件下”</p>
+<p>比如某个教学模型给“蓝”分配 0.6、“灰”分配 0.3、其他候选项合计 0.1。采样器据此选择“蓝”，再把它加入上下文，模型继续预测。一次前向计算得到的是候选分数；把分数变成文字还需要选择规则。</p>
+<h3>1.2 整句话的概率如何得到？</h3>
+<p>“先发生 A，再发生 B”的概率可以写成 p(A) × p(B|A)。不断展开，一条序列的概率就是各步条件概率的乘积：</p>
+<div class="math-block">\[p(x_1,\ldots,x_n)=\prod_{t=1}^{n}p(x_t\mid x_1,\ldots,x_{t-1})\]</div>
+<p>符号 ∏ 表示“把一串数乘起来”。这叫<b>自回归分解</b>：预测当前位置时，以更早的位置为条件。模型是确定性的计算网络，随机性通常来自采样、训练中的随机操作以及某些硬件执行细节。</p>
+<h3>1.3 训练为什么知道正确答案？</h3>
+<p>训练语料已经包含整句话。例如序列是“〈开始〉 我 爱 数学 〈结束〉”。输入和监督目标错开一位：</p>
+<div class="tf-table-wrap">
+<table class="decision-table">
+<thead>
+<tr>
+<th>位置</th>
+<th>输入</th>
+<th>希望预测</th>
+<th>允许看到</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0</td>
+<td>〈开始〉</td>
+<td>我</td>
+<td>〈开始〉</td>
+</tr>
+<tr>
+<td>1</td>
+<td>我</td>
+<td>爱</td>
+<td>〈开始〉、我</td>
+</tr>
+<tr>
+<td>2</td>
+<td>爱</td>
+<td>数学</td>
+<td>〈开始〉、我、爱</td>
+</tr>
+<tr>
+<td>3</td>
+<td>数学</td>
+<td>〈结束〉</td>
+<td>前面全部与当前位置</td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>训练时一次就能准备所有位置的输入，所以多个位置可以一起计算。<b>因果遮罩</b>禁止每个位置偷看它右边的答案。给定正确历史来训练称为 teacher forcing。它解释了一个看似矛盾的现象：训练可以并行计算位置，而普通生成仍需要逐步得到未知的后续 token。</p>
+<h3>1.4 模型从哪里获得能力？</h3>
+<p>预测损失会推动参数学习语言、知识及任务中的规律。不过“以预测下一个 token 训练”只描述训练目标，不等于模型内部仅执行简单查表。为了把很长的上下文预测好，网络可能学到复杂的中间表征。训练后，指令微调、偏好优化等阶段还会改变回答行为；它们不应与 Transformer 的基本计算结构混为一谈。</p>
+<p>模型也不保证事实正确。一个上下文中很可能出现的续写，未必是经过外部验证的结论。对推理工程师而言，更直接的区分是：<b>模型前向给出 logits，解码策略决定选什么，服务系统决定何时算、如何存、在哪里算。</b>
+</p>
+<div class="callout">
+<b>面试表达。</b>“自回归”是概率分解和生成依赖，不是“必须用 RNN”。Transformer 用 causal attention 实现相应的依赖约束；已知整段输入时，各位置的前向仍可批量计算。</div>
+</div>
+<div class="tf-chapter" id="math">
+<h2>二、数学工具箱：向量、矩阵和函数到底在做什么</h2>
+<p class="tf-chapter-subtitle">不跳过点积、维度、转置、指数和导数。</p>
+<h3>2.1 向量：一串有顺序的数</h3>
+<p>向量 [2, −1, 3] 有三个分量，因此是三维。你可以把它当成三个旋钮的读数。在教学图里，我们偶尔把某一维命名为“偏动物”或“偏动作”，帮助理解；真实网络的单一维度通常没有这样干净、固定的人类含义，信息往往分布在很多维中。</p>
+<p>两个同形状向量可以逐项相加：[1,2]+[3,4]=[4,6]。乘一个数也逐项进行：0.2×[10,5]=[2,1]。逐元素相乘用 ⊙ 表示：[2,3]⊙[4,5]=[8,15]。<b>矩阵乘法与逐元素乘法是不同操作。</b>
+</p>
+<h3>2.2 点积：比较，也可以做加权求和</h3>
+<div class="math-block">\[q\cdot k=\sum_i q_i k_i=\lVert q\rVert\lVert k\rVert\cos\theta\]</div>
+<p>Σ 表示相加。比如 [1,2]·[3,4]=1×3+2×4=11。从几何上看，方向越一致，点积倾向越大；但长度也会影响结果。所以注意力中的点积<b>不是自动等于余弦相似度</b>，Q、K 也不必事先单位化。</p>
+<p>高中熟悉的 cos θ 把方向关系变成一个数。方向相反时 cos θ 为负，垂直时为零。真实高维空间无法直接画出，我们借二维投影理解运算，而不声称能画出全部语义空间。</p>
+<h3>2.3 矩阵：一次处理许多向量</h3>
+<p>设 X 有 S 行、D 列，每行是一枚 token 的向量；W 有 D 行、F 列。那么 Y=XW 有 S 行、F 列：</p>
+<div class="math-block">\[\underbrace{[S,D]}_X\;\underbrace{[D,F]}_W\longrightarrow\underbrace{[S,F]}_Y\]</div>
+<p class="tf-math-note">中间的 D 必须相等</p>
+<p>其中 yᵢⱼ=Σₖ xᵢₖwₖⱼ。W 的第 j 列规定怎样从输入各维读出一个新特征。它是一组可学习的“读取方向”。同一 W 会作用到所有 token，所以矩阵乘法可以把许多位置一起处理。</p>
+<p>
+<b>线性变换</b>是 xW；加上偏置 b 得到<b>仿射变换</b> xW+b。机器学习里经常都称为 Linear 层。若两个层中间没有非线性，(xW₁)W₂=x(W₁W₂)，多层仍可折叠成一个线性变换；非线性让网络能够表达更复杂的规则。</p>
+<h3>2.4 张量、转置和形状</h3>
+<p>张量可以先理解为带多个轴的数组。矩阵有两个轴；[B,S,D] 有批次、序列、通道三个轴。<b>形状是每个轴的长度，不是数字本身。</b>转置 Kᵀ 把行列互换。批量注意力一般只交换最后两个轴，不是把整个多维数组的所有轴倒过来。</p>
+<div class="tf-table-wrap">
+<table class="decision-table">
+<thead>
+<tr>
+<th>符号</th>
+<th>含义</th>
+<th>教学取值</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>B</td>
+<td>同时处理的序列数量</td>
+<td>1</td>
+</tr>
+<tr>
+<td>S / T</td>
+<td>本次输入长度 / 已缓存总上下文长度</td>
+<td>3 / 8192</td>
+</tr>
+<tr>
+<td>D</td>
+<td>模型隐藏宽度 d_model</td>
+<td>512 或 4096</td>
+</tr>
+<tr>
+<td>L</td>
+<td>Transformer 层数</td>
+<td>6 或 32</td>
+</tr>
+<tr>
+<td>Hq / Hkv</td>
+<td>Q 头数 / K、V 头数</td>
+<td>32 / 8</td>
+</tr>
+<tr>
+<td>dₕ</td>
+<td>单个注意力头的宽度</td>
+<td>128</td>
+</tr>
+<tr>
+<td>F</td>
+<td>FFN 中间宽度</td>
+<td>14336</td>
+</tr>
+<tr>
+<td>V</td>
+<td>词表大小；斜体 V 也可能指 value 张量，靠上下文区分</td>
+<td>32000</td>
+</tr>
+<tr>
+<td>b</td>
+<td>每个缓存元素占用的字节数</td>
+<td>BF16 为 2</td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>常见结构满足 D=Hq·dₕ，但不是所有新模型都如此。看代码时，应分别检查 hidden size、head dim、Q/KV 投影宽度，不能只凭一条经验公式猜。</p>
+<h3>2.5 指数、对数、导数：只需要抓住作用</h3>
+<p>指数 eˣ 始终为正，x 增加时增长很快。自然对数 ln 是它的逆运算：ln(eˣ)=x。对数把乘法变成加法，所以整句概率的连乘，可以变成各位置 log 概率的求和。这既便于优化，也避免非常小的概率直接连乘下溢。</p>
+<p>导数 f′(x) 描述“输入变动一点，输出大约变多少”。例如 f(x)=x²，x=3 附近输入增加 0.01，输出大约增加 2×3×0.01=0.06。复杂网络用<b>链式法则</b>把每一步的局部影响相乘、把多条路径的影响相加。这就是反向传播的核心；它不会在每个参数上反复试错运行整个网络。</p>
+<div class="callout">
+<b>一个通用读公式方法。</b>先问输入和输出的形状，再问是逐元素操作、归约操作还是矩阵乘法，最后才看符号的名字。softmax 是沿一个轴归约后归一化；Linear 是矩阵乘法；RMSNorm 是沿通道轴归约后逐元素缩放。</div>
+</div>
+<div class="tf-chapter" id="tokenizer">
+<h2>三、Tokenizer：文字如何变成模型能处理的编号</h2>
+<p class="tf-chapter-subtitle">BPE、Unigram、字节与词表，以及它们对推理成本的影响。</p>
+<h3>3.1 字符串不是模型的直接输入</h3>
+<p>计算图通常接收整数 token ID。一个典型过程是：原始文本 → 可选规范化 → 预切分 → 子词或字节编码 → 特殊 token 处理 → ID。不同 tokenizer 的处理顺序和细节可以不同，必须以模型随附的配置为准。</p>
+<p>“我喜欢 Transformer”可能被切成多个汉字和英文子词；具体切法不能靠肉眼保证。这里出现的 ID 都是教学编号。ID=42 不比 ID=7 “更大”或“更有意义”，编号只是词表索引，后续 embedding 才赋予它向量。</p>
+<h3>3.2 为什么不直接用完整单词？</h3>
+<p>完整单词词表会遇到没见过的词、词形变化、多语言、代码和标点。逐字符词表很小，但一句话会变得很长。子词方法在词表大小与序列长度间折中：常见片段可合并，少见片段可拆开。</p>
+<h3>3.3 手工做两轮 BPE</h3>
+<p>用一个没有空格与边界符的玩具语料：low 出现 5 次，lower 出现 2 次，new 出现 3 次。初始把词拆成字符，统计相邻对，频次按词频加权：</p>
+<div class="tf-table-wrap">
+<table class="decision-table">
+<thead>
+<tr>
+<th>相邻对</th>
+<th>频次</th>
+<th>解释</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>l o</td>
+<td>7</td>
+<td>low 的 5 次 + lower 的 2 次</td>
+</tr>
+<tr>
+<td>o w</td>
+<td>7</td>
+<td>同上</td>
+</tr>
+<tr>
+<td>n e、e w</td>
+<td>各 3</td>
+<td>来自 new</td>
+</tr>
+<tr>
+<td>w e、e r</td>
+<td>各 2</td>
+<td>来自 lower</td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>并列时按预定规则选 l+o→lo。下一轮 lo+w 仍出现 7 次，再合并为 low。此时语料表示为 low、low e r、n e w。总 token 数从 34 降到 20，词表则多了 lo 和 low 两个条目。生产 tokenizer 还会处理边界、字节映射、正则预切分等，此例只展示合并思想。</p>
+<p>
+<b>训练 tokenizer</b>时决定合并规则和词表；<b>使用 tokenizer</b>时按照已经学好的规则编码。常见 BPE 编码依赖合并优先级，不应笼统理解成“任意寻找最长词”。它通常也不是随着 Transformer 每次反向传播一起更新的那组参数。</p>
+<h3>3.4 三个经常混淆的名字</h3>
+<ul>
+<li>
+<b>BPE：</b>反复合并片段，得到子词词表和合并规则。</li>
+<li>
+<b>Unigram：</b>从较大的候选片段集合出发，用概率模型评估分词，逐步删减；编码可寻找高概率切分。它与 BPE 的训练策略不同。</li>
+<li>
+<b>SentencePiece：</b>处理子词训练与编码的工具系统，支持 BPE、Unigram 等方法；它不是某一种算法的同义词，也不要求所有语言先按空格分词。</li>
+</ul>
+<p>字节级方法或 byte fallback 可以让许多词表外文本仍能表示，但“能表示”不等于“只需一个 token”，也不等于“模型在训练中学得充分”。流式输出还可能暂时停在一个 UTF-8 字符的部分字节上，解码器需要正确缓冲。</p>
+<details>
+<summary>再深入一步：Unigram 怎样比较两种切法？</summary>
+<p>设玩具词表中 p(a)=0.35、p(b)=0.35、p(ab)=0.10，其他条目概率合计 0.20。字符串 ab 可以切成一枚 ab，也可以切成 a、b。这个简化子词模型把片段概率相乘：一枚的分数为 0.10，两枚的分数为 0.35×0.35=0.1225，因而后者更高。真实训练还需处理所有合法切分以及词表删减，不能把这个小例子当成完整训练过程。</p>
+<p>编码时可用动态规划避免穷举所有切法。令 best[i] 表示字符串前 i 个字符的最优 log 分数，则 best[i]=max_j{best[j]+ln p(片段 j:i)}，只考虑词表中存在的片段。记录取到最大值的前一个位置，再回溯即可得到切分。这里“用子词分布选择切法”与 Transformer “预测下一个 token 的分布”是两个层次，别混为一谈。</p>
+</details>
+<h3>3.5 为什么 AI Infra 必须关心 tokenizer？</h3>
+<p>同样一页文字，不同词表会得到不同 S。S 影响 prefill 计算、缓存、长上下文限制和计费。词表 V 越大，embedding 和输出投影也往往越大。较少 token 不一定让所有任务更快：词表输出成本、硬件、语言覆盖和模型质量都要一起看。</p>
+<p>对话通常先用 <b>chat template</b>把角色、分隔符、工具信息变成模型训练时习惯的格式，再编码。漏掉 generation prompt、重复添加 BOS、使用错误 EOS，都可能让正确权重输出异常。服务端与客户端各切一次、词表版本不同、文本规范化不同，也会导致 token 统计和缓存命中不一致。</p>
+<div class="callout">
+<b>排障第一问。</b>比较“文本看起来一样”不够。先比较应用 chat template 后的完整 token ID、特殊 token、attention mask、position IDs，再比较网络计算。词表固定后，增加一个新 token 还要为 embedding/输出头增加相应参数，并让模型学会使用它。</div>
+<p class="source">一手资料：<a href="https://huggingface.co/docs/tokenizers/main/en/components">Hugging Face Tokenizers 组件说明</a>；<a href="https://arxiv.org/abs/1808.06226">SentencePiece 论文</a>。本章 BPE 计数为独立构造的教学算例。</p>
+</div>
+<div class="tf-chapter" id="embedding">
+<h2>四、Embedding：编号怎样获得“可计算的含义”</h2>
+<p class="tf-chapter-subtitle">查表、可训练参数、上下文表示与输出权重共享。</p>
+<h3>4.1 一个二维表就够开始</h3>
+<p>假设词表有 V 个 token，每个用 D 个数表示。建立一个 V×D 的参数表 E。ID 为 i 的 token 就取第 i 行：</p>
+<div class="math-block">\[x=E[i]\in\mathbb R^D,\qquad X\in\mathbb R^{B\times S\times D}\]</div>
+<p>这叫 embedding lookup。它没有把“编号大小”直接当作语义。训练时，这张表也会随损失更新。两个 token 的向量可能因为经常出现在相似情境中而形成某些相似性，但具体相似性要通过训练和测量判断，不能把示意图中的距离当作实际模型结论。</p>
+<h3>4.2 与 one-hot 的关系</h3>
+<p>one-hot 是长度 V 的向量，只有目标位置为 1，其他位置全为 0。one_hot(i)E 恰好选出 E 的第 i 行。数学上等价，工程上直接查表，避免构造巨大且几乎全为零的数组。</p>
+<h3>4.3 一个 token 为什么会有不同“意思”？</h3>
+<p>词表 embedding 是静态起点。同一个 ID 初始查出的向量相同，但经过位置处理、attention 和 FFN 后，输出向量依赖上下文。“苹果”出现在“吃苹果”和“苹果发布电脑”里，可以被加工成不同的上下文表示。Transformer 的层层计算主要就在构造这样的表示。</p>
+<p>因此“embedding 就是模型全部语义”不准确。词表表格只负责输入的第一步；中间每一层的隐藏状态同样是向量，却已经融合了其他位置、层深和任务的信息。</p>
+<h3>4.4 输入与输出可以共享参数</h3>
+<p>最终隐藏向量 h 还要映射回词表分数。若共享输入 embedding，则 logits=hEᵀ。D 维向量与每个词表向量做点积，得到 V 个分数。共享可减少参数，但是否共享是模型的具体选择。</p>
+<div class="math-block">\[[B,S,D]\;[D,V]\longrightarrow[B,S,V]\]</div>
+<p>原始 Transformer 将输入 embedding 乘以 √D，再与位置编码相加。现代模型并不普遍照搬这个缩放；加载模型时必须遵循它自身的实现和配置。</p>
+<div class="callout">
+<b>工程连接。</b>当 V 很大，输出头的计算和 logits 临时内存都可能可观。普通生成往往只需最后一个输入位置的下一 token logits，不必为每个历史位置都物化完整词表分数。训练或需要各位置 logprob 时则另当别论。</div>
+<p class="source">设计出处：<a href="https://arxiv.org/abs/1706.03762">原始 Transformer，Embeddings and Softmax</a>。查表与 one-hot 的等价性为本教程的直接展开。</p>
+</div>
+<div class="tf-chapter" id="architecture">
+<h2>五、架构全景：原版 Transformer 与现代大模型</h2>
+<p class="tf-chapter-subtitle">Encoder、Decoder、cross-attention，以及两种容易混淆的“层”。</p>
+<h3>5.0 从 RNN 的传话链到 attention 的直接查询</h3>
+<p>先看一个简化循环网络：hₜ=tanh(xₜWₓ+hₜ₋₁Wₕ+b)。xₜ 是当前输入，hₜ 是读到这里的摘要，tanh 把数平滑地压到 −1 与 1 之间。要算 h₃，先得有 h₂；要有 h₂，又得先有 h₁。这种位置之间的串行依赖，不能靠把矩阵乘写得更快就消除。</p>
+<p>早期序列到序列模型常把源句压进固定大小的摘要，再让 Decoder 生成。句子长、信息多时，这条摘要通道可能成为瓶颈。Attention 允许 Decoder 针对当前需要，查询源句不同位置的表示；Transformer 再把“查询其他位置”用到序列内部，让 self-attention 成为主干，不依赖 RNN 的逐位置状态传递。</p>
+<p>代价也随之改变：原本按时间传话的依赖减少了，但稠密 attention 要比较许多位置对，长度增长时会遇到平方规模的工作。设计进步是换了一组更适合并行硬件、也有新瓶颈的取舍，并不是免费删除所有顺序和成本。</p>
+<h3>5.1 先认清原文画的是哪种模型</h3>
+<p>2017 年的 Transformer 面向机器翻译，包含 Encoder 与 Decoder。Encoder 读取源语言，输出一整排上下文向量；Decoder 一边读取已经知道的目标前缀，一边查询 Encoder 的输出，预测目标语言的下一 token。</p>
+<figure class="lab-frame" data-lab="architecture" aria-label="结构实验 · 沿信息流走一遍">
+<h3 class="lab-title">结构实验 · 沿信息流走一遍</h3>
+<div class="lab-controls">
+<div class="lab-control">
+<label class="control-heading" for="lab-architecture-variant">
+<span>架构</span>
+</label>
+<select id="lab-architecture-variant" data-key="variant">
+<option value="modern" selected>现代 Decoder 示例</option>
+<option value="original" >原版 Encoder–Decoder</option>
+</select>
+</div>
+<div class="lab-control">
+<label class="control-heading" for="lab-architecture-stage">
+<span>当前加工阶段</span>
+<output data-value="stage">0</output>
+</label>
+<input id="lab-architecture-stage" type="range" data-key="stage" min="0" max="5" step="1" value="0">
+</div>
+</div>
+<div class="lab-stage">
+<div class="architecture-flow">
+<div class="arch-node active">
+<span class="node-index">1</span>
+<span>Token IDs → Embedding</span>
+</div>
+<div class="arch-node ">
+<span class="node-index">2</span>
+<span>RMSNorm → Q/K/V + RoPE</span>
+</div>
+<div class="arch-node ">
+<span class="node-index">3</span>
+<span>Causal GQA → WO</span>
+</div>
+<div class="arch-node ">
+<span class="node-index">4</span>
+<span>残差相加</span>
+</div>
+<div class="arch-node ">
+<span class="node-index">5</span>
+<span>RMSNorm → SwiGLU → 残差</span>
+</div>
+<div class="arch-node ">
+<span class="node-index">6</span>
+<span>重复 L 层 → Final Norm → Logits</span>
+</div>
+</div>
+<p class="lab-detail" aria-live="polite">阶段 1 / 6 · ID 查表，得到 [B,S,D]。</p>
+</div>
+<figcaption class="lab-caption">结构示意；原版省略 dropout，现代路径选择 Pre-RMSNorm / RoPE / GQA / SwiGLU。</figcaption>
+</figure>
+<h3>5.2 Encoder 的一个 block</h3>
+<p>原版 Encoder block 有两个主要子层：self-attention 让源句的各位置交换信息；FFN 对每个位置进行相同形式的非线性加工。每个子层外有 residual 和 LayerNorm，原版的次序是 Post-Norm：</p>
+<div class="math-block">\[\begin{aligned}U&amp;=\operatorname{LayerNorm}(X+\operatorname{Attention}(X))\\Y&amp;=\operatorname{LayerNorm}(U+\operatorname{FFN}(U))\end{aligned}\]</div>
+<p>这里暂略训练时的 dropout。原版 base 配置堆叠 6 个 Encoder block，D=512、8 个注意力头、FFN 宽度 2048。<b>结构相同不代表各层参数共享。</b>同一层的 FFN 在不同 token 位置共享参数，也不等于不同层之间共用一套 FFN。</p>
+<h3>5.3 Decoder 为什么多一个 attention？</h3>
+<p>原版 Decoder 有三种主要加工：① causal self-attention，看已知目标前缀；② cross-attention，查询 Encoder 输出；③ FFN。Cross-attention 中 Q 来自 Decoder，K、V 来自 Encoder，因而它的分数矩阵可为“目标长度 × 源长度”的长方形。</p>
+<p>Encoder 通常允许源序列内部双向关注；Decoder 的 self-attention 禁止看到未来的目标 token。Cross-attention 可以看完整源句，因为源句本来就是已知条件。padding mask 仍需排除无效位置。</p>
+<h3>5.4 今天常见的三类架构</h3>
+<div class="tf-table-wrap">
+<table class="decision-table">
+<thead>
+<tr>
+<th>架构</th>
+<th>典型信息可见性</th>
+<th>常见用途</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Encoder-only</td>
+<td>输入序列内部双向交互</td>
+<td>理解、检索表征、分类；BERT 是代表</td>
+</tr>
+<tr>
+<td>Decoder-only</td>
+<td>因果地读取一个序列前缀</td>
+<td>自回归生成；许多 GPT / Llama 类模型</td>
+</tr>
+<tr>
+<td>Encoder–Decoder</td>
+<td>编码输入，再条件式生成输出</td>
+<td>翻译、摘要、其他序列到序列任务</td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>“Decoder-only”不表示把原版右半边原样保留：常见实现通常没有原版的 encoder cross-attention，还会调整位置编码、归一化、激活和注意力头设计。多模态或特定任务模型也可能重新加入 cross-attention 等机制。</p>
+<h3>5.5 一层的宽度与整个模型的深度</h3>
+<p>增加 D，类似让每个位置能携带更多通道；增加 L，类似增加更多轮加工。宽度与深度都影响容量、训练和运行成本。堆叠并不是机械地重复同一函数，因为每层通常有不同参数，输入表示也在变化。</p>
+<div class="callout">
+<b>原文阅读时纠正三点。</b>Attention 不要求当前位置的权重最大；Q/K/V 的投影参数不是按 token 位置各配一套；每个位置的 FFN 相互独立计算，但通常共享同一组层参数。它们分别涉及“学到的权重分布”“参数共享”“位置间数据依赖”，是不同问题。</div>
+<p class="source">结构依据：<a href="https://arxiv.org/abs/1706.03762">Attention Is All You Need</a>；Encoder 代表：<a href="https://arxiv.org/abs/1810.04805">BERT</a>；现代 Decoder 实例：<a href="https://arxiv.org/abs/2407.21783">The Llama 3 Herd of Models</a>。</p>
+</div>
+<div class="tf-chapter" id="attention">
+<h2>六、注意力：从三枚向量手算到矩阵公式</h2>
+<p class="tf-chapter-subtitle">Q、K、V，缩放、softmax、mask 和加权求和。</p>
+<h3>6.1 先问“从哪里拿什么信息”</h3>
+<p>处理“动物没过马路，因为它太累了”时，“它”的表示可以从“动物”等位置吸收信息。一个便于入门的比喻是：Q 表示当前位置提出的查询，K 表示其他位置可供匹配的索引，V 表示匹配后取回的内容。这是运算角色的比喻，不是说模型真的构造了一份人类可读的问题和索引。</p>
+<div class="math-block">\[Q=XW_Q,\qquad K=XW_K,\qquad V=XW_V\]</div>
+<p>WQ、WK、WV 是训练得到的矩阵；同一层同一头内，不同位置共享这些矩阵。Q、K、V 则是随输入变化的激活。为什么分三路？“适合被匹配的特征”和“值得传递的内容”可以不同；查询者与被查询者也可以使用不同的读出方式。</p>
+<h3>6.2 三枚 token，六步算完</h3>
+<p>为了手算，直接指定一个头的投影结果。当前 query 为 q=[1,1]，三个 key 是 k₁=[1,0]、k₂=[0,1]、k₃=[1,1]；三个 value 是 v₁=[1,0]、v₂=[0,2]、v₃=[3,1]。这些数为教学构造，没有预设真实语义。</p>
+<ol>
+<li>
+<b>打分：</b>q 与三个 k 点积，得到 [1,1,2]。</li>
+<li>
+<b>缩放：</b>dₖ=2，除以 √2，得到 [0.7071,0.7071,1.4142]。</li>
+<li>
+<b>加遮罩：</b>此例允许看全部三个位置，分数不变。不可见位置则加 −∞。</li>
+<li>
+<b>指数化：</b>把允许位置的分数变成正数。数值实现先减去本行最大分数。</li>
+<li>
+<b>归一化：</b>除以本行指数之和，得到约 [0.2483,0.2483,0.5035]。</li>
+<li>
+<b>混合内容：</b>z=0.2483v₁+0.2483v₂+0.5035v₃≈[1.7587,1.0000]。</li>
+</ol>
+<figure class="lab-frame" data-lab="attention" aria-label="注意力实验 · 改变查询，观察内容混合">
+<h3 class="lab-title">注意力实验 · 改变查询，观察内容混合</h3>
+<div class="lab-controls">
+<div class="lab-control">
+<label class="control-heading" for="lab-attention-qx">
+<span>Query 的第 1 维</span>
+<output data-value="qx">1</output>
+</label>
+<input id="lab-attention-qx" type="range" data-key="qx" min="-2" max="2" step="0.1" value="1">
+</div>
+<div class="lab-control">
+<label class="control-heading" for="lab-attention-qy">
+<span>Query 的第 2 维</span>
+<output data-value="qy">1</output>
+</label>
+<input id="lab-attention-qy" type="range" data-key="qy" min="-2" max="2" step="0.1" value="1">
+</div>
+<div class="lab-control">
+<label class="control-heading" for="lab-attention-temp">
+<span>教学温度 τ</span>
+<output data-value="temp">1</output>
+</label>
+<input id="lab-attention-temp" type="range" data-key="temp" min="0.25" max="2" step="0.05" value="1">
+</div>
+<div class="lab-control">
+<label class="control-heading" for="lab-attention-position">
+<span>Query 的序列位置</span>
+</label>
+<select id="lab-attention-position" data-key="position">
+<option value="0" >位置 0</option>
+<option value="1" >位置 1</option>
+<option value="2" selected>位置 2</option>
+</select>
+</div>
+<label class="check-control">
+<input type="checkbox" data-key="causal" >
+<span>使用因果遮罩</span>
+</label>
+</div>
+<div class="lab-stage">
+<div class="lab-split">
+<div>
+<h4>Q / K 的二维坐标（无量纲）</h4>
+<svg class="lab-plot" viewBox="0 0 840 720" role="img" aria-label="Query 与三枚 Key 的二维向量">
+<title>Query 与三枚 Key 的二维向量</title>
+<g transform="scale(3)">
+<line x1="18" y1="120" x2="262" y2="120" class="tf-stroke-line"/>
+<line x1="140" y1="15" x2="140" y2="225" class="tf-stroke-line"/>
+<text x="258" y="140">x</text>
+<text x="148" y="20">y</text>
+<text x="145" y="137">0</text>
+<line x1="140" y1="120" x2="186" y2="120" class="tf-stroke-secondary-ink" stroke-width="1.5"/>
+<circle cx="186" cy="120" r="3" class="tf-fill-secondary-ink"/>
+<text x="194" y="112" class="tf-fill-ink">K₁</text>
+<line x1="140" y1="120" x2="140" y2="74" class="tf-stroke-secondary-ink" stroke-width="1.5"/>
+<circle cx="140" cy="74" r="3" class="tf-fill-secondary-ink"/>
+<text x="148" y="66" class="tf-fill-ink">K₂</text>
+<line x1="140" y1="120" x2="186" y2="74" class="tf-stroke-secondary-ink" stroke-width="1.5"/>
+<circle cx="186" cy="74" r="3" class="tf-fill-secondary-ink"/>
+<text x="194" y="66" class="tf-fill-ink">K₃</text>
+<line x1="140" y1="120" x2="186" y2="74" class="tf-stroke-viz" stroke-width="3"/>
+<circle cx="186" cy="74" r="4" class="tf-fill-viz"/>
+<text x="194" y="92" class="tf-fill-ink">Q</text>
+</g>
+</svg>
+<div class="legend">
+<span class="swatch">
+</span>Q：当前查询 <span class="swatch muted">
+</span>K：候选索引</div>
+</div>
+<div>
+<h4>沿 key 轴归一化的权重</h4>
+<table class="lab-table">
+<thead>
+<tr>
+<th>Key</th>
+<th>点积</th>
+<th>权重</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>K1</td>
+<td>1.00</td>
+<td>
+<b>24.83%</b>
+<div class="bar-track">
+<div style="width:24.825507825772313%" class="bar-fill">
+</div>
+</div>
+</td>
+</tr>
+<tr>
+<td>K2</td>
+<td>1.00</td>
+<td>
+<b>24.83%</b>
+<div class="bar-track">
+<div style="width:24.825507825772313%" class="bar-fill">
+</div>
+</div>
+</td>
+</tr>
+<tr>
+<td>K3</td>
+<td>2.00</td>
+<td>
+<b>50.35%</b>
+<div class="bar-track">
+<div style="width:50.34898434845538%" class="bar-fill">
+</div>
+</div>
+</td>
+</tr>
+</tbody>
+</table>
+<div class="lab-result" aria-live="polite">输出 z = [1.7587, 1.0000]</div>
+<p class="lab-detail">最大权重位置：K3；权重和 1.0000</p>
+</div>
+</div>
+</div>
+<figcaption class="lab-caption">独立教学数据：K=[(1,0),(0,1),(1,1)]；V=[(1,0),(0,2),(3,1)]。分数除以 √2，再除教学温度。</figcaption>
+</figure>
+<p>拖动 q 的两个分量，观察同一组 K、V 下的检索结果如何变化；打开 causal mask 并选更早的 query 位置，观察右侧位置的权重如何归零。实验中的“温度”用来观察分布锐度，默认 1；普通注意力的标准定义不额外要求这样一个可调温度。</p>
+<h3>6.3 softmax 到底是什么？</h3>
+<div class="math-block">\[\begin{aligned}a_j&amp;=\frac{\exp(s_j)}{\sum_r\exp(s_r)}\\&amp;=\frac{\exp(s_j-m)}{\sum_r\exp(s_r-m)},\qquad m=\max_r s_r\end{aligned}\]</div>
+<p>只看未遮住的元素，指数为正，权重和为 1。指数放大分数差异，分母把总量归一化。所有分数一起加常数，结果不变，因为共同的指数因子会约掉。因此减最大值既不改变数学结果，又能避免 exp(1000) 之类的溢出。</p>
+<p>softmax 的导数为 ∂aᵢ/∂sⱼ=aᵢ(δᵢⱼ−aⱼ)，其中 δᵢⱼ 在 i=j 时为 1，否则为 0。当某个权重接近 1、其他接近 0 时，很多导数接近 0，分布变得饱和。它并非完全无法学习，但优化容易变得困难。</p>
+<h3>6.4 为什么除以 √dₖ，而不是 dₖ？</h3>
+<p>先作一个简化假设：qᵢ 与 kᵢ 彼此独立、均值为 0、方差为 1，不同维之间也足够独立。单项 qᵢkᵢ 的方差约为 1，dₖ 项相加的方差约为 dₖ，所以点积的标准差约为 √dₖ。除以 √dₖ 后，分数的典型尺度不再随维度按这个规律变大。</p>
+<p>这缓解高维点积让 softmax 过早饱和的问题。它是基于统计尺度的设计动机，不是声称训练后每个分量永远服从独立标准正态分布。原文 dₖ=64 时除以 8，8 来自 √64，不是魔法常数。</p>
+<h3>6.5 一行变成整张矩阵</h3>
+<div class="math-block">\[\operatorname{Attention}(Q,K,V)=\underbrace{\operatorname{softmax}\!\left(\frac{QK^{\mathsf T}}{\sqrt{d_k}}+M\right)}_{\text{沿 key 轴归一化}}V\]</div>
+<div class="tf-table-wrap">
+<table class="decision-table">
+<thead>
+<tr>
+<th>步骤</th>
+<th>单头形状</th>
+<th>轴的意义</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Q、K、V</td>
+<td>[S,dₖ]、[T,dₖ]、[T,dᵥ]</td>
+<td>S 个 query，T 个可检索位置</td>
+</tr>
+<tr>
+<td>QKᵀ</td>
+<td>[S,T]</td>
+<td>第 i 行：query i 给所有 key 打分</td>
+</tr>
+<tr>
+<td>softmax</td>
+<td>[S,T]</td>
+<td>每行沿 T 归一化</td>
+</tr>
+<tr>
+<td>乘 V</td>
+<td>[S,dᵥ]</td>
+<td>每个 query 得到一份内容混合</td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>self-attention 的 Q/K/V 来自同一序列；cross-attention 的 Q 与 K/V 可来自不同序列。普通训练 self-attention 常有 S=T；缓存解码常有 S=1、T 很大。</p>
+<h3>6.6 因果遮罩不是乘一个 0</h3>
+<p>对方阵、从 0 开始编号时，可见条件是 j≤i。允许位置的 Mᵢⱼ=0，禁止位置为 −∞。因为 exp(−∞)=0，未来位置才真正不占归一化分母。如果先把禁止位置的原始 score 乘 0，exp(0)=1，它们反而仍会分走概率。</p>
+<p>padding mask 处理无效位置；causal mask 处理时间可见性。二者可组合。若整行都被遮住，数学分布没有定义，朴素实现可能得到 NaN。生产算子需要明确处理约定，输入组织也应避免把无效 query 当作有效结果使用。</p>
+<div class="callout">
+<b>几条必须说准确的话。</b>注意力矩阵通常不对称；行和为 1 不代表列和为 1；V 可以包含负数，所以输出不是“每维概率”；关注自己不保证得分最高；单头的加权和有凸组合性质，但后续输出投影、残差和其他头会进一步改变表示。注意力权重也不等同于完整因果解释。</div>
+<p class="source">定义与缩放动机：<a href="https://arxiv.org/abs/1706.03762">Scaled Dot-Product Attention</a>。数值算例、softmax 变换和方差展开由本教程独立推导。</p>
+</div>
+<div class="tf-chapter" id="heads">
+<h2>七、多头注意力：多条检索通道如何拼起来</h2>
+<p class="tf-chapter-subtitle">head、reshape、输出投影，以及 MHA、MQA、GQA 的准确区别。</p>
+<h3>7.1 为什么只做一次混合还不够？</h3>
+<p>一个头给每个 query 产生一组位置权重。若一类信息需要关注主语，另一类信息需要关注局部搭配，把它们强行放进同一份加权分布，表达上可能受限。多个头分别投影、分别匹配、分别混合，让网络有多条并行通道。</p>
+<p>这是能力上的直觉，不是对某个头强制分配“语法专家”“指代专家”的标签。头的行为由训练形成，可能重叠，也可能难以用一句话解释。</p>
+<div class="math-block">\[\begin{aligned}\operatorname{head}_i&amp;=\operatorname{Attention}(XW_{Q,i},XW_{K,i},XW_{V,i})\\\operatorname{MHA}(X)&amp;=\operatorname{Concat}(\operatorname{head}_1,\ldots,\operatorname{head}_H)W_O\end{aligned}\]</div>
+<h3>7.2 concat 后为什么还有 WO？</h3>
+<p>Concat 只把向量首尾连接起来，没有让不同头互相加工。WO 则学习怎样重新组合各头的输出，并映射回残差流的宽度 D。若只把所有头直接相加，通常会丢掉“来自哪个头”的可分辨通道结构；多头拼接再投影更加灵活。</p>
+<h3>7.3 真实代码怎样得到多个头？</h3>
+<p>以 D=512、H=8、dₕ=64 为例：X[B,S,512] 乘 WQ[512,512] 后得到 Q[B,S,512]。接着拆开最后一个轴，得到 [B,S,8,64]，再交换轴得到 [B,8,S,64]，方便进行逐头矩阵乘法。</p>
+<div class="math-block">\[\begin{aligned}[B,S,D]&amp;\longrightarrow[B,S,H,d_h]\longrightarrow[B,H,S,d_h]\\{}[B,H,S,T]&amp;\longrightarrow[B,H,S,d_v]\longrightarrow\text{合并头}\end{aligned}\]</div>
+<p>拆轴只是解释数据布局，不等于所有头共享同一个小投影。大 WQ 的不同列组对应不同头的参数。工程上可把 Q/K/V 三路拼成一次较大的投影，减少启动次数与部分输入读取；并非保证每种尺寸都更快。</p>
+<p>transpose 有时只改变 stride，数据并未真正重新排列。后续 view 若假设内存连续，就可能出错，或需要额外搬运。框架工程师要同时看<b>逻辑形状、物理布局、stride、算子的布局要求</b>。</p>
+<h3>7.4 从 MHA 到 MQA、GQA</h3>
+<div class="tf-table-wrap">
+<table class="decision-table">
+<thead>
+<tr>
+<th>方案</th>
+<th>Q 头数</th>
+<th>KV 头数</th>
+<th>共享方式</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>MHA</td>
+<td>Hq</td>
+<td>Hq</td>
+<td>每个 Q 头配独立 K/V 头</td>
+</tr>
+<tr>
+<td>MQA</td>
+<td>Hq</td>
+<td>1</td>
+<td>所有 Q 头共享一组 K/V</td>
+</tr>
+<tr>
+<td>GQA</td>
+<td>Hq</td>
+<td>Hkv，介于两者之间</td>
+<td>每组 Q 头共享一组 K/V</td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>例如 Hq=32、Hkv=8，每 4 个 query 头共享一组 key/value。Q 仍可有 32 份位置权重，因而 attention 核心点积的头数没有简单降到 8；减少的是 K/V 投影宽度、缓存大小，以及在合适内核中的 KV 数据读取。质量与成本需要模型训练和运行实现共同权衡。</p>
+<p>假定 Q 宽度为 Hq·dₕ，KV 宽度为 Hkv·dₕ，则 WQ 为 [D,Hq·dₕ]，WK、WV 为 [D,Hkv·dₕ]。在 D=Hq·dₕ、各头 V 同宽时，attention 投影参数量约为 2D²+2D·Hkv·dₕ，暂略偏置。</p>
+<div class="callout">
+<b>常见追问。</b>“我把 KV repeat 到 Hq 个头是不是就实现 GQA 了？”数学参考实现可以这样写，但若把完整重复结果存回长上下文缓存，会损失缓存节省；若每步物化扩展，也增加临时内存与带宽。生产内核应直接复用原始 KV 分组。训练好的普通 MHA 模型通常不能只改配置头数就无损变成 GQA。</div>
+<p class="source">MQA：<a href="https://arxiv.org/abs/1911.02150">Fast Transformer Decoding</a>；GQA：<a href="https://arxiv.org/abs/2305.13245">Training Generalized Multi-Query Transformer Models</a>。</p>
+<p class="tf-related">继续阅读：<a href="attention-mechanism-evolution-mha-mqa-gqa-mla.html">MHA、MQA、GQA、MLA 的结构性权衡</a>。</p>
+</div>
+<div class="tf-chapter" id="position">
+<h2>八、位置：从正弦波到 RoPE 的旋转几何</h2>
+<p class="tf-chapter-subtitle">顺序为什么需要单独处理，相对位置怎样进入点积。</p>
+<h3>8.1 没有位置信息会怎样？</h3>
+<p>单看没有位置项、没有因果遮罩的 self-attention，如果把输入行重新排列，输出也只是相应重新排列，这叫<b>置换等变</b>。模型很难仅凭这套机制区分“狗咬人”和“人咬狗”的次序。因果遮罩确实破坏了一部分这种对称性，但不能把它直接当成通用位置编码的等价替代。</p>
+<h3>8.2 原版：在输入里加入多种频率的波</h3>
+<div class="math-block">\[\begin{aligned}\operatorname{PE}(p,2i)&amp;=\sin\!\left(\frac{p}{10000^{2i/D}}\right)\\\operatorname{PE}(p,2i+1)&amp;=\cos\!\left(\frac{p}{10000^{2i/D}}\right)\end{aligned}\]</div>
+<p>p 是位置，i 是一对通道的编号。有的波转得快，适合区分近邻；有的波转得慢，提供较大尺度的变化。把多组钟表的读数组合起来，位置就有了一串连续的数值特征。原版把 PE 与 token embedding 相加；学习式绝对位置表则直接为每个位置学习向量。</p>
+<p>三角函数的和角公式让“挪动一定距离后的波”可以由原来的 sin/cos 线性组合表达，给相对偏移提供了可利用的结构。但这不意味着模型天然拥有无限长度的可靠推理能力。</p>
+<h3>8.3 RoPE：不往输入加位置，给 Q/K 转一个角度</h3>
+<p>在一个二维通道平面上，把向量旋转 φ，可以写成：</p>
+<div class="math-block">\[R(\phi)\begin{bmatrix}a\\b\end{bmatrix}=\begin{bmatrix}a\cos\phi-b\sin\phi\\a\sin\phi+b\cos\phi\end{bmatrix}\]</div>
+<p>RoPE 把头向量的通道配成若干二维平面，第 i 对在位置 p 旋转 p·θᵢ。不同平面使用不同频率。常见形式 θᵢ=base^(−2i/d_rot)，但 base、旋转维度、是否只旋转部分通道，都由具体模型决定。</p>
+<div class="math-block">\[\begin{aligned}q_m^{\prime}&amp;=R(m\theta)q_m,\quad k_n^{\prime}=R(n\theta)k_n\\(q_m^{\prime})^{\mathsf T}k_n^{\prime}&amp;=q_m^{\mathsf T}R((n-m)\theta)k_n\end{aligned}\]</div>
+<p>关键巧思在最后一行：旋转后的点积自然包含位置差 n−m。推导只需用旋转矩阵的两个性质：R(φ)ᵀ=R(−φ)，R(a)R(b)=R(a+b)。左边两次绝对旋转，在内积中合成了相对旋转。</p>
+<figure class="lab-frame" data-lab="rope" aria-label="RoPE 实验 · 同时平移，相对关系不变">
+<h3 class="lab-title">RoPE 实验 · 同时平移，相对关系不变</h3>
+<div class="lab-controls">
+<div class="lab-control">
+<label class="control-heading" for="lab-rope-m">
+<span>Query 位置 m</span>
+<output data-value="m">2</output>
+</label>
+<input id="lab-rope-m" type="range" data-key="m" min="0" max="12" step="1" value="2">
+</div>
+<div class="lab-control">
+<label class="control-heading" for="lab-rope-n">
+<span>Key 位置 n</span>
+<output data-value="n">5</output>
+</label>
+<input id="lab-rope-n" type="range" data-key="n" min="0" max="12" step="1" value="5">
+</div>
+<div class="lab-control">
+<label class="control-heading" for="lab-rope-shift">
+<span>共同位置平移 Δ</span>
+<output data-value="shift">0</output>
+</label>
+<input id="lab-rope-shift" type="range" data-key="shift" min="0" max="20" step="1" value="0">
+</div>
+</div>
+<div class="lab-stage">
+<div class="lab-split">
+<div>
+<svg class="lab-plot" viewBox="0 0 840 720" role="img" aria-label="固定内容向量经位置旋转后的 Q 和 K">
+<title>固定内容向量经位置旋转后的 Q 和 K</title>
+<g transform="scale(3)">
+<line x1="18" y1="120" x2="262" y2="120" class="tf-stroke-line"/>
+<line x1="140" y1="15" x2="140" y2="225" class="tf-stroke-line"/>
+<text x="258" y="140">x</text>
+<text x="148" y="20">y</text>
+<text x="145" y="137">0</text>
+<circle cx="140" cy="120" r="46" fill="none" class="tf-stroke-line"/>
+<line x1="140" y1="120" x2="175.18274061508646" y2="90.36598638706622" class="tf-stroke-viz" stroke-width="3"/>
+<circle cx="175.18274061508646" cy="90.36598638706622" r="4" class="tf-fill-viz"/>
+<text x="183.18274061508646" y="82.36598638706622" class="tf-fill-ink">Q′</text>
+<line x1="140" y1="120" x2="107.67519846841653" y2="87.27222577162115" class="tf-stroke-secondary-ink" stroke-width="1.5"/>
+<circle cx="107.67519846841653" cy="87.27222577162115" r="3" class="tf-fill-secondary-ink"/>
+<text x="115.67519846841653" y="105.27222577162115" class="tf-fill-ink">K′</text>
+</g>
+</svg>
+<div class="legend">
+<span class="swatch">
+</span>旋转后 Q <span class="swatch muted">
+</span>旋转后 K</div>
+</div>
+<div>
+<h4>相对位置与内积</h4>
+<dl class="lab-numbers">
+<div>
+<dt>实际位置 (m+Δ, n+Δ)</dt>
+<dd>(2, 5)</dd>
+</div>
+<div>
+<dt>位置差 n−m</dt>
+<dd>3</dd>
+</div>
+<div>
+<dt>旋转后点积（无量纲）</dt>
+<dd>-0.079121</dd>
+</div>
+</dl>
+<p class="lab-detail" aria-live="polite">只改共同平移 Δ，点积仍为 -0.079121。</p>
+</div>
+</div>
+</div>
+<figcaption class="lab-caption">只展示一个二维平面，θ=0.35 rad/位置。内容 q=(1,0)，k=(cos0.6,sin0.6) 固定。</figcaption>
+</figure>
+<p>实验固定两枚内容向量，仅改变位置。一起平移 m 与 n，点积保持不变；只移动一边，点积改变。这展示的是<b>位置机制的代数性质</b>。真实网络里内容向量还依赖上下文，因此不能推断任意两段语境中“距离相同就必有相同 attention”。</p>
+<h3>8.4 为什么一般旋转 Q/K，不旋转 V？</h3>
+<p>上述机制的目的，是让“匹配分数”携带相对位置。V 是要取回并混合的内容，不需要为这个目的做同样旋转。具体变体可能不同，但看到“给 embedding 加位置”“旋转 Q/K”“对分数加偏置”时，应辨认它们插在计算图的哪个位置。</p>
+<h3>8.5 ALiBi、插值与长上下文</h3>
+<p>ALiBi 在注意力分数里加入与位置距离相关的线性偏置，常用不同头的斜率控制距离惩罚。位置插值、频率缩放、YaRN 等方法试图让较长位置落到模型更能利用的范围。它们的具体训练与缩放安排不同，不能合并成“把 max length 改大”。</p>
+<p>长上下文至少有三个门槛：位置机制是否合适、模型是否在相关长度上训练或适配、计算与缓存资源是否足够。“程序能接收 100 万 token”与“能够稳定利用其中的远处信息”不是同一指标。</p>
+<div class="callout">
+<b>缓存相关错误。</b>缓存 K 通常已经过正确绝对位置的 RoPE；后续不要再次旋转。chunked prefill、decode、prefix reuse 要使用一致的 position IDs 和频率配置。左 padding 的数组下标不一定就是有效 token 的位置。长位置的 sin/cos 计算和中间精度也要检查。不同的通道配对布局可以等价，但必须与权重、实现保持一致。</div>
+<p class="source">位置旋转：<a href="https://arxiv.org/abs/2104.09864">RoFormer</a>；分数偏置：<a href="https://arxiv.org/abs/2108.12409">ALiBi</a>；长度扩展：<a href="https://arxiv.org/abs/2309.00071">YaRN</a>。</p>
+<p class="tf-related">继续阅读：<a href="rope-rotary-position-embedding.html">RoPE 的二维旋转、复数与长上下文推导</a>。</p>
+</div>
+<div class="tf-chapter" id="norm">
+<h2>九、Residual 与 Norm：让许多层能稳定合作</h2>
+<p class="tf-chapter-subtitle">恒等路径、LayerNorm、RMSNorm、Pre-Norm 和 Post-Norm。</p>
+<h3>9.1 残差：每一层学一次“修正”</h3>
+<div class="math-block">\[y=x+F(x)\]</div>
+<p>如果你要修改一份已经可用的草稿，直接给出改动量，可能比每次从零重写更容易。Residual 让子层输出与原来的表示相加；当 F(x) 很小，输出仍保留 x。它要求相加两路的形状兼容，所以 attention/FFN 最后通常投影回 D。</p>
+<p>从导数看，∂y/∂x=I+J_F。I 是“原样传递”的路径，梯度不必只通过复杂子层。这有助于深层优化，但不保证网络永远没有梯度爆炸或训练不稳定；初始化、归一化与训练设置仍然重要。</p>
+<h3>9.2 LayerNorm：在一枚 token 的通道里校准尺度</h3>
+<div class="math-block">\[\begin{aligned}\mu&amp;=\frac1D\sum_i x_i,\qquad\sigma^2=\frac1D\sum_i(x_i-\mu)^2\\\operatorname{LN}(x)_i&amp;=\gamma_i\frac{x_i-\mu}{\sqrt{\sigma^2+\epsilon}}+\beta_i\end{aligned}\]</div>
+<p>μ 是平均值，σ² 是方差，ε 是避免分母为零的小正数。γ、β 是可学习的逐通道缩放与平移。这里的标准差来自 D 个通道，<b>不是来自批次中其他句子，也不是沿序列位置求平均</b>，这与常见 BatchNorm 的用法不同。</p>
+<p>手算 x=[1,2,3]，平均值为 2，方差为 2/3。忽略 ε，取 γ=1、β=0，得到 [−1.2247,0,1.2247]。实际学到 γ、β 后，输出不必继续保持均值 0、方差 1。</p>
+<h3>9.3 RMSNorm：保留均值，只用均方根缩放</h3>
+<div class="math-block">\[\begin{aligned}\operatorname{RMS}(x)&amp;=\sqrt{\frac1D\sum_i x_i^2+\epsilon}\\\operatorname{RMSNorm}(x)_i&amp;=\gamma_i\frac{x_i}{\operatorname{RMS}(x)}\end{aligned}\]</div>
+<p>同样的 [1,2,3]，均方根约为 2.1602，缩放后约 [0.4629,0.9258,1.3887]。没有减平均值，所以不是零均值。常见实现也没有 β，但具体变体应看模型定义。</p>
+<p>RMSNorm 简化了归约与算术，在不少现代模型中成为常见选择。不能把它解释成“数学上严格优于 LayerNorm”；归一化方式是训练设计的一部分，不能在已训练权重中随意替换，指望输出不变。</p>
+<h3>9.4 Pre-Norm 与 Post-Norm</h3>
+<div class="tf-table-wrap">
+<table class="decision-table">
+<thead>
+<tr>
+<th>安排</th>
+<th>子层表达式</th>
+<th>理解</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Post-Norm</td>
+<td>y=Norm(x+F(x))</td>
+<td>相加后再校准；原版 Transformer 的安排</td>
+</tr>
+<tr>
+<td>Pre-Norm</td>
+<td>y=x+F(Norm(x))</td>
+<td>先规范化送入子层的输入；残差主干更直接</td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>Pre-Norm 在许多深层结构中有利于训练稳定性，常配合栈末尾的 final norm。但“用了 Norm”与“用了哪种 Norm”“放在什么位置”是三个独立问题。实际模型还可能有额外缩放、Q/K norm、并行残差分支或其他稳定化设计。</p>
+<h3>9.5 推理时为什么 Norm 也能成为热点？</h3>
+<p>Norm 的加乘次数不算多，却需要读取向量、做归约、再写回。小 batch 下算子启动和访存可能占显著比例。把 residual add、RMSNorm、量化等相邻操作融合，可减少中间读写和启动。</p>
+<p>低精度输入不代表归约也应全用低精度。平方求和通常需要较高精度累加，避免范围与舍入问题。把 Norm 当成 softmax 也不对：Norm 调节特征尺度，不会把各通道变成和为 1 的概率。</p>
+<div class="callout">
+<b>面试可画的两条线。</b>画一条贯穿很多 block 的残差主干，再从每个位置画出 Norm→Attention 或 Norm→FFN 的支路。这个图同时解释了训练稳定性的直觉、同形状相加的要求，以及 residual/norm 融合的执行机会。</div>
+<p class="source">RMSNorm：<a href="https://arxiv.org/abs/1910.07467">Root Mean Square Layer Normalization</a>；归一化次序分析：<a href="https://arxiv.org/abs/2002.04745">On Layer Normalization in the Transformer Architecture</a>。</p>
+</div>
+<div class="tf-chapter" id="ffn">
+<h2>十、FFN 与激活函数：每个位置内部怎样加工信息</h2>
+<p class="tf-chapter-subtitle">ReLU、GELU、SiLU、GLU、SwiGLU，逐步解释门控的巧思。</p>
+<h3>10.1 Attention 交换信息，FFN 组合特征</h3>
+<p>这是一种方便理解的分工：attention 在位置之间路由信息，FFN 在每个位置的通道之间进行非线性加工。两者共同工作，不能把“所有知识都存在 FFN”“attention 只负责语法”等说法当成严格定理。</p>
+<div class="math-block">\[\begin{aligned}\operatorname{FFN}(x)&amp;=\phi(xW_1+b_1)W_2+b_2\\{}[D]&amp;\longrightarrow[F]\longrightarrow[D]\end{aligned}\]</div>
+<p>先升到 F 个中间特征，再用激活 φ 进行非线性变换，最后压回 D。原版常取 F=4D。一个 block 内，不同 token 都用相同的 W₁、W₂；它们可以一起算，但 FFN 本身不直接跨位置混合。</p>
+<h3>10.2 Sigmoid：把数压到 0 与 1 之间</h3>
+<div class="math-block">\[\sigma(x)=\frac1{1+e^{-x}},\qquad\sigma^{\prime}(x)=\sigma(x)(1-\sigma(x))\]</div>
+<p>x 很大时接近 1，很小时接近 0，x=0 时为 0.5。它适合作为一种“门”的系数。两端趋于平坦，导数变小。注意：Sigmoid 逐元素处理，不要求不同元素之和为 1；softmax 把一组分数关联起来进行归一化。</p>
+<h3>10.3 ReLU：最简单的开关</h3>
+<div class="math-block">\[\operatorname{ReLU}(x)=\max(0,x)\]</div>
+<p>正输入保留，负输入归零。正半轴导数为 1，负半轴为 0；0 点不可导，自动微分使用约定的次梯度。它计算简单、容易实现，但某些单元长期落在负区间时可能得不到有效梯度。</p>
+<h3>10.4 GELU：平滑地按输入大小保留</h3>
+<div class="math-block">\[\begin{aligned}\operatorname{GELU}(x)&amp;=x\Phi(x)\\&amp;\approx\frac{x}{2}\left[1+\tanh\!\left(\sqrt{\frac2\pi}(x+0.044715x^3)\right)\right]\end{aligned}\]</div>
+<p>Φ(x) 是标准正态分布的累积分布函数：标准钟形曲线在 x 左侧的面积。不要把它误认成高斯概率密度。GELU 用一个平滑系数调节 x，允许小的负输出。给定输入后它仍是确定函数，并不需要每次随机抽一个门。</p>
+<h3>10.5 SiLU / Swish：用自己的 sigmoid 给自己加门</h3>
+<div class="math-block">\[\begin{aligned}\operatorname{SiLU}(x)&amp;=x\sigma(x)\\\operatorname{SiLU}^{\prime}(x)&amp;=\sigma(x)+x\sigma(x)(1-\sigma(x))\end{aligned}\]</div>
+<p>正侧逐渐接近 x，负侧有一小段负输出，极负时趋近 0。它与 GELU 形状相近但不相同。Swish 常写 xσ(βx)，β=1 时即这里的 SiLU。形状平滑有助于理解，但“曲线更平滑”不是普遍质量提升的充分证明。</p>
+<figure class="lab-frame" data-lab="activation" aria-label="函数实验 · 负输入会被怎样处理？">
+<h3 class="lab-title">函数实验 · 负输入会被怎样处理？</h3>
+<div class="lab-controls">
+<div class="lab-control">
+<label class="control-heading" for="lab-activation-fn">
+<span>激活函数</span>
+</label>
+<select id="lab-activation-fn" data-key="fn">
+<option value="relu" >ReLU</option>
+<option value="gelu" >GELU（tanh 近似）</option>
+<option value="silu" selected>SiLU</option>
+<option value="sigmoid" >Sigmoid</option>
+</select>
+</div>
+<div class="lab-control">
+<label class="control-heading" for="lab-activation-x">
+<span>输入 x</span>
+<output data-value="x">1</output>
+</label>
+<input id="lab-activation-x" type="range" data-key="x" min="-4" max="4" step="0.05" value="1">
+</div>
+</div>
+<div class="lab-stage">
+<div class="lab-split">
+<div>
+<h4>函数值 f(x)（无量纲）</h4>
+<svg class="lab-plot" viewBox="0 0 840 735" role="img" aria-label="SiLU 函数曲线，横轴输入 x，纵轴函数值">
+<title>SiLU 函数曲线，横轴输入 x，纵轴函数值</title>
+<g transform="scale(3)">
+<line x1="25" y1="157" x2="260" y2="157" class="tf-stroke-line"/>
+<line x1="140" y1="20" x2="140" y2="200" class="tf-stroke-line"/>
+<text x="25" y="218">−4</text>
+<text x="137" y="218">0</text>
+<text x="243" y="218">4</text>
+<text x="8" y="29">4</text>
+<text x="8" y="161">0</text>
+<text x="185" y="237">输入 x</text>
+<path d="M32.00,159.37 L33.35,159.46 L34.70,159.55 L36.05,159.65 L37.40,159.74 L38.75,159.84 L40.10,159.95 L41.45,160.05 L42.80,160.16 L44.15,160.27 L45.50,160.39 L46.85,160.50 L48.20,160.62 L49.55,160.75 L50.90,160.87 L52.25,161.00 L53.60,161.14 L54.95,161.27 L56.30,161.41 L57.65,161.55 L59.00,161.70 L60.35,161.84 L61.70,161.99 L63.05,162.14 L64.40,162.30 L65.75,162.45 L67.10,162.61 L68.45,162.77 L69.80,162.93 L71.15,163.09 L72.50,163.26 L73.85,163.42 L75.20,163.59 L76.55,163.75 L77.90,163.92 L79.25,164.08 L80.60,164.24 L81.95,164.40 L83.30,164.56 L84.65,164.72 L86.00,164.87 L87.35,165.02 L88.70,165.16 L90.05,165.30 L91.40,165.43 L92.75,165.55 L94.10,165.67 L95.45,165.77 L96.80,165.87 L98.15,165.96 L99.50,166.03 L100.85,166.09 L102.20,166.14 L103.55,166.17 L104.90,166.19 L106.25,166.19 L107.60,166.17 L108.95,166.13 L110.30,166.07 L111.65,165.98 L113.00,165.88 L114.35,165.74 L115.70,165.58 L117.05,165.40 L118.40,165.18 L119.75,164.94 L121.10,164.66 L122.45,164.36 L123.80,164.02 L125.15,163.64 L126.50,163.23 L127.85,162.78 L129.20,162.30 L130.55,161.77 L131.90,161.21 L133.25,160.61 L134.60,159.97 L135.95,159.29 L137.30,158.57 L138.65,157.80 L140.00,157.00 L141.35,156.15 L142.70,155.27 L144.05,154.34 L145.40,153.37 L146.75,152.36 L148.10,151.31 L149.45,150.22 L150.80,149.10 L152.15,147.93 L153.50,146.73 L154.85,145.49 L156.20,144.22 L157.55,142.91 L158.90,141.56 L160.25,140.19 L161.60,138.78 L162.95,137.35 L164.30,135.88 L165.65,134.39 L167.00,132.88 L168.35,131.33 L169.70,129.77 L171.05,128.18 L172.40,126.57 L173.75,124.94 L175.10,123.29 L176.45,121.62 L177.80,119.94 L179.15,118.24 L180.50,116.53 L181.85,114.81 L183.20,113.07 L184.55,111.32 L185.90,109.57 L187.25,107.80 L188.60,106.03 L189.95,104.25 L191.30,102.46 L192.65,100.67 L194.00,98.87 L195.35,97.07 L196.70,95.26 L198.05,93.45 L199.40,91.64 L200.75,89.83 L202.10,88.02 L203.45,86.20 L204.80,84.39 L206.15,82.57 L207.50,80.76 L208.85,78.94 L210.20,77.13 L211.55,75.32 L212.90,73.51 L214.25,71.70 L215.60,69.90 L216.95,68.09 L218.30,66.29 L219.65,64.49 L221.00,62.70 L222.35,60.90 L223.70,59.11 L225.05,57.32 L226.40,55.54 L227.75,53.75 L229.10,51.97 L230.45,50.20 L231.80,48.42 L233.15,46.65 L234.50,44.89 L235.85,43.12 L237.20,41.36 L238.55,39.60 L239.90,37.85 L241.25,36.09 L242.60,34.34 L243.95,32.60 L245.30,30.85 L246.65,29.11 L248.00,27.37" fill="none" class="tf-stroke-viz" stroke-width="2.5"/>
+<circle cx="167" cy="132.87506690520985" r="4.5" class="tf-fill-viz"/>
+</g>
+</svg>
+</div>
+<div>
+<h4>SiLU</h4>
+<dl class="lab-numbers">
+<div>
+<dt>输入 x</dt>
+<dd>1.00</dd>
+</div>
+<div>
+<dt>输出 f(x)</dt>
+<dd>0.73106</dd>
+</div>
+</dl>
+<p class="lab-detail" aria-live="polite">小幅负输出被保留；这不是硬切断的开关。</p>
+</div>
+</div>
+</div>
+<figcaption class="lab-caption">横轴为输入 x，纵轴为函数值，均无量纲。GELU 使用正文给出的常见 tanh 近似。</figcaption>
+</figure>
+<p>切换函数并移动输入 x，观察负数怎样处理。图中的 GELU 使用上面的 tanh 近似，便于与常见实现对照；SiLU 则直接计算 xσ(x)。坐标都没有物理单位。</p>
+<h3>10.6 GLU 的关键：门来自另一条可学习的支路</h3>
+<div class="math-block">\[\begin{aligned}\operatorname{GLU}(x)&amp;=(xW_U)\odot\sigma(xW_G)\\\operatorname{SwiGLU}(x)&amp;=\left[(xW_U)\odot\operatorname{SiLU}(xW_G)\right]W_D\end{aligned}\]</div>
+<p>两条投影分别构造“内容”和“门控特征”，逐通道相乘，再做输出投影。它更像“在这个输入条件下，让哪些特征通过多少”，而不是始终用相同阈值处理所有情况。</p>
+<p>名字里的“门”也容易误导：SwiGLU 的 SiLU 门不被限制在 0 到 1，可以放大或改变符号；它不是单纯概率阀门。WG、WU 是不同可学习矩阵，不是先把原输入向量机械地切成两半就完事。</p>
+<h3>10.7 为什么门控 FFN 的中间宽度常会调整？</h3>
+<p>普通双投影 FFN 约有 2DF 个参数，F=4D 时是 8D²。三投影 SwiGLU 约有 3DFg 个参数。若要大致保持这个参数预算，解 3DFg≈8D² 得到 Fg≈8D/3。生产配置还会为了训练效果和硬件对齐调整 F，所以不应背成固定比例。</p>
+<p>更多中间通道与分支意味着更多算术和临时数据。将 gate/up 合并投影，将 SiLU 与逐元素乘融合，能减少部分中间开销。MoE 后面会把“所有 token 共用一份 FFN”扩展成“每枚 token 选择少数 FFN 专家”。</p>
+<p class="source">GELU 定义：<a href="https://arxiv.org/abs/1606.08415">Gaussian Error Linear Units</a>；门控变体：<a href="https://arxiv.org/abs/2002.05202">GLU Variants Improve Transformer</a>。参数预算等式为本教程推算。</p>
+</div>
+<div class="tf-chapter" id="learning">
+<h2>十一、输出与学习：从 logits 到损失、梯度和采样</h2>
+<p class="tf-chapter-subtitle">交叉熵为什么这样写，训练与推理究竟差在哪里。</p>
+<h3>11.1 logits 是分数，概率才是归一化后的量</h3>
+<p>设最后一层的某个位置输出 h[D]，输出头给出 z=hW_vocab+b，形状为 [V]。z 中可以有任意实数；这些是 logits。softmax(z) 才得到词表概率。</p>
+<p>训练需要每个有效监督位置的预测。普通生成只需要当前末尾位置的下一 token 分数；prompt 末尾的 logits 就可产生第一个输出 token，不必先再做一次“空 decode”。</p>
+<h3>11.2 交叉熵：正确答案的概率越低，惩罚越大</h3>
+<div class="math-block">\[\ell=-\ln p(y)=-z_y+\log\sum_j\exp(z_j)\]</div>
+<p>如果正确 token 的概率为 0.8，损失约为 0.223；如果只有 0.1，损失约为 2.303。负对数把“提高正确答案概率”变成可最小化的标量，同时把整句概率的连乘拆成求和。训练一般对有效位置求和或求平均，padding 和被忽略的 prompt 位置不能错误参与。</p>
+<p>为了稳定计算 log Σexp(z)，同样先减去最大值 m：</p>
+<div class="math-block">\[\log\sum_j\exp(z_j)=m+\log\sum_j\exp(z_j-m),\qquad m=\max_j z_j\]</div>
+<p>softmax 与交叉熵结合后，有一个特别简洁的梯度：∂ℓ/∂zⱼ=pⱼ−1[j=y]。正确答案分数倾向被提高，其他分数按当前概率受到调整。参数通过链式法则收到这些梯度，而不是直接把每条训练文本写进 KV Cache。</p>
+<h3>11.3 一个参数怎样更新？</h3>
+<p>最基本的梯度下降是 θ←θ−ηg。g 是损失对 θ 的导数，η 是学习率。把损失想成山坡高度，梯度告诉你局部上升最快的方向；减去梯度就是向下降方向迈一步。深度学习中通常用小批数据估计梯度。</p>
+<details>
+<summary>展开：AdamW 的公式与每个量的角色</summary>
+<div class="math-block">\[\begin{aligned}m_t&amp;=\beta_1m_{t-1}+(1-\beta_1)g_t\\v_t&amp;=\beta_2v_{t-1}+(1-\beta_2)g_t^2\\\widehat m_t&amp;=\frac{m_t}{1-\beta_1^t},\qquad\widehat v_t=\frac{v_t}{1-\beta_2^t}\\\theta_t&amp;=(1-\eta\lambda)\theta_{t-1}-\eta\frac{\widehat m_t}{\sqrt{\widehat v_t}+\epsilon}\end{aligned}\]</div>
+<p>m 平滑梯度方向，v 平滑梯度平方，帽子项修正初始为 0 带来的偏差，分母为不同参数提供不同的有效步长。λ 是解耦权重衰减；不是所有参数都必须使用同一衰减规则。ε 防止分母过小。实际优化器还涉及精度、分片等实现细节。原始 Transformer 使用 Adam；AdamW 这里用于解释现代训练常见的优化思路，不是原论文的同名配置。</p>
+</details>
+<h3>11.4 dropout、label smoothing 和 perplexity</h3>
+<p>训练时常见 dropout 随机丢弃一部分激活，并用 1/(1−p_drop) 缩放保留下来的元素，使期望不变。推理时一般关闭。它与生成采样不是同一种随机过程。Label smoothing 把“只有正确类概率为 1”的目标稍微平滑，是一种正则化选择，并非所有现代 LLM 都必须使用。</p>
+<p>困惑度 perplexity=exp(平均负 log 概率)。直觉上可理解成平均“有多少同样难选的候选”。但它依赖 token 切法、数据、监督掩码与计量方式，不宜直接拿不同 tokenizer 的 perplexity 比较模型强弱。</p>
+<h3>11.5 推理怎样选择下一个 token？</h3>
+<div class="tf-table-wrap">
+<table class="decision-table">
+<thead>
+<tr>
+<th>方法</th>
+<th>计算规则</th>
+<th>含义</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Greedy</td>
+<td>argmax z</td>
+<td>取分数最大的一项</td>
+</tr>
+<tr>
+<td>温度 τ&gt;0</td>
+<td>softmax(z/τ)</td>
+<td>小温度更集中，大温度更平坦</td>
+</tr>
+<tr>
+<td>Top-k</td>
+<td>只保留分数最高的 k 项，再归一化采样</td>
+<td>固定候选数量</td>
+</tr>
+<tr>
+<td>Top-p / nucleus</td>
+<td>按概率排序，取累计概率达到 p 的最小前缀</td>
+<td>候选数量随分布变化</td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>temperature=0 在服务 API 中通常以特殊逻辑表示 greedy，不是实际计算 z/0。Top-k 与 top-p 同时使用时的先后顺序应看实现。语法约束、重复惩罚、禁用 token、EOS 检测也在解码链路中起作用。</p>
+<div class="callout">
+<b>精度与文本的区别。</b>两个实现的 logits 只差很小，若最大两项接近，greedy token 也可能不同，后续文本差异会被放大。排查时先比较隐藏状态与 logits 的数值误差，再看 token 排名间隔、采样和随机源，不能只以整段文本是否相同判断内核正确性。</div>
+<p class="tf-related">继续阅读：<a href="cross-entropy-hard-label-soft-distillation.html">交叉熵、硬标签与软蒸馏</a>。</p>
+</div>
+<div class="tf-chapter" id="walkthrough">
+<h2>十二、走完一层：把所有模块放回同一张计算图</h2>
+<p class="tf-chapter-subtitle">现代 Decoder 的准确次序、张量形状和参数量估算。</p>
+<h3>12.1 本教程采用的代表性 block</h3>
+<p>下面选择一种便于连接生产实现的教学结构：Pre-RMSNorm + RoPE + GQA + SwiGLU。它不是所有现代模型的唯一结构，也不是把原始论文的配置原封不动搬过来。</p>
+<div class="flow">
+<span>残差流 X</span>
+<span>RMSNorm → Q/K/V 投影 → Q/K RoPE → causal GQA → WO</span>
+<span>与 X 相加，得到 U</span>
+<span>RMSNorm → gate/up 投影 → SiLU 与乘法 → down 投影</span>
+<span>与 U 相加，得到 Y，进入下一层</span>
+</div>
+<div class="math-block">\[\begin{aligned}U&amp;=X+\operatorname{GQA}(\operatorname{RMSNorm}(X))\\Y&amp;=U+\operatorname{SwiGLU}(\operatorname{RMSNorm}(U))\end{aligned}\]</div>
+<p>RoPE 属于上式 GQA 分支内部。所有层完成后再做 final RMSNorm 与词表输出投影。参考实现暂略 dropout、偏置和训练功能，用更少代码暴露主干计算。</p>
+<h3>12.2 一套贯穿工程章节的假想配置</h3>
+<p>令 L=32、D=4096、Hq=32、Hkv=8、dₕ=128、F=14336、词表 V=32000。它是用于算量的假想配置，不是对某个真实模型规格的声明。取 B=1、prefill 长度 S=3：</p>
+<div class="tf-table-wrap">
+<table class="decision-table">
+<thead>
+<tr>
+<th>中间结果</th>
+<th>形状</th>
+<th>解释</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>输入 / Norm 输出</td>
+<td>[1,3,4096]</td>
+<td>3 枚 token，各有 4096 通道</td>
+</tr>
+<tr>
+<td>Q 投影并拆头</td>
+<td>[1,32,3,128]</td>
+<td>32 个查询头</td>
+</tr>
+<tr>
+<td>K / V 投影并拆头</td>
+<td>各 [1,8,3,128]</td>
+<td>8 组 KV</td>
+</tr>
+<tr>
+<td>逻辑分数</td>
+<td>[1,32,3,3]</td>
+<td>每个查询头产生自己的分布</td>
+</tr>
+<tr>
+<td>每头输出</td>
+<td>[1,32,3,128]</td>
+<td>按权重混合内容</td>
+</tr>
+<tr>
+<td>合头 / WO 输出</td>
+<td>[1,3,4096]</td>
+<td>与原残差流相加</td>
+</tr>
+<tr>
+<td>gate / up</td>
+<td>各 [1,3,14336]</td>
+<td>中间特征与门控</td>
+</tr>
+<tr>
+<td>down / block 输出</td>
+<td>[1,3,4096]</td>
+<td>再次加残差</td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>表中“逻辑分数”不意味着高效实现必须在显存里完整存放这一张张矩阵。FlashAttention 正是利用数学等价性，避免这种物化。</p>
+<h3>12.3 参数放在哪里？</h3>
+<div class="math-block">\[\begin{aligned}P_{\rm attention}&amp;\approx2D^2+2DH_{\rm kv}d_h\\P_{\rm SwiGLU}&amp;\approx3DF\\P_{\rm block}&amp;\approx P_{\rm attention}+P_{\rm SwiGLU}+2D\end{aligned}\]</div>
+<p>其中 2D 是两套 RMSNorm 的缩放参数。此配置每层 attention 投影约 4194 万参数，FFN 约 1.762 亿参数。32 层，加上不共享的输入/输出词表表格及 final norm，总计约 72.42 亿参数。若输入输出共享，少约 1.31 亿。这里未计不存在于本教学结构中的偏置或额外模块。</p>
+<p>参数量是<b>保存多少权重</b>；FLOPs 是<b>为具体输入执行多少运算</b>；峰值显存还包括 KV、激活、工作区等。三者不能互相代替。MoE 尤其能让“总参数”与“每 token 激活参数”差很多。</p>
+<h3>12.4 看懂源码的四个锚点</h3>
+<ol>
+<li>在模型层找到 residual、norm 和子层调用次序，先确认计算图。</li>
+<li>在 attention 中确认 head 数、head dim、RoPE、缓存写入与 mask。</li>
+<li>在 FFN 中确认普通或门控结构，以及是否是 MoE。</li>
+<li>再追踪 Linear、Attention、Norm 被替换成了哪类执行算子、使用了什么布局与精度。</li>
+</ol>
+<p>先读抽象接口，再沿一个真实形状走到内核，比从最底层的循环开始猜整网含义更容易建立稳定理解。</p>
+</div>
+<div class="tf-chapter" id="cache">
+<h2>十三、KV Cache：为什么只存 K/V，缓存怎样省掉重算</h2>
+<p class="tf-chapter-subtitle">Prefill、Decode、位置偏移、显存公式与缓存一致性。</p>
+<h3>13.1 已知前缀不必每次重新加工</h3>
+<p>在因果 Decoder 中，较早位置不能读取后来新增的 token，所以在模型权重和计算条件相同、推理随机层关闭时，历史位置的逐层表示不因后续续写而改变。每层历史 K/V 也就可以复用。这是 KV Cache 成立的根本原因。</p>
+<p>新 token 在某层生成新的 Q/K/V。它的 Q 查询“历史 K 加当前 K”，权重再混合“历史 V 加当前 V”。把当前 K/V 追加到缓存，下一步继续。历史 Q 不参与未来 token 的查询，所以普通自回归解码无需把它们作为长期 attention cache 保存。特殊算法可能额外保存隐藏状态或其他信息，这不推翻普通 KV 缓存的逻辑。</p>
+<h3>13.2 Prefill 和 Decode 是同一网络的两种形状</h3>
+<div class="tf-table-wrap">
+<table class="decision-table">
+<thead>
+<tr>
+<th>阶段</th>
+<th>本次新输入</th>
+<th>关键形状</th>
+<th>主要特点</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Prefill</td>
+<td>一段已知 prompt</td>
+<td>多个 query 对前缀/本段的可见 key</td>
+<td>能把很多 token 的投影合成大矩阵乘</td>
+</tr>
+<tr>
+<td>普通 Decode</td>
+<td>每条活跃序列通常 1 枚新 token</td>
+<td>Q 长度 1，KV 长度 T</td>
+<td>继续读取历史缓存，常面对较低算术强度</td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>Prompt prefill 的末尾输出预测第一个生成 token。这个刚采样出来的 token 还没有经过网络，因此它的 K/V 尚未写入；下一次 forward 把它作为输入时才追加。这个细节经常造成缓存长度、输出 token 数和 position ID 的“差一位”。</p>
+<figure class="lab-frame" data-lab="cacheStep" aria-label="缓存实验 · 已采样，不等于已写入缓存">
+<h3 class="lab-title">缓存实验 · 已采样，不等于已写入缓存</h3>
+<div class="lab-controls">
+<div class="lab-control">
+<label class="control-heading" for="lab-cacheStep-step">
+<span>生成进度</span>
+</label>
+<select id="lab-cacheStep-step" data-key="step">
+<option value="0" selected>Prompt prefill 后</option>
+<option value="1" >第 1 次 decode 后</option>
+<option value="2" >第 2 次 decode 后</option>
+</select>
+</div>
+</div>
+<div class="lab-stage">
+<div class="cache-rows">
+<div class="cache-row">
+<span>第 1 层<br>K + V</span>
+<div class="token-row">
+<span class="token-cell ">我 <small>p=0</small>
+</span>
+<span class="token-cell ">爱 <small>p=1</small>
+</span>
+<span class="token-cell latest">数 <small>p=2</small>
+</span>
+</div>
+</div>
+<div class="cache-row">
+<span>第 2 层<br>K + V</span>
+<div class="token-row">
+<span class="token-cell ">我 <small>p=0</small>
+</span>
+<span class="token-cell ">爱 <small>p=1</small>
+</span>
+<span class="token-cell latest">数 <small>p=2</small>
+</span>
+</div>
+</div>
+</div>
+<dl class="lab-numbers horizontal">
+<div>
+<dt>每层缓存长度</dt>
+<dd>3</dd>
+</div>
+<div>
+<dt>本轮已采样，尚未写入</dt>
+<dd>学</dd>
+</div>
+</dl>
+<p class="lab-detail" aria-live="polite">Prompt 的末尾 logits 产生“学”；无需再做一轮空计算。</p>
+</div>
+<figcaption class="lab-caption">玩具 token 与预定输出，不是运行语言模型。展示两层缓存，每一层都有独立 K/V。采样到 EOS 后通常停止。</figcaption>
+</figure>
+<h3>13.3 带缓存的 causal mask 不能忘记偏移</h3>
+<p>假设缓存已有 P 个位置，本次输入 q 个位置，当前 query 的局部行号是 i。它的全局位置是 P+i。若 key 下标 j 覆盖历史与本段，可见条件应为：</p>
+<div class="math-block">\[j\le P+i,\qquad i=0,\ldots,q-1,\quad j=0,\ldots,P+q-1\]</div>
+<p>当 P=5、q=1 时，当前 query 应该看到 key 0 到 5。若误用从左上角开始的 1×6 下三角，它只会看到 key 0。chunked prefill、投机验证的一批新 token，都会遇到这种长方形 mask 对齐问题。</p>
+<p>此外，同一布尔值在不同接口里含义可能相反。PyTorch 2.9 的 SDPA 中 bool mask 的 True 表示<b>允许参与</b>；其非方阵 is_causal 使用左上对齐的因果偏置。因此不能看到 is_causal=True 就假定已自动处理所有缓存偏移。应依据实际 API 版本和位置语义选 mask/causal bias。</p>
+<h3>13.4 KV 显存公式</h3>
+<div class="math-block">\[M_{\rm KV}=2LBTH_{\rm kv}d_hb\quad\text{（字节）}\]</div>
+<p class="tf-math-note">单位：字节</p>
+<p>2 是 K 与 V；L 是层数；B 是序列数；T 是每条序列当前长度；Hkv 是 KV 头数；dₕ 是每头宽度；b 是每元素字节数。若各请求长短不同，用 ΣᵢTᵢ 替换 B×T。若 K/V 宽度不同或各层结构不同，要分别求和。</p>
+<figure class="lab-frame" data-lab="kv" aria-label="KV 容量实验 · 比较 MHA、GQA 与 MQA">
+<h3 class="lab-title">KV 容量实验 · 比较 MHA、GQA 与 MQA</h3>
+<div class="lab-controls">
+<div class="lab-control">
+<label class="control-heading" for="lab-kv-layers">
+<span>层数 L</span>
+</label>
+<select id="lab-kv-layers" data-key="layers">
+<option value="16" >16 层</option>
+<option value="32" selected>32 层</option>
+<option value="80" >80 层</option>
+</select>
+</div>
+<div class="lab-control">
+<label class="control-heading" for="lab-kv-batch">
+<span>序列数量 B</span>
+<output data-value="batch">1</output>
+</label>
+<input id="lab-kv-batch" type="range" data-key="batch" min="1" max="16" step="1" value="1">
+</div>
+<div class="lab-control">
+<label class="control-heading" for="lab-kv-tokens">
+<span>每条序列 token 数 T</span>
+<output data-value="tokens">8192</output>
+</label>
+<input id="lab-kv-tokens" type="range" data-key="tokens" min="512" max="32768" step="512" value="8192">
+</div>
+<div class="lab-control">
+<label class="control-heading" for="lab-kv-heads">
+<span>KV 头数 Hkv</span>
+</label>
+<select id="lab-kv-heads" data-key="heads">
+<option value="32" >32 · MHA</option>
+<option value="8" selected>8 · GQA</option>
+<option value="1" >1 · MQA</option>
+</select>
+</div>
+<div class="lab-control">
+<label class="control-heading" for="lab-kv-bytes">
+<span>每元素字节 b</span>
+</label>
+<select id="lab-kv-bytes" data-key="bytes">
+<option value="2" selected>2 字节 · BF16/FP16 载荷</option>
+<option value="1" >1 字节 · 8 bit 载荷</option>
+</select>
+</div>
+</div>
+<div class="lab-stage">
+<div class="lab-result" aria-live="polite">当前缓存载荷：1.000 GiB</div>
+<p class="lab-detail">每 token（跨 L 层）：128.0 KiB；1 条 × 8,192 token</p>
+<h4>同一 L / B / T / dtype 下的载荷比较</h4>
+<div class="compare-bars">
+<div class="compare-row">
+<span>MHA <small>32 KV 头</small>
+</span>
+<div class="bar-track">
+<div class="bar-fill quiet" style="width:100%">
+</div>
+</div>
+<b>4.000 GiB</b>
+</div>
+<div class="compare-row">
+<span>GQA <small>8 KV 头</small>
+</span>
+<div class="bar-track">
+<div class="bar-fill " style="width:25%">
+</div>
+</div>
+<b>1.000 GiB</b>
+</div>
+<div class="compare-row">
+<span>MQA <small>1 KV 头</small>
+</span>
+<div class="bar-track">
+<div class="bar-fill quiet" style="width:3.125%">
+</div>
+</div>
+<b>128.00 MiB</b>
+</div>
+</div>
+<p class="axis-caption">条长：缓存载荷（字节），MHA 为当前比较上限。</p>
+</div>
+<figcaption class="lab-caption">固定 Hq=32、dh=128。只算元素载荷，不含页尾、比例因子、对齐与元数据；不是每卡分片估算。</figcaption>
+</figure>
+<p>以 L=32、Hkv=8、dₕ=128、BF16 为例，每枚 token 跨所有层占 128 KiB。单序列 8192 token 占 1 GiB；若改为 Hkv=32 的 MHA，占 4 GiB；改为 Hkv=1 的 MQA，占 128 MiB。这是元素载荷，未计页尾空位、量化比例因子、对齐、页表与分配开销。</p>
+<h3>13.5 两个常见的过度简化</h3>
+<p>
+<b>“Cache 让 attention 变成 O(1)”：</b>不对。当前 Q 仍需检索越来越长的 KV，稠密 attention 单步的这部分成本随 T 增长。对总生成长度 N 做粗略比较：只算 attention 核心，逐步全量重算的求和可到 O(N³D)，缓存后降为 O(N²D)；线性投影/FFN 也由重复处理前缀变为主要处理新 token。实际 prompt 与输出长度分布需单独代入。</p>
+<p>
+<b>“TP=p 就一定每卡 KV 除以 p”：</b>不一定。只有能相应分片、没有复制等条件满足时才能这样估算。Hkv 小于 TP 数或头不能均匀分配时，某些实现会复制 KV。PP 则按每卡承载层数改变缓存。混合模型还可能同时存在其他状态缓存。</p>
+<div class="callout">
+<b>缓存命中需要相同的计算条件。</b>前缀 token、模型权重版本、适配器、位置配置、可见性、多模态输入等必须兼容。“文本后面长得一样”不足以复用受不同前文影响的 K/V。普通 KV Cache 是上下文状态，不是模型参数，也不是知识库检索索引。</div>
+<p class="source">接口细节：<a href="https://docs.pytorch.org/docs/2.9/generated/torch.nn.functional.scaled_dot_product_attention.html">PyTorch 2.9 SDPA 文档</a>；缓存共享语义：<a href="https://docs.vllm.ai/en/latest/features/automatic_prefix_caching/">vLLM Automatic Prefix Caching</a>。容量数字为公式计算。</p>
+<p class="tf-related">继续阅读：<a href="../inference/llm-inference-prefill-decode-bottleneck-analysis.html">Prefill / Decode 的瓶颈分析</a>。</p>
+</div>
+<div class="tf-chapter" id="flash">
+<h2>十四、FlashAttention：数学相同，搬运方式不同</h2>
+<p class="tf-chapter-subtitle">分块与在线 softmax 的完整推导，解释显存和计算量的区别。</p>
+<h3>14.1 慢，未必因为乘法太多</h3>
+<p>朴素 attention 常经历：计算 QKᵀ → 把分数写到显存 → 读回来做 softmax → 写概率 → 再读回来乘 V。当 S 很大，[B,H,S,S] 的中间矩阵很可观。以 B=1、H=32、S=8192、每元素 2 字节计算，单独一份这样的矩阵就有 4 GiB。实际实现中的精度与同时存活的中间量可能不同。</p>
+<p>GPU 的 HBM 容量大，片上寄存器/shared memory 容量小但就近访问更快。FlashAttention 把 Q/K/V 切成可处理的小块，让分数、softmax 与内容混合尽量在片上完成，避免把整份 S×S 中间量反复写回 HBM。</p>
+<h3>14.2 难点：softmax 的分母需要全行，怎么分块？</h3>
+<p>一个 query 的目标输出是 z=Σⱼ exp(sⱼ)vⱼ / Σⱼexp(sⱼ)。如果每块独立做 softmax，再把每块输出直接平均，会错，因为不同块的总概率质量并不相等。要保留全局归一化，必须维护能够合并的统计量。</p>
+<p>对已经看过的分数，维护三个量：m 是最大分数；ℓ=Σexp(sⱼ−m) 是归一化分母；u=Σexp(sⱼ−m)vⱼ 是未除分母的内容累加。最后输出为 u/ℓ。</p>
+<h3>14.3 新块来了，怎样更新？</h3>
+<div class="math-block">\[\begin{aligned}m_{\rm new}&amp;=\max(m_{\rm old},\max s_{\rm block})\\\alpha&amp;=\exp(m_{\rm old}-m_{\rm new})\\\ell_{\rm new}&amp;=\alpha\ell_{\rm old}+\sum_{j\in\mathrm{block}}\exp(s_j-m_{\rm new})\\u_{\rm new}&amp;=\alpha u_{\rm old}+\sum_{j\in\mathrm{block}}\exp(s_j-m_{\rm new})v_j\\z&amp;=u_{\rm new}/\ell_{\rm new}\end{aligned}\]</div>
+<p>最大值从 m_old 变成 m_new 时，过去所有 exp(s−m_old) 要换到新的尺度。乘 α 恰好完成这个尺度转换。这是能分块而不丢掉全行归一化的关键。初始空状态可记 m=−∞、ℓ=0、u=0，首块在实现中妥善处理。</p>
+<figure class="lab-frame" data-lab="flash" aria-label="在线 softmax 实验 · 分母怎样跨块保留？">
+<h3 class="lab-title">在线 softmax 实验 · 分母怎样跨块保留？</h3>
+<div class="lab-controls">
+<div class="lab-control">
+<label class="control-heading" for="lab-flash-step">
+<span>已处理的数据块</span>
+</label>
+<select id="lab-flash-step" data-key="step">
+<option value="0" >初始状态</option>
+<option value="1" selected>块 1：分数 2、1</option>
+<option value="2" >块 1 + 块 2：再读 3、0</option>
+</select>
+</div>
+</div>
+<div class="lab-stage">
+<div class="chunk-grid">
+<div class="chunk processed">
+<h4>块 1 · 已读入</h4>
+<p>分数 [2, 1]</p>
+<p>Value [1, 2]</p>
+</div>
+<div class="chunk ">
+<h4>块 2 · 未读入</h4>
+<p>分数 [3, 0]</p>
+<p>Value [-1, 4]</p>
+</div>
+</div>
+<dl class="lab-numbers horizontal">
+<div>
+<dt>累计最大值 m</dt>
+<dd>2.000</dd>
+</div>
+<div>
+<dt>累计指数和 ℓ</dt>
+<dd>1.367879</dd>
+</div>
+<div>
+<dt>累计内容 u</dt>
+<dd>1.735759</dd>
+</div>
+</dl>
+<div class="lab-result" aria-live="polite">已读部分输出 u/ℓ = 1.268941</div>
+<p class="lab-detail">整行 softmax 参考：-0.104508；处理完两块后再比较。</p>
+</div>
+<figcaption class="lab-caption">单 query、标量 value。分数 [2,1,3,0]，value [1,2,−1,4]；每块 2 项。全部数值现场计算。</figcaption>
+</figure>
+<p>实验用标量 value 便于看数字；真实 attention 的 u 是向量。它逐块处理分数 [2,1,3,0] 和 value [1,2,−1,4]，最后与整行 softmax 的输出核对。分块顺序会改变浮点舍入，数学实数结果相同不意味着逐 bit 一致。</p>
+<h3>14.4 究竟节省了什么？</h3>
+<ul>
+<li>
+<b>主要减少：</b>大中间矩阵的 HBM 读写，以及相应物化所需的工作显存。</li>
+<li>
+<b>没有自动减少：</b>完整稠密 attention 中所有 Q/K 对的点积数量。固定 head dim 时，序列长度的计算阶数仍是平方。</li>
+<li>
+<b>训练还要考虑：</b>反向传播如何保存少量统计量、重算局部分数，避免保存整张概率矩阵；这是计算与内存之间的权衡。</li>
+</ul>
+<p>常说 attention 的中间存储由平方规模降到更接近线性，是在说明不保存完整 S×S 矩阵，并不意味着总显存只剩一个常数。Q/K/V、输出、缓存、每行统计量、其他层激活和工作区仍要占内存。</p>
+<h3>14.5 后续版本为什么继续发展？</h3>
+<p>在保持相同注意力目标的前提下，还能优化线程分工、减少同步和非矩阵运算、让数据搬运与矩阵计算重叠。硬件变了，相对瓶颈也会变：矩阵单元增长快，不代表指数单元、共享内存带宽和调度能力同比增长。</p>
+<p>2026 年公开的 FlashAttention-4 就讨论 Blackwell 上这种不对称扩展下的算法与流水线协同设计。面试时值得讲清原理与硬件依赖；某个版本的名字本身不能保证你的 GPU/NPU、head dim、mask 和数据类型都有高效支持。</p>
+<div class="callout">
+<b>一句准确回答。</b>FlashAttention 通过分块、在线归一化及融合减少数据移动，在浮点误差范围内实现同一稠密注意力计算；它与通过只选择部分 token 来降低计算量的稀疏注意力，是不同层面的优化。</div>
+<p class="source">基础算法：<a href="https://arxiv.org/abs/2205.14135">FlashAttention</a>；硬件演进：<a href="https://arxiv.org/abs/2603.05451">FlashAttention-4</a>。在线合并公式与容量算例在此直接展开。</p>
+<p class="tf-related">继续阅读：<a href="../inference/flash-attention-deep-dive.html">FlashAttention 与存储层级</a>。</p>
+</div>
+<div class="tf-chapter" id="paging">
+<h2>十五、分页缓存与请求调度：把一台机器变成服务</h2>
+<p class="tf-chapter-subtitle">PagedAttention、Prefix Cache、连续批处理与 Chunked Prefill。</p>
+<h3>15.1 为什么连续分配一大段缓存会浪费？</h3>
+<p>请求长度事先未知。如果为每条请求预留最大长度，会浪费大量空间；如果随着生成扩容连续区域，又会遇到搬迁与外部碎片。分页式 KV 把逻辑 token 序列分成固定容量的块，用映射表指向实际物理块。</p>
+<p>类似操作系统页表的思想：序列逻辑连续，物理显存不必连续。比如逻辑块 0、1、2 可以分别落在物理块 7、2、11。Attention 内核根据映射读取，不要求把它们重新拼成一个大连续数组。</p>
+<figure class="lab-frame" data-lab="pages" aria-label="分页实验 · 逻辑连续，物理块可以不连续">
+<h3 class="lab-title">分页实验 · 逻辑连续，物理块可以不连续</h3>
+<div class="lab-controls">
+<div class="lab-control">
+<label class="control-heading" for="lab-pages-tokens">
+<span>请求包含的 token 数</span>
+<output data-value="tokens">9</output>
+</label>
+<input id="lab-pages-tokens" type="range" data-key="tokens" min="1" max="20" step="1" value="9">
+</div>
+</div>
+<div class="lab-stage">
+<div class="page-list">
+<div class="page-row">
+<span>逻辑块 0<br> <small>物理块 7</small>
+</span>
+<div class="page-slots">
+<span class="page-slot occupied">t0</span>
+<span class="page-slot occupied">t1</span>
+<span class="page-slot occupied">t2</span>
+<span class="page-slot occupied">t3</span>
+</div>
+</div>
+<div class="page-row">
+<span>逻辑块 1<br> <small>物理块 2</small>
+</span>
+<div class="page-slots">
+<span class="page-slot occupied">t4</span>
+<span class="page-slot occupied">t5</span>
+<span class="page-slot occupied">t6</span>
+<span class="page-slot occupied">t7</span>
+</div>
+</div>
+<div class="page-row">
+<span>逻辑块 2<br> <small>物理块 11</small>
+</span>
+<div class="page-slots">
+<span class="page-slot occupied">t8</span>
+<span class="page-slot ">空</span>
+<span class="page-slot ">空</span>
+<span class="page-slot ">空</span>
+</div>
+</div>
+</div>
+<p class="lab-detail" aria-live="polite">9 枚 token → 3 块 → 12 槽位；尾部空 3 槽。块表：[7, 2, 11]</p>
+</div>
+<figcaption class="lab-caption">教学块容量为 4 token；预设物理块顺序 [7,2,11,4,9]。空槽表示真实尾部内部碎片。</figcaption>
+</figure>
+<p>实验每块容纳 4 枚 token，仅为方便看清；真实块大小是实现与配置选择。9 枚 token 分配 3 块，共 12 个槽位，尾块空 3 个。分页主要缓解大连续区域分配与预留浪费，不能把页尾内部碎片也说成永远为零。未共享的单条序列在这组缓存块的尾部最多浪费一块内不足整块的槽位。</p>
+<h3>15.2 共享前缀为什么能共享缓存？</h3>
+<p>如果两个请求具有相同且计算条件兼容的 token 前缀，就可复用已经算好的前缀 KV。共享块需要引用计数等管理；若共享的部分块要被不同分支修改，可能需要 copy-on-write。具体系统可以限制只复用完整块，或实现更细粒度的策略。</p>
+<p>Prefix Cache 是对<b>同一前缀计算结果</b>的复用，不是对“语义相近问题”复用答案。它主要减少重复 prefill。后续 decode 仍要检索前缀 KV，所以命中不等于之后不再读取这部分历史。缓存容量有限，还需要淘汰与生命周期管理。</p>
+<h3>15.3 连续批处理：每一步重新拼当前活跃请求</h3>
+<p>静态 batch 常让一组请求一起开始，短请求结束后，空出来的位置不能及时利用。连续批处理按迭代调度：某些请求结束就释放资源，新请求可在合适时机加入。不同请求正在生成的 token 可以一起投影，提高权重读取的复用。</p>
+<p>活跃数 B 不是唯一限制。调度还要看本轮 token 预算、KV 可用块、请求等待时间、优先级、上下文长度和服务延迟目标。为了吞吐无条件塞大 batch，可能显著增加排队或每 token 延迟。</p>
+<h3>15.4 Chunked Prefill：长 prompt 别一次占住所有时间</h3>
+<p>一个很长的 prompt 可能让已经在逐字输出的用户等待很久。把它分成若干块，在块边界给 decode 留出机会，可以改善混合流量的调度。每块仍需要读取前面的缓存，并正确使用位置与 mask。</p>
+<p>较小块给 decode 更细的插入机会，但可能增加启动、调度开销，降低大矩阵效率，并拉长长 prompt 自己的首 token 时间。较大块则反向权衡。官方文档中的默认策略与参数会演变；应在实际版本、流量分布和 TTFT/ITL 目标下选择。</p>
+<h3>15.5 三个优化可以同时存在</h3>
+<div class="tf-table-wrap">
+<table class="decision-table">
+<thead>
+<tr>
+<th>技术</th>
+<th>解决的主要问题</th>
+<th>不应误解成</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>FlashAttention</td>
+<td>注意力内部的数据移动与中间量</td>
+<td>自动管理所有请求的内存生命周期</td>
+</tr>
+<tr>
+<td>Paged KV / PagedAttention</td>
+<td>缓存组织、分配、共享及读取</td>
+<td>把稠密注意力变成线性计算</td>
+</tr>
+<tr>
+<td>连续批处理 / 分块 prefill</td>
+<td>多请求调度与资源利用</td>
+<td>仅改某个矩阵乘法内核</td>
+</tr>
+</tbody>
+</table>
+</div>
+<div class="callout">
+<b>排队问题不能只优化内核。</b>如果服务的 TTFT 主要花在等待可用缓存、调度排队或请求预处理，再快一点 attention kernel 可能几乎无助。先把端到端耗时拆开，才能选择正确层次的工具。</div>
+<p class="source">设计出处：<a href="https://arxiv.org/abs/2309.06180">PagedAttention / vLLM 论文</a>；实现语义：<a href="https://docs.vllm.ai/en/latest/features/automatic_prefix_caching/">Prefix Caching</a>、<a href="https://docs.vllm.ai/en/latest/configuration/optimization/">vLLM 调度与优化说明</a>。</p>
+</div>
+<div class="tf-chapter" id="roofline">
+<h2>十六、算量与带宽：怎样判断瓶颈在哪里</h2>
+<p class="tf-chapter-subtitle">FLOPs、字节数、算术强度与 Prefill/Decode 的形状差异。</p>
+<h3>16.1 FLOPs 不是运行时间</h3>
+<p>一个乘法和一个加法通常各记一个 FLOP，因此 [M,K]×[K,N] 的矩阵乘约为 2MKN FLOPs。峰值 FLOP/s 表示每秒理论运算能力，但如果数据没及时到达、矩阵太小或算子间等待很多，实际利用率会低得多。</p>
+<p>计算之外，还要传输字节：权重、输入输出、KV、临时结果、跨卡数据。粗略看，某个内核的时间至少受两个下界约束：</p>
+<div class="math-block">\[t\ge\max\!\left(\frac{\text{运算量}}{\text{有效算力}},\frac{\text{数据量}}{\text{有效带宽}}\right)\]</div>
+<p>这个式子不是完整性能模型。它忽略启动、依赖、同步、缓存层级和许多调度因素；“有效”能力也通常低于标称峰值。它仍能帮你排除明显不可能的性能预期。</p>
+<h3>16.2 算术强度：每搬一个字节做多少运算？</h3>
+<div class="math-block">\[I=\frac{\mathrm{FLOPs}}{\mathrm{Bytes}},\qquad P_{\rm attainable}\le\min(P_{\rm peak},\mathrm{BW}\cdot I)\]</div>
+<p>I 很低时，设备在等数据；I 足够大时，矩阵计算能力更可能成为限制。转折点 I*=P_peak/BW。单位必须一致：TFLOP/s、TB/s 采用十进制时，比例直接给 FLOP/Byte。</p>
+<figure class="lab-frame" data-lab="roofline" aria-label="Roofline 实验 · 同一权重服务更多输入行">
+<h3 class="lab-title">Roofline 实验 · 同一权重服务更多输入行</h3>
+<div class="lab-controls">
+<div class="lab-control">
+<label class="control-heading" for="lab-roofline-batch">
+<span>Linear 输入行数 B</span>
+<output data-value="batch">1</output>
+</label>
+<input id="lab-roofline-batch" type="range" data-key="batch" min="1" max="128" step="1" value="1">
+</div>
+</div>
+<div class="lab-stage">
+<div class="lab-split">
+<div>
+<h4>理论吞吐上界（TFLOP/s）</h4>
+<svg class="lab-plot" viewBox="0 0 840 675" role="img" aria-label="Roofline：横轴算术强度 FLOP/Byte，纵轴理论吞吐 TFLOP/s">
+<title>Roofline：横轴算术强度 FLOP/Byte，纵轴理论吞吐 TFLOP/s</title>
+<g transform="scale(3)">
+<line x1="35" y1="195" x2="260" y2="195" class="tf-stroke-line"/>
+<line x1="35" y1="25" x2="35" y2="195" class="tf-stroke-line"/>
+<path d="M35,175 L36.71875,173.75 L38.4375,172.5 L40.15625,171.25 L41.875,170 L43.59375,168.75 L45.3125,167.5 L47.03125,166.25 L48.75,165 L50.46875,163.75 L52.1875,162.5 L53.90625,161.25 L55.625,160 L57.34375,158.75 L59.0625,157.5 L60.78125,156.25 L62.5,155 L64.21875,153.75 L65.9375,152.5 L67.65625,151.25 L69.375,150 L71.09375,148.75 L72.8125,147.5 L74.53125,146.25 L76.25,145 L77.96875,143.75 L79.6875,142.5 L81.40625,141.25 L83.125,140 L84.84375,138.75 L86.5625,137.5 L88.28125,136.25 L90,135 L91.71875,133.75 L93.4375,132.5 L95.15625,131.25 L96.875,130 L98.59375,128.75 L100.3125,127.5 L102.03125,126.25 L103.75,125 L105.46875,123.75 L107.1875,122.5 L108.90625,121.25 L110.625,120 L112.34375,118.75 L114.0625,117.5 L115.78125,116.25 L117.5,115 L119.21875,113.75 L120.9375,112.5 L122.65625,111.25 L124.375,110 L126.09375,108.75 L127.8125,107.5 L129.53125,106.25 L131.25,105 L132.96875,103.75 L134.6875,102.5 L136.40625,101.25 L138.125,100 L139.84375,98.75 L141.5625,97.5 L143.28125,96.25 L145,95 L146.71875,93.75 L148.4375,92.5 L150.15625,91.25 L151.875,90 L153.59375,88.75 L155.3125,87.5 L157.03125,86.25 L158.75,85 L160.46875,83.75 L162.1875,82.5 L163.90625,81.25 L165.625,80 L167.34375,78.75 L169.0625,77.5 L170.78125,76.25 L172.5,75 L174.21875,73.75 L175.9375,72.5 L177.65625,71.25 L179.375,70 L181.09375,68.75 L182.8125,67.5 L184.53125,66.25 L186.25,65 L187.96875,63.75 L189.6875,62.5 L191.40625,61.25 L193.125,60 L194.84375,58.75 L196.5625,57.5 L198.28125,56.25 L200,55 L201.71875,53.75 L203.4375,52.5 L205.15625,51.25 L206.875,50 L208.59375,48.75 L210.3125,47.5 L212.03125,46.25 L213.75,45 L215.46875,43.75 L217.1875,42.5 L218.90625,42.1228762045055 L220.625,42.1228762045055 L222.34375,42.1228762045055 L224.0625,42.1228762045055 L225.78125,42.1228762045055 L227.5,42.1228762045055 L229.21875,42.1228762045055 L230.9375,42.1228762045055 L232.65625,42.1228762045055 L234.375,42.1228762045055 L236.09375,42.1228762045055 L237.8125,42.1228762045055 L239.53125,42.1228762045055 L241.25,42.1228762045055 L242.96875,42.1228762045055 L244.6875,42.1228762045055 L246.40625,42.1228762045055 L248.125,42.1228762045055 L249.84375,42.1228762045055 L251.5625,42.1228762045055 L253.28125,42.1228762045055 L255,42.1228762045055" fill="none" class="tf-stroke-secondary-ink" stroke-width="2"/>
+<circle cx="35" cy="175.01408538022494" r="5" class="tf-fill-viz"/>
+<text x="31" y="215">1</text>
+<text x="140" y="215">16</text>
+<text x="237" y="215">256</text>
+<text x="9" y="180">2</text>
+<text x="1" y="100">32</text>
+<text x="1" y="47.1228762045055">200</text>
+</g>
+</svg>
+<p class="axis-caption">横轴：算术强度 I（FLOP/Byte，对数刻度）</p>
+</div>
+<div>
+<dl class="lab-numbers">
+<div>
+<dt>本 Linear 算术强度</dt>
+<dd>1.00 FLOP/Byte</dd>
+</div>
+<div>
+<dt>理论上界</dt>
+<dd>2.00 TFLOP/s</dd>
+</div>
+<div>
+<dt>转折强度 P/BW</dt>
+<dd>100 FLOP/Byte</dd>
+</div>
+</dl>
+<p class="lab-detail" aria-live="polite">当前带宽给出的上界更低。实际执行还会受形状、启动和同步影响。</p>
+</div>
+</div>
+</div>
+<figcaption class="lab-caption">教学设备：200 TFLOP/s、2 TB/s；D=4096、2 字节元素。权重一次读取，输入输出各一次；理论上界，非实测。</figcaption>
+</figure>
+<p>实验只估算一层方形 Linear：X[B,4096]×W[4096,4096]。假设权重从 HBM 读取一次，输入输出各一次，均为 2 字节；设备能力取教学值 200 TFLOP/s、2 TB/s，不指代真实硬件，也不预测整网延迟。增大 B 后，同一 W 服务更多行，算术强度提升。</p>
+<h3>16.3 为什么 prefill 经常更容易利用矩阵单元？</h3>
+<p>Prefill 把很多已知位置作为输入行，投影和 FFN 往往成为较大的 GEMM。同一权重在许多 token 上复用。小 batch decode 每条序列只有一行新输入，容易变成窄 GEMM/GEMV：很多权重要读，服务的输入行却少。</p>
+<p>所以常听到“prefill 偏计算受限、decode 偏带宽受限”。这是工作负载下的常见倾向，不是阶段的永久属性。大 decode batch、很长上下文、稀疏/混合结构、量化、跨卡通信，都可能改变实际热点。</p>
+<h3>16.4 一层大致要做多少事？</h3>
+<p>以传统 D=Hq·dₕ 的 MHA 为例，先略去 softmax、Norm、激活等较小算术项：Q/K/V 与输出投影约 8BSD² FLOPs；全量非因果 attention 的 QKᵀ 与 AV 合计约 4BS²D；普通双投影 FFN 约 4BSDF。因果三角若内核能跳过不可见块，可减少相应 attention 工作，但别把逻辑遮罩自动当作已经省掉了计算。</p>
+<p>GQA 投影应改用实际 KV 宽度；SwiGLU 三投影约 6BSDF。Decode 则把 query 长度换成每请求的新 token 数，并让 KV 长度为当前 T。只背一句“Transformer 是 O(S²)”会漏掉短序列时常占大量工作的线性层与 FFN。</p>
+<h3>16.5 用极简下界检查一个宣传数字</h3>
+<p>假设一个稠密模型有 80 亿个 BF16 参数，载荷约 16 GB。若一次低 batch decode 真的要从 HBM 读取这批权重，且有效带宽只有 2 TB/s，那么仅这项就有约 8 ms 的理想下界。它不包含 KV、激活、通信与启动，也不适用于权重驻留更高层缓存或不同分片安排的同一假设外情况。</p>
+<p>这不是该模型的实测速率，而是让你习惯先检查单位和资源。看到异常好的数字，要追问：是单请求还是 batch 总吞吐？是每卡还是全系统？是否量化？输入输出多长？是否包含 prefill？是否有命中缓存？</p>
+<div class="callout">
+<b>一个优化必须配一个瓶颈假设。</b>例如“尝试权重量化”对应权重载荷与低 batch 带宽压力；“增大 token batch”对应权重复用与矩阵形状；“稀疏 attention”对应长上下文检索成本；“减少 TP 或改善拓扑”对应通信。先测量，再验证假设。</div>
+</div>
+<div class="tf-chapter" id="quantization">
+<h2>十七、低精度与量化：用更少的位保存和计算</h2>
+<p class="tf-chapter-subtitle">FP16、BF16、INT8、INT4、FP8，以及量化为什么不必然加速。</p>
+<h3>17.1 浮点数的两笔预算：范围与精细程度</h3>
+<p>浮点数可粗略理解成“符号 × 有效数字 × 2 的指数”。指数位更多，能覆盖更大范围；尾数位更多，同一数量级附近更精细。FP32 通常有 1 位符号、8 位指数、23 位显式尾数；FP16 为 1/5/10；BF16 为 1/8/7。</p>
+<p>BF16 与 FP32 的指数位数相同，范围较大，但尾数更短，不等于精度和 FP32 一样。FP16 在常见数量级上更精细，却更容易遇到范围问题。运算的输入格式、乘法格式、累加格式、输出格式还可以不同。</p>
+<h3>17.2 整数量化：带刻度的尺子</h3>
+<div class="math-block">\[\begin{aligned}q&amp;=\operatorname{clip}(\operatorname{round}(x/s)+z,q_{\min},q_{\max})\\\widehat x&amp;=s(q-z)\end{aligned}\]</div>
+<p>s 是量化步长，z 是零点。可表示的实数落在有限格点上，round 会带来舍入，clip 会带来截断。对称 INT8 的一种简单选择是 z=0、s=max|x|/127，使用 −127 到 127 的对称范围。</p>
+<p>对 [0,0.5,1]，s=1/127，量化为 [0,64,127]，反量化约 [0,0.50394,1]。如果再出现离群值 100，统一步长约为 0.7874，原来很小的数就难以精确表示。分通道、分组或分块比例因子，可以减轻不同通道尺度相差很大的问题，但会增加元数据和实现复杂度。</p>
+<h3>17.3 W、A、KV 是三种不同对象</h3>
+<div class="tf-table-wrap">
+<table class="decision-table">
+<thead>
+<tr>
+<th>对象</th>
+<th>是什么</th>
+<th>减少位宽的主要收益</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>W：权重</td>
+<td>训练后固定的矩阵</td>
+<td>模型驻留大小与权重传输</td>
+</tr>
+<tr>
+<td>A：激活</td>
+<td>本次输入的中间结果</td>
+<td>激活传输、低精度矩阵计算机会</td>
+</tr>
+<tr>
+<td>KV Cache</td>
+<td>随上下文增长的历史状态</td>
+<td>长上下文容量和注意力读取载荷</td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>W4A16 通常表示权重 4 bit、激活 16 bit；W8A8 常表示二者均为 8 bit。但缓存格式应另行说明，诸如 C8 的缩写并非跨框架统一标准。不能从“模型 INT4”推断 KV 也必然是 INT4。</p>
+<h3>17.4 三条代表性量化思路</h3>
+<ul>
+<li>
+<b>GPTQ：</b>利用近似二阶信息评估、补偿权重量化误差，属于训练后权重量化路线。</li>
+<li>
+<b>AWQ：</b>根据激活分布识别重要的权重通道，通过适当缩放减轻低位宽误差。</li>
+<li>
+<b>SmoothQuant：</b>利用等价缩放，把部分激活量化困难转移到权重，以支持高效 W8A8。</li>
+</ul>
+<p>等价缩放为什么可行？以行向量约定，把通道缩放组成对角矩阵 S，有 XW=(XS⁻¹)(SW)。在实数计算里没有改变线性映射，但两侧数值分布改变了，低精度舍入误差也随之改变。不能只缩一边而不补偿另一边。</p>
+<h3>17.5 FP8 与更低精度需要什么支持？</h3>
+<p>FP8 仍是浮点，常见 E4M3、E5M2 的指数与尾数预算不同，也有具体格式变体。实际使用还常配合张量/通道/块级 scale。名称相同并不保证不同硬件、内核和 checkpoint 格式完全兼容。更低精度的块浮点或低位格式也同理，应看清缩放粒度、累加与打包方式。</p>
+<p>INT4 权重通常还要位打包、解包、重排或反量化。如果硬件与内核不能把省下的载荷转化为更好的执行效率，可能只省容量，甚至更慢。小 batch 可能更受权重载荷影响，大 batch 则可能更受计算吞吐影响，同一种量化的收益也会改变。</p>
+<h3>17.6 精度验证怎样设计才有意义？</h3>
+<p>先逐层比较隐藏状态、logits 与误差分布，再检验目标业务集上的准确率、困惑度或任务指标。覆盖长上下文、异常值、不同 batch 与关键语言/代码样本。KV 的误差会在后续多步反复参与注意力，应单独观察长生成行为。</p>
+<p>要记录校准数据、scale 粒度、零点、舍入、饱和、算子累加格式和混合精度范围。误差容忍值应该由 dtype、运算规模和业务要求决定，而不是统一指定一个“放之四海皆准”的小数。</p>
+<p class="source">原始方法：<a href="https://arxiv.org/abs/2210.17323">GPTQ</a>、<a href="https://arxiv.org/abs/2306.00978">AWQ</a>、<a href="https://arxiv.org/abs/2211.10438">SmoothQuant</a>。格点算例与等价缩放推导为本教程构造。</p>
+</div>
+<div class="tf-chapter" id="moe">
+<h2>十八、MoE：把一份 FFN 变成可选择的专家集合</h2>
+<p class="tf-chapter-subtitle">Router、Top-k、负载均衡、共享专家和 All-to-all。</p>
+<h3>18.1 “专家”先当成多个 FFN</h3>
+<p>Dense FFN 让每个 token 都经过同一套网络。Sparse MoE 在某些 block 中放置多个专家 FFN，另用 router 为每个 token 选择少数专家。常见情况下 attention 仍然存在，MoE 主要替换 FFN 部分；专家并不必然是完整的 Transformer 模型。</p>
+<p>“数学专家”“代码专家”是便于想象的说法，不能保证实际专家有这样清晰的分工。路由通常按 token、按层进行，一句话中的不同 token、同一 token 的不同层都可能选择不同专家。</p>
+<h3>18.2 一套可手算的路由</h3>
+<div class="math-block">\[\begin{aligned}r&amp;=xW_r,\quad p=\operatorname{softmax}(r),\quad S=\operatorname{TopK}(r,k)\\g_i&amp;=\frac{\exp(r_i)}{\sum_{j\in S}\exp(r_j)},\quad i\in S\\\operatorname{MoE}(x)&amp;=\sum_{i\in S}g_iE_i(x)\end{aligned}\]</div>
+<p>这里演示“先选 Top-k，再把选中分数归一化”的一种约定。真实模型可能先做全体 softmax、用 sigmoid 亲和度、增加路由偏置、采用不同归一化或缩放，并不必与本例相同。</p>
+<p>设 r=[2,1,0,−1]、k=2，选中专家 0、1；选中权重约为 [0.7311,0.2689]。假设两位专家给出的某个输出通道分别为 2 与 −1，混合结果为 0.7311×2−0.2689≈1.1932。选中专家一般接收完整的 token 隐藏向量，不是把向量切成若干段分给不同专家。</p>
+<figure class="lab-frame" data-lab="moe" aria-label="MoE 路由实验 · 少数路径与负载倾斜">
+<h3 class="lab-title">MoE 路由实验 · 少数路径与负载倾斜</h3>
+<div class="lab-controls">
+<div class="lab-control">
+<label class="control-heading" for="lab-moe-k">
+<span>每 token 激活专家数</span>
+</label>
+<select id="lab-moe-k" data-key="k">
+<option value="1" >Top-1</option>
+<option value="2" selected>Top-2</option>
+</select>
+</div>
+<div class="lab-control">
+<label class="control-heading" for="lab-moe-bias">
+<span>专家 0 的教学路由偏置</span>
+<output data-value="bias">0</output>
+</label>
+<input id="lab-moe-bias" type="range" data-key="bias" min="-2" max="4" step="0.25" value="0">
+</div>
+<div class="lab-control">
+<label class="control-heading" for="lab-moe-token">
+<span>查看一枚 token 的路径</span>
+</label>
+<select id="lab-moe-token" data-key="token">
+<option value="0" selected>token 0</option>
+<option value="1" >token 1</option>
+<option value="2" >token 2</option>
+<option value="3" >token 3</option>
+<option value="4" >token 4</option>
+<option value="5" >token 5</option>
+<option value="6" >token 6</option>
+<option value="7" >token 7</option>
+</select>
+</div>
+</div>
+<div class="lab-stage">
+<h4>Token 0 的分派与合并（某一输出通道）</h4>
+<div class="route-line">
+<span>完整 token 向量</span>
+<span>Router → 专家 0（73.1%） + 专家 1（26.9%）</span>
+</div>
+<div class="lab-result" aria-live="polite">输出通道 = 1.1932</div>
+<p class="lab-detail">专家输出示意 [2, −1, 3, 0.5]；本 token 路由 logits [2.00, 1.00, 0.00, -1.00]</p>
+<h4>整个教学 batch 的专家分派数</h4>
+<div class="compare-bars">
+<div class="compare-row">
+<span>专家 0</span>
+<div class="bar-track">
+<div class="bar-fill " style="width:50%">
+</div>
+</div>
+<b>4 次</b>
+</div>
+<div class="compare-row">
+<span>专家 1</span>
+<div class="bar-track">
+<div class="bar-fill " style="width:75%">
+</div>
+</div>
+<b>6 次</b>
+</div>
+<div class="compare-row">
+<span>专家 2</span>
+<div class="bar-track">
+<div class="bar-fill quiet" style="width:37.5%">
+</div>
+</div>
+<b>3 次</b>
+</div>
+<div class="compare-row">
+<span>专家 3</span>
+<div class="bar-track">
+<div class="bar-fill quiet" style="width:37.5%">
+</div>
+</div>
+<b>3 次</b>
+</div>
+</div>
+<p class="axis-caption">条长：分派次数（0—8）；总分派 16 = 8 token × 2。</p>
+</div>
+<figcaption class="lab-caption">8 枚教学 token、4 位专家；选中后归一化。偏置只用于显示热点，不代表某个模型的完整负载均衡算法。</figcaption>
+</figure>
+<p>实验同时展示 8 枚教学 token 的路由和专家收到的分派数。调大某个专家的路由偏置，会看到流量集中。柱高是玩具路由计数，不是生产吞吐测量。切换 Top-k 后，所有分派总数应为 token 数×k。</p>
+<h3>18.3 总参数、激活参数、驻留显存</h3>
+<p>若有 E 份专家，每份参数为 P_e，每个 token 激活 k 份，那么专家总参数为 E·P_e，当前 token 的专家算术大致对应 k·P_e。还要加上 attention、router、共享专家等公共部分。这样可以增加可学习容量，同时控制每 token 的部分计算。</p>
+<p>但所有专家权重通常仍要放在参与服务的设备或分级存储中。激活少不意味着所有权重都能消失，也不意味着一个 batch 只会访问同样 k 个专家。batch 中不同 token 的路由会覆盖很多专家，实际权重流量依赖路由分布。</p>
+<h3>18.4 热门专家为什么会拖慢整层？</h3>
+<p>如果许多 token 都选同一专家，它的队列变长，其他专家却空闲。整层常需等最慢的分片完成。专家数量越多、激活越稀疏，小专家 GEMM 也越可能因为形状太小而利用率不足。需要 grouped GEMM、token 重排、融合以及更好的负载分配。</p>
+<p>训练中可以增加平衡损失。一种示意形式是 L_bal=λEΣᵢ fᵢPᵢ，其中 fᵢ 表示实际分派比例，Pᵢ 表示平均路由概率。过度集中时，它推动路由减少热点。Top-k 选择本身是离散的；训练通常通过选中路径的权重与额外信号学习，并不是给排序索引普通求导。</p>
+<p>capacity factor 规定专家本轮容纳的 token 数。超额后丢弃、重路由、排队或其他方案，是具体系统选择；不能把“MoE 一定丢 token”当成定义。DeepSeek-V3 的主要负载均衡采用无辅助损失策略，同时报告了很小系数的序列级辅助项，因此“auxiliary-loss-free”不等于完整训练目标中任何平衡辅助项都没有。</p>
+<h3>18.5 专家跨卡后，通信成为基本成本</h3>
+<div class="flow">
+<span>Router 选择专家</span>
+<span>按目标专家重排 / 分桶</span>
+<span>Dispatch：把 token 发给专家所在设备</span>
+<span>各设备执行专家 FFN</span>
+<span>Combine：结果返回并按门控权重合并</span>
+</div>
+<p>EP（Expert Parallel）把专家分布到不同设备；dispatch/combine 常涉及 all-to-all 类数据交换。若 N 枚 token 各激活 k 个专家，隐藏宽度 D，单元素 b 字节，逻辑分派载荷的粗略尺度约为 N·k·D·b，返回还有对应载荷。实际跨网络字节数还取决于本地路由、去重、分组、共享机制与通信实现。</p>
+<p>所以需要一起看路由倾斜、跨节点比例、网络拓扑、通信重叠、token 重排开销和最慢专家。复制热门专家或节点受限路由可能降低部分瓶颈，但会改变容量、通信或路由安排。不能只用“激活参数/总参数”的比例推断加速倍数。</p>
+<h3>18.6 共享专家是什么？</h3>
+<p>有些结构让每枚 token 都经过一组共享专家，同时再选择少数路由专家。共享部分处理普遍需要的加工，路由部分提供条件计算容量。共享专家也消耗权重与计算，算激活参数与性能时应计入。</p>
+<div class="callout">
+<b>完整的面试回答要同时出现四个词。</b>容量、激活计算、驻留权重、通信负载。前两者解释为什么设计 MoE，后两者解释为什么它对推理基础设施提出新要求。</div>
+<p class="source">生产模型的具体路由与均衡安排：<a href="https://arxiv.org/html/2412.19437v2">DeepSeek-V3 Technical Report，§2.1.2 与 §3</a>。本章 softmax 路由实验使用独立教学约定。</p>
+</div>
+<div class="tf-chapter" id="mla">
+<h2>十九、MLA：把历史 KV 压成潜在表示，为什么还要改 RoPE</h2>
+<p class="tf-chapter-subtitle">低秩压缩、矩阵吸收与缓存容量的适用边界。</p>
+<h3>19.1 GQA 之外，还能压缩什么？</h3>
+<p>GQA 减少 KV 头数。MLA（Multi-head Latent Attention）则把 KV 的公共信息压到较小的 latent 向量，再借助投影生成各头内容。它是模型训练结构的一部分，不是给任意模型的历史 KV 随手做一次无损压缩。</p>
+<p>为了推导清楚，本章暂改用列向量记号：h∈ℝᴰ，c=W_down h，c 的维度 r 远小于展开后的 KV 总宽度。每头内容 key 与 value 可以写成 kᶜ_i=W_K,i c，v_i=W_V,i c。</p>
+<h3>19.2 直接存 c，岂不是每步还要重建全部历史 K/V？</h3>
+<p>如果直接这么做，确实可能把省显存换成大量重建与读写。巧思是利用矩阵乘法结合律，把部分上投影提前并入 query 或后续输出的计算：</p>
+<div class="math-block">\[\begin{aligned}q^{\mathsf T}(W_Kc)&amp;=(W_K^{\mathsf T}q)^{\mathsf T}c\\\sum_j a_j(W_Vc_j)&amp;=W_V\left(\sum_j a_jc_j\right)\end{aligned}\]</div>
+<p>第一行让 query 变换后直接与缓存 latent 匹配；第二行让 value 上投影移到加权求和之后。这样不必为所有历史位置完整恢复大 KV，具体算子仍需要针对这些维度和布局优化。</p>
+<h3>19.3 RoPE 为什么挡住简单吸收？</h3>
+<p>若内容 key 再乘一个依赖历史位置 n 的旋转矩阵 R_n，打分项含 qᵀR_nW_Kc_n。R_n 随位置变，而且矩阵乘法一般不能交换顺序。原本固定的 W_K 不再能按相同方式简单吸收到一次 query 变换中。</p>
+<p>DeepSeek 的 MLA 为此使用<b>解耦 RoPE</b>：内容部分走低秩压缩/吸收，另设承载位置的 query/key 分量。打分可看作内容匹配与位置匹配两项相加，缓存保留 latent 与所需的位置 key。这是“为了让压缩真正高效，连位置机制一起协同设计”的例子。</p>
+<h3>19.4 缓存估算也要改公式</h3>
+<div class="math-block">\[M_{\rm MLA}\approx L\left(\sum_iT_i\right)(r_{\rm KV}+d_R)b\]</div>
+<p>这里表示典型“压缩 KV latent + 共享位置 key”的载荷估算；实际应按模型与后端究竟缓存哪些张量求和。它不能直接照搬 2×Hkv×dₕ 的普通 GQA 公式。量化 scale、对齐、临时展开、不同 prefill/decode 路径仍会影响峰值。</p>
+<p>压缩后仍然可能需要与许多历史 latent 做匹配。<b>KV 载荷减少不等于 dense attention 的上下文依赖自动消失。</b>它主要改变状态表示与执行形状；稀疏选择又是另一个维度的设计。</p>
+<div class="callout">
+<b>为什么只背“MLA 压缩 KV”不够？</b>工程师还应说明如何避免每步展开全部历史、为什么原始 RoPE 会妨碍简单矩阵吸收，以及为何不同后端的 prefill/decode 可以采用不同执行路径。</div>
+<p class="source">架构与解耦 RoPE：<a href="https://arxiv.org/html/2405.04434v5">DeepSeek-V2，§2.1</a>。结合律示例使用列向量约定，与前文的行向量代码记法等价。</p>
+</div>
+<div class="tf-chapter" id="evolution">
+<h2>二十、演变地图：不只“换一个更快的 Attention”</h2>
+<p class="tf-chapter-subtitle">稀疏、线性、混合结构与投机解码，各自改变了什么。</p>
+<h3>20.1 用“改了哪一层”理解发展</h3>
+<div class="tf-table-wrap">
+<table class="decision-table">
+<thead>
+<tr>
+<th>代表性阶段</th>
+<th>变化</th>
+<th>主要作用层次</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>2017</td>
+<td>Encoder–Decoder、缩放点积、多头与 FFN</td>
+<td>奠定基础计算结构</td>
+</tr>
+<tr>
+<td>2018 之后</td>
+<td>双向 Encoder、自回归 Decoder 等任务化发展</td>
+<td>可见性、目标与整体架构</td>
+</tr>
+<tr>
+<td>随后广泛发展的组件路线</td>
+<td>Pre-Norm、RMSNorm、GELU/SwiGLU、RoPE 等</td>
+<td>训练稳定性与模块表达；并非同时出现</td>
+</tr>
+<tr>
+<td>2019—2023 的代表性推理路线</td>
+<td>MQA、GQA、FlashAttention、PagedAttention、低位量化</td>
+<td>头结构、计算组织、缓存与精度</td>
+</tr>
+<tr>
+<td>2024 及之后</td>
+<td>MLA、细粒度 MoE、专家通信协同</td>
+<td>状态压缩与条件计算</td>
+</tr>
+<tr>
+<td>2025—2026 的部分公开路线</td>
+<td>DSA、线性/混合注意力、面向新硬件的 FA4</td>
+<td>减少有效检索、改变状态机制、继续优化等价执行</td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>这张图是代表性路线的归类，不是各方法的完整发明年表。训练数据、规模、后训练和多模态能力同样推动模型进展，但不能全部归因于某一个基础模块的替换。</p>
+<h3>20.2 稀疏注意力：不再读取所有候选位置</h3>
+<p>滑动窗口只看附近若干位置；块稀疏按预定块模式连接；学习式稀疏则按输入选择重点。若每个 query 只对 k 个位置做主 attention，主运算可从与 T 成比例变成与 k 成比例，但还要算<b>选择这些位置的成本</b>。</p>
+<p>DeepSeek-V3.2 的 DSA 使用轻量 indexer 为历史位置打分并选 Top-k，再做主要注意力。它与 FlashAttention 不同：前者改变有效候选集合，后者在给定集合上优化计算组织。稀疏选择也需要训练适配或精度验证；不能对普通模型任意丢掉多数 KV 并假定行为不变。</p>
+<p>如果 indexer 仍扫描很长历史，或选择结果导致不规则读取，实际瓶颈可能转移到索引、Top-k 和数据访问。仅看主 attention 理论 FLOPs 会漏掉这些成本。</p>
+<h3>20.3 线性注意力的简单原型</h3>
+<p>先考虑一种示意机制，用特征映射 φ 替换 softmax 匹配核。对历史维护一个矩阵状态 A 与一个向量状态 b：</p>
+<div class="math-block">\[\begin{aligned}A_t&amp;=A_{t-1}+\phi(k_t)v_t^{\mathsf T},\quad b_t=b_{t-1}+\phi(k_t)\\o_t&amp;=\frac{\phi(q_t)^{\mathsf T}A_t}{\phi(q_t)^{\mathsf T}b_t+\epsilon}\end{aligned}\]</div>
+<p>原本要逐个检索的历史，被累积为固定形状的状态。φ(k)vᵀ 是外积，把 key 特征与 value 各通道的联系累加进去。若维度固定，状态大小不随 token 总数线性增加，单步更新也能避免扫描全部历史。</p>
+<p>代价是这个简单式子一般<b>不是标准 softmax attention 的完全等价重写</b>。有限状态会改变信息保存和检索方式。Gated DeltaNet、KDA 等现代方法还有门控、遗忘、delta 更新等复杂设计，上式只解释“利用结合与状态累积”的入门思想，不能当作这些模型的完整算法。</p>
+<h3>20.4 混合结构为什么值得工程师注意？</h3>
+<p>Qwen3-Next 的公开模型卡描述了 Gated DeltaNet 与 Gated Attention 的混合；Kimi Linear 则结合 KDA 与 MLA 等机制。保留部分可显式检索历史的层，再用较低成本状态机制处理其他层，是一类取舍。</p>
+<p>因此“每层都存同样形状的 K/V”“所有层都能按普通 KV 页随意切分复用”已经不是通用假设。混合模型可能同时需要 KV block、卷积状态、递归状态等。前缀复用要有正确状态检查点；分支、投机失败回滚、迁移恢复都要处理不同类型状态。</p>
+<h3>20.5 投机解码：未知 token 还能一次验证多个吗？</h3>
+<p>可以让较便宜的 draft 模型或预测头先猜一段候选，然后目标模型一次计算这些候选位置的条件分数。猜测正确的一段就能一次推进多个 token。它利用的是“验证已给定的一段候选可以并行计算”，而不是突然知道了未来答案。</p>
+<p>在随机采样的经典精确版本中，候选来自 draft 分布 q，目标分布为 p，可用 min(1,p(x)/q(x)) 接受；拒绝时按归一化的 max(p−q,0) 残差分布补采样。正确的接受与修正机制能保持目标采样分布。Greedy 版本可以按目标 argmax 校验前缀，但它是不同的接受规则。</p>
+<p>收益取决于候选接受率、draft 成本、验证形状、额外 KV 与回滚、流量和硬件。MTP 是多 token 预测的训练/结构方向；将其用于推理还要设计候选生成与验证流程，不能把“有 MTP”直接等同于固定加速倍数。</p>
+<p class="source">稀疏机制：<a href="https://arxiv.org/abs/2512.02556">DeepSeek-V3.2</a>；混合结构：<a href="https://huggingface.co/Qwen/Qwen3-Next-80B-A3B-Instruct">Qwen3-Next 官方模型卡</a>、<a href="https://arxiv.org/abs/2510.26692">Kimi Linear</a>；投机采样：<a href="https://arxiv.org/abs/2211.17192">Fast Inference from Transformers via Speculative Decoding</a>；硬件执行演进：<a href="https://arxiv.org/abs/2603.05451">FlashAttention-4</a>。</p>
+<p class="tf-related">继续阅读：<a href="../inference/speculative-decoding-evolution-mtp-eagle-dflash-dspark.html">投机解码与 MTP 的演变</a>。</p>
+</div>
+<div class="tf-chapter" id="parallel">
+<h2>二十一、跨设备执行：TP、PP、DP、EP 与 PD 分离</h2>
+<p class="tf-chapter-subtitle">从矩阵分片推导通信，而不是只记缩写。</p>
+<h3>21.1 TP：把一层矩阵切开</h3>
+<p>设 Y=XW。若沿 W 的输出列拆成 W=[W₁ W₂]，各设备都拿到 X，分别计算 Y₁=XW₁、Y₂=XW₂，结果在逻辑上拼起来。这常称 column parallel，输出可以保持分片，不必立刻物理拼接。</p>
+<p>下一层若沿输入维拆开，X=[X₁ X₂]，W 按行拆成 W₁、W₂，则 Y=X₁W₁+X₂W₂。各设备算的是部分和，需要跨设备相加。这个依赖解释了为什么 TP 的层内通常会出现 all-reduce、reduce-scatter 或其他通信安排。</p>
+<div class="math-block">\[\begin{aligned}X[W_1\ W_2]&amp;=[XW_1\ XW_2]\\{}[X_1\ X_2]\begin{bmatrix}W_1\\W_2\end{bmatrix}&amp;=X_1W_1+X_2W_2\end{aligned}\]</div>
+<p>Attention 常能按头分片，FFN 的升维与降维也适合配对分片。具体 layout 还涉及序列/通道分片、GQA 头数以及内核需求。TP 降低每卡权重与部分计算，但通信延迟、带宽和最慢 rank 会限制加速。</p>
+<h3>21.2 不同并行方式切的是不同东西</h3>
+<div class="tf-table-wrap">
+<table class="decision-table">
+<thead>
+<tr>
+<th>方案</th>
+<th>主要切分对象</th>
+<th>核心代价</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>TP</td>
+<td>单层的头或矩阵维度</td>
+<td>频繁层内通信与同步</td>
+</tr>
+<tr>
+<td>PP</td>
+<td>不同层放不同设备</td>
+<td>跨阶段传激活，流水线气泡与调度</td>
+</tr>
+<tr>
+<td>DP</td>
+<td>模型副本处理不同请求</td>
+<td>副本权重占用，流量/缓存命中分配</td>
+</tr>
+<tr>
+<td>EP</td>
+<td>不同专家</td>
+<td>dispatch/combine、路由负载倾斜</td>
+</tr>
+<tr>
+<td>CP / 上下文相关分片</td>
+<td>长序列或历史 KV 的部分工作</td>
+<td>交换状态或合并注意力统计量</td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>这些方案可以组合。DP 在推理中通常是独立副本服务，并不意味着要像训练那样同步每一步梯度。PP 对单请求端到端延迟也未必有利：请求还是要依次经过不同层，收益往往来自容量与流水线并发。</p>
+<h3>21.3 不同设备各看一段 KV，怎样合并 attention？</h3>
+<p>可以复用第 14 章的在线 softmax 思想。每段算自己的最大值 m_r、指数和 ℓ_r、内容累加 u_r，先得到全局 m=max m_r，再用 exp(m_r−m) 重缩放后相加。最后用全局 u/ℓ 得到结果。直接平均各段独立 softmax 输出通常是错的。</p>
+<p>这解释了为什么“并行 attention”不仅要划分数据，还需要正确归约归一化统计量。实际通信选择和算法取决于 prefill/decode、布局与网络。</p>
+<h3>21.4 Prefill / Decode 分离</h3>
+<p>PD 分离把两种形状和服务目标不同的工作放在不同资源池：prefill 处理 prompt，decode 负责后续逐步生成。这样可以分别调优，也可以减少长 prefill 对 decode 的直接干扰。</p>
+<p>代价是要把 prompt 的 KV 或其他必要状态传给 decode 端。极简传输下界为：</p>
+<div class="math-block">\[t_{\rm transfer}\ge\frac{\text{状态字节数}}{\text{有效链路带宽}}\]</div>
+<p>真实开销还包括序列化/布局转换、连接、排队、通信启动、分配和同步。若本来 prompt 很短，拆分引入的开销可能超过收益；长 prompt、较大缓存、网络受限时也要谨慎测量。共享前缀、状态压缩、传输与计算重叠会改变成本。</p>
+<h3>21.5 “GPU 数翻倍，速度翻倍”为什么通常不成立？</h3>
+<p>只有可并行的部分能随设备增长；固定开销、通信与同步不会自动消失。小消息可能受延迟限制，大消息受带宽限制。跨节点一般也比同机高速互联更难隐藏。规模越大，拓扑、放置策略、负载偏斜和长尾故障越重要。</p>
+<div class="callout">
+<b>容量与速度分开回答。</b>“必须用 8 卡才能放下”和“8 卡的吞吐/延迟最优”是两种结论。先满足权重、状态和工作区容量，再测量 2/4/8 卡等配置在目标流量下的 SLO goodput，才能决定部署方式。</div>
+<p class="source">当前实现入口：<a href="https://docs.vllm.ai/en/latest/configuration/optimization/">vLLM 并行策略与优化说明</a>。本章矩阵拆分和分段归一化由前述公式推导。</p>
+<p class="tf-related">继续阅读：<a href="../inference/vllm-ascend-01-sequence-parallel.html">从 Transformer Block 推导 SP、PCP 与 DCP</a>。</p>
+</div>
+<div class="tf-chapter" id="production">
+<h2>二十二、生产排障：从用户感知回到具体算子</h2>
+<p class="tf-chapter-subtitle">精度、延迟、吞吐、显存与跨 GPU/NPU 的分析方法。</p>
+<h3>22.1 先把请求生命周期画完整</h3>
+<div class="flow">
+<span>接收 / 排队</span>
+<span>对话模板与 tokenize</span>
+<span>调度与缓存匹配 / 分配</span>
+<span>Prefill → 首 token 采样</span>
+<span>多轮 Decode → 流式传输</span>
+<span>结束、释放或保留可复用状态</span>
+</div>
+<p>用户看见的是整条链路，算子 profiler 通常只覆盖其中一段。比较指标时，先说明观察点是客户端、网关、推理进程还是设备。</p>
+<h3>22.2 四类指标，不要混算</h3>
+<div class="tf-table-wrap">
+<table class="decision-table">
+<thead>
+<tr>
+<th>指标</th>
+<th>一种常用定义</th>
+<th>需要交代的边界</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>TTFT</td>
+<td>首个输出 token 到达时间 − 请求发出时间</td>
+<td>是否含网络、排队与 tokenize</td>
+</tr>
+<tr>
+<td>ITL</td>
+<td>相邻输出 token 的时间间隔</td>
+<td>流式缓冲可能把多个 token 一起送达</td>
+</tr>
+<tr>
+<td>TPOT</td>
+<td>(末 token 时间 − 首 token 时间)/(输出数−1)</td>
+<td>输出少于 2 时不按此式定义</td>
+</tr>
+<tr>
+<td>Throughput / Goodput</td>
+<td>单位时间 token 或请求；满足 SLO 的有效完成量</td>
+<td>区分输入/输出 token、单请求/全系统、失败与超时</td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>平均 TPOT 可能看不出卡顿，因此还看 ITL 分位数和端到端长尾。吞吐上升但大量请求违反 TTFT/ITL 目标，不一定是更好的服务。</p>
+<h3>22.3 六种现象，六条证据链</h3>
+<div class="tf-table-wrap">
+<table class="decision-table">
+<thead>
+<tr>
+<th>现象</th>
+<th>先查什么</th>
+<th>如何验证方向</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>长 prompt 首 token 慢</td>
+<td>排队、输入长度、prefix 命中、prefill 时间</td>
+<td>分离命中/未命中样本；观察 chunk 与负载</td>
+</tr>
+<tr>
+<td>生成越来越慢</td>
+<td>上下文增长后的 KV 读取、attention 占比</td>
+<td>固定 batch，扫 T，比较各算子耗时</td>
+</tr>
+<tr>
+<td>显存足够却很慢</td>
+<td>小矩阵、启动间隙、同步、CPU 调度</td>
+<td>看设备时间线与实际矩阵形状</td>
+</tr>
+<tr>
+<td>高并发 OOM / 抢占</td>
+<td>KV 块、活动长度、工作区与图捕获内存</td>
+<td>分解峰值，限制 token/请求预算，记录抢占</td>
+</tr>
+<tr>
+<td>加卡反而慢</td>
+<td>通信占比、拓扑、负载与同步等待</td>
+<td>固定业务目标，对比分片与并行度</td>
+</tr>
+<tr>
+<td>MoE 延迟长尾明显</td>
+<td>路由热度、最慢专家、跨节点流量</td>
+<td>记录每层专家分派、通信和 GEMM 时间</td>
+</tr>
+</tbody>
+</table>
+</div>
+<h3>22.4 错误输出：按计算链逐段缩小范围</h3>
+<ol>
+<li>
+<b>输入对齐：</b>模型配置、权重、token IDs、chat template、特殊 token、mask 与 position IDs。</li>
+<li>
+<b>先测无缓存全量：</b>验证 embedding、Norm、投影、RoPE、attention、FFN 与输出头，定位最早出现明显误差的一层。</li>
+<li>
+<b>再测增量：</b>同一前缀全量 vs 缓存 decode，再测试不等长 chunk。重点检查 offset、重复旋转、cache 写入和读入位置。</li>
+<li>
+<b>再测实际 batch：</b>多请求、ragged 长度、padding、共享 prefix、块边界、TP 分片。</li>
+<li>
+<b>最后看采样：</b>logits 处理、候选过滤、随机源与流式 detokenize。</li>
+</ol>
+<p>全量相同而增量不同，优先查缓存与位置；单请求正常、batch 异常，优先查索引、长度、mask、布局和跨请求污染；固定长度正常、跨块边界异常，优先查页表、槽位和容量边界。</p>
+<h3>22.5 融合与执行图为何重要？</h3>
+<p>小算子之间的启动间隙、临时结果读写都是真实成本。residual+Norm、gate+activation、量化/反量化与矩阵乘的融合，可能减少这些开销。执行图捕获/重放能降低部分主机调度开销，但动态 batch、内存地址、形状桶和额外图内存需要管理。融合太多也可能增加寄存器压力、限制复用或妨碍最优矩阵内核。</p>
+<p>批处理中打包有效 token，可以少算 padding，但 attention 还要正确表达每条序列的边界。让某条请求读到另一条请求的 token 是正确性错误，不是可接受的精度差异。</p>
+<h3>22.6 GPU 与 NPU：迁移思想，不硬套硬件名字</h3>
+<p>矩阵单元、向量单元、片上存储和设备主存之间的数据组织，是跨硬件都要分析的问题。但 CUDA 的 SM/shared memory、特定 NPU 的片上缓冲与计算单元并不是可一一照抄的同名设备。支持的 dtype、对齐、分块、同步、通信与编译栈都需要按目标平台确认。</p>
+<p>面试时用“这个阶段主要搬哪些张量、算哪些形状、在哪一级复用”来组织说明，再落到目标硬件的工具与算子，会比把某张 GPU 的术语当成所有平台通则更可靠。</p>
+<div class="callout">
+<b>基准测试的最小可复述记录。</b>模型与量化格式、硬件数量与互联、框架版本、输入/输出长度分布、并发或到达率、缓存命中条件、预热与测量窗口、TTFT/ITL 分位数、输入/输出吞吐和错误率。缺少这些，数字难以比较。</div>
+</div>
+<div class="tf-chapter" id="reference">
+<h2>二十三、可运行参考：用最小 Decoder 验证缓存语义</h2>
+<p class="tf-chapter-subtitle">从公式到代码，包含有意义的正确性核对。</p>
+<p class="tf-download">
+<a href="../../assets/transformer-anatomy/reference_transformer.py" download>下载可运行的 NumPy 参考实现</a> · <a href="../../assets/transformer-anatomy/verification.json">查看验证记录</a>
+</p>
+<h3>23.1 这份实现用来验证什么？</h3>
+<p>附带的 reference_transformer.py 是未训练的两层 NumPy Decoder，实现 RMSNorm、相邻通道 RoPE、GQA、SwiGLU、残差与输出头。它输出有正确形状的数值，不具备自然语言生成能力。选择 NumPy 和 float64，是为了把数学与索引暴露清楚，便于在没有 GPU 的机器上核对。</p>
+<p>运行方式：在安装 NumPy 的 Python 环境执行 <code>python reference_transformer.py</code>。程序会运行自检，并生成 verification.json。它没有训练、自动微分、ragged batching、padding、量化、分页、共享前缀或分布式能力。</p>
+<h3>23.2 先读三个关键片段</h3>
+<pre>
+<code># 1. 本次 query 的全局位置；已有 P 个历史 token
+positions = past_len + np.arange(new_length)
+q, k = rope(q, positions), rope(k, positions)
+
+# 2. 新 K/V 追加，历史 K 已旋转过，不再旋转
+k = np.concatenate([old_k, k], axis=2)
+v = np.concatenate([old_v, v], axis=2)
+
+# 3. 因果 mask 要使用全局 query 位置
+allow = key_indices[None, :] &lt;= positions[:, None]
+scores = np.where(allow[None, None], scores, -np.inf)
+out = softmax(scores) @ values</code>
+</pre>
+<p>参考代码为简单起见，每次 concatenate 复制缓存，且用 repeat 展开 KV 头；这些写法有利于验证数学，却会造成生产中应避免的重复搬运/物化。换成分页存储或原地缓存时，不能只追求速度，还要保持完全相同的逻辑位置与分组语义。</p>
+<h3>23.3 已执行的验证结果</h3>
+<div class="tf-table-wrap">
+<table class="calc-table">
+<thead>
+<tr>
+<th>验证项</th>
+<th>最大绝对差（float64）</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>one_token</td>
+<td>2.887e-15</td>
+</tr>
+<tr>
+<td>unequal_chunks</td>
+<td>2.220e-15</td>
+</tr>
+<tr>
+<td>causal_future_isolation</td>
+<td>0.000e+00</td>
+</tr>
+<tr>
+<td>gqa_head_mapping</td>
+<td>0.000e+00</td>
+</tr>
+<tr>
+<td>rope_common_shift</td>
+<td>8.882e-16</td>
+</tr>
+<tr>
+<td>online_softmax</td>
+<td>2.220e-16</td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>自检还覆盖缓存形状、改变未来 token 不影响过去、GQA 与逐头计算一致、旋转保持范数、四种分块尺寸的在线 softmax、大 logits 下稳定归一化、全遮罩行的拒绝，以及 1 GiB 容量算例。这些误差只属于本教学配置的 NumPy float64 运行，不能直接作为 BF16/INT8 内核的容忍阈值。</p>
+<details>
+<summary>展开完整参考实现（也可单独打开附带的 .py 文件）</summary>
+<pre>
+<code class="language-python">&quot;&quot;&quot;教学用、未训练的 NumPy Decoder：RMSNorm + RoPE + GQA + SwiGLU。
+
+运行：python reference_transformer.py
+依赖：NumPy。只验证数学/缓存语义；不代表生产内核的布局或性能。
+本实现故意使用 float64、显式 attention 和 KV repeat，便于核对。
+&quot;&quot;&quot;
+from __future__ import annotations
+
+import json
+from pathlib import Path
+import numpy as np
+
+
+def softmax(x: np.ndarray) -&gt; np.ndarray:
+    &quot;&quot;&quot;沿最后一轴；至少一项有限，禁止全遮罩行。&quot;&quot;&quot;
+    if not np.all(np.any(np.isfinite(x), axis=-1)):
+        raise ValueError(&quot;softmax 不接受全遮罩/无有限分数的行&quot;)
+    z = np.exp(x - x.max(axis=-1, keepdims=True))
+    return z / z.sum(axis=-1, keepdims=True)
+
+
+def rms_norm(x: np.ndarray, gamma: np.ndarray, eps=1e-6) -&gt; np.ndarray:
+    return x / np.sqrt(np.mean(x * x, axis=-1, keepdims=True) + eps) * gamma
+
+
+def silu(x: np.ndarray) -&gt; np.ndarray:
+    # 以 exp(-abs(x)) 避免极端输入的指数溢出。
+    e = np.exp(-np.abs(x))
+    sig = np.where(x &gt;= 0, 1 / (1 + e), e / (1 + e))
+    return x * sig
+
+
+def rope(x: np.ndarray, positions: np.ndarray, base=10000.0) -&gt; np.ndarray:
+    &quot;&quot;&quot;x[B,H,S,dh]；使用相邻通道 (0,1),(2,3)... 配对。&quot;&quot;&quot;
+    dh = x.shape[-1]
+    if dh % 2 or len(positions) != x.shape[-2]:
+        raise ValueError(&quot;需要偶数 head dim 与匹配的 position 数&quot;)
+    inv = base ** (-np.arange(0, dh, 2, dtype=np.float64) / dh)
+    angle = positions[:, None] * inv[None, :]
+    c, s = np.cos(angle)[None, None], np.sin(angle)[None, None]
+    a, b = x[..., 0::2], x[..., 1::2]
+    out = np.empty_like(x)
+    out[..., 0::2] = a * c - b * s
+    out[..., 1::2] = a * s + b * c
+    return out
+
+
+def attention(q, k, v, past_len=0):
+    &quot;&quot;&quot;Q[B,Hq,S,dh]、KV[B,Hkv,T,dh]，返回合头前的输出。&quot;&quot;&quot;
+    hq, hkv = q.shape[1], k.shape[1]
+    if hq % hkv:
+        raise ValueError(&quot;Hq 必须是 Hkv 的整数倍&quot;)
+    # 仅供数学参考。生产内核应直接共享 KV，而不物化全部重复。
+    kr = np.repeat(k, hq // hkv, axis=1)
+    vr = np.repeat(v, hq // hkv, axis=1)
+    scores = q @ kr.swapaxes(-1, -2) / np.sqrt(q.shape[-1])
+    qi = past_len + np.arange(q.shape[-2])
+    kj = np.arange(k.shape[-2])
+    allow = kj[None, :] &lt;= qi[:, None]
+    scores = np.where(allow[None, None], scores, -np.inf)
+    return softmax(scores) @ vr
+
+
+class TinyDecoder:
+    def __init__(self, seed=7, vocab=128, d=32, hq=4, hkv=2, layers=2, f=64):
+        if d % hq or hq % hkv or (d // hq) % 2:
+            raise ValueError(&quot;教学配置要求 D%Hq=0、Hq%Hkv=0、dh 为偶数&quot;)
+        self.d, self.hq, self.hkv = d, hq, hkv
+        self.dh = d // hq
+        rng = np.random.default_rng(seed)
+        def weight(m, n):
+            return rng.normal(0, 1 / np.sqrt(m), (m, n))
+        self.embed = weight(vocab, d)
+        self.blocks = []
+        for _ in range(layers):
+            self.blocks.append(dict(
+                n1=np.ones(d), n2=np.ones(d),
+                wq=weight(d, hq * self.dh),
+                wk=weight(d, hkv * self.dh),
+                wv=weight(d, hkv * self.dh), wo=weight(d, d),
+                wg=weight(d, f), wu=weight(d, f), wd=weight(f, d),
+            ))
+        self.final_norm = np.ones(d)
+        self.lm_head = weight(d, vocab)  # 未共享输出权重
+
+    def forward(self, token_ids, caches=None):
+        &quot;&quot;&quot;同 batch、无 padding、连续位置；不支持 ragged/跨请求共享。&quot;&quot;&quot;
+        x = self.embed[np.asarray(token_ids)]
+        if x.ndim != 3 or x.shape[1] == 0:
+            raise ValueError(&quot;输入须为非空 [B,S] token ID&quot;)
+        batch, seq, _ = x.shape
+        if caches is None:
+            caches = [None] * len(self.blocks)
+        if len(caches) != len(self.blocks):
+            raise ValueError(&quot;缓存层数不匹配&quot;)
+        lengths = [0 if c is None else c[0].shape[-2] for c in caches]
+        if len(set(lengths)) != 1:
+            raise ValueError(&quot;各层历史长度必须一致&quot;)
+        new_caches = []
+        for w, cache, past in zip(self.blocks, caches, lengths):
+            n = rms_norm(x, w[&#x27;n1&#x27;])
+            def split(z, heads):
+                return z.reshape(batch, seq, heads, self.dh).transpose(0, 2, 1, 3)
+            q = split(n @ w[&#x27;wq&#x27;], self.hq)
+            k = split(n @ w[&#x27;wk&#x27;], self.hkv)
+            v = split(n @ w[&#x27;wv&#x27;], self.hkv)
+            positions = past + np.arange(seq)
+            q, k = rope(q, positions), rope(k, positions)
+            if cache is not None:
+                old_k, old_v = cache
+                expected = (batch, self.hkv, past, self.dh)
+                if old_k.shape != expected or old_v.shape != expected:
+                    raise ValueError(&quot;缓存形状与本次 batch/头数不兼容&quot;)
+                k = np.concatenate([old_k, k], axis=2)
+                v = np.concatenate([old_v, v], axis=2)
+            # K 在写入 cache 前已旋转；历史 K 不重复旋转。
+            new_caches.append((k, v))
+            a = attention(q, k, v, past_len=past)
+            a = a.transpose(0, 2, 1, 3).reshape(batch, seq, self.d)
+            x = x + a @ w[&#x27;wo&#x27;]
+            n = rms_norm(x, w[&#x27;n2&#x27;])
+            x = x + (silu(n @ w[&#x27;wg&#x27;]) * (n @ w[&#x27;wu&#x27;])) @ w[&#x27;wd&#x27;]
+        logits = rms_norm(x, self.final_norm) @ self.lm_head
+        return logits, new_caches
+
+
+def online_attention(scores, values, block_size=2):
+    &quot;&quot;&quot;单 query 的在线 softmax，values[N,dv]。&quot;&quot;&quot;
+    m, total = -np.inf, 0.0
+    acc = np.zeros(values.shape[-1], dtype=np.float64)
+    for start in range(0, len(scores), block_size):
+        sb, vb = scores[start:start + block_size], values[start:start + block_size]
+        new_m = max(m, sb.max())
+        alpha = np.exp(m - new_m)
+        p = np.exp(sb - new_m)
+        total = alpha * total + p.sum()
+        acc = alpha * acc + p @ vb
+        m = new_m
+    return acc / total
+
+
+def self_test():
+    rng = np.random.default_rng(11)
+    ids = rng.integers(0, 128, (2, 11))
+    model = TinyDecoder()
+    full, full_cache = model.forward(ids)
+    errors = {}
+    for name, chunks in [(&#x27;one_token&#x27;, [1] * 11), (&#x27;unequal_chunks&#x27;, [3, 2, 1, 5])]:
+        cache, outputs, start = None, [], 0
+        for size in chunks:
+            out, cache = model.forward(ids[:, start:start + size], cache)
+            outputs.append(out)
+            start += size
+        actual = np.concatenate(outputs, axis=1)
+        np.testing.assert_allclose(actual, full, rtol=1e-10, atol=1e-10)
+        errors[name] = float(np.max(np.abs(actual - full)))
+        for k, v in cache:
+            assert k.shape == v.shape == (2, 2, 11, 8)
+    # 改未来 token，不应改变较早位置的 logits。
+    changed = ids.copy()
+    changed[:, 6:] = (changed[:, 6:] + 17) % 128
+    alternative, _ = model.forward(changed)
+    np.testing.assert_allclose(full[:, :6], alternative[:, :6], atol=1e-12)
+    errors[&#x27;causal_future_isolation&#x27;] = float(np.max(abs(full[:, :6] - alternative[:, :6])))
+    # GQA 分组计算应等于显式逐头读取相应 KV。
+    q, k, v = (rng.normal(size=s) for s in [(1,4,3,8),(1,2,3,8),(1,2,3,8)])
+    grouped = attention(q, k, v)
+    headwise = np.concatenate([attention(q[:, i:i+1], k[:, i//2:i//2+1],
+                             v[:, i//2:i//2+1]) for i in range(4)], axis=1)
+    np.testing.assert_allclose(grouped, headwise, atol=1e-12)
+    errors[&#x27;gqa_head_mapping&#x27;] = float(np.max(abs(grouped - headwise)))
+    # 旋转保持范数；共同平移位置保持旋转后的匹配内积。
+    positions = np.array([0, 5, 10])
+    qa, ka = rope(q[:, :2], positions), rope(k, positions)
+    qb, kb = rope(q[:, :2], positions + 100), rope(k, positions + 100)
+    np.testing.assert_allclose((qa*ka).sum(-1), (qb*kb).sum(-1), atol=1e-11)
+    np.testing.assert_allclose((qa*qa).sum(-1), (q[:, :2]**2).sum(-1), atol=1e-11)
+    errors[&#x27;rope_common_shift&#x27;] = float(np.max(abs((qa*ka).sum(-1)-(qb*kb).sum(-1))))
+    # 在线分块输出与整行 softmax 对齐，覆盖大 logits 与不等长尾块。
+    scores, values = rng.normal(size=13) * 20 + 10000, rng.normal(size=(13, 5))
+    direct = softmax(scores) @ values
+    for block in (1, 2, 5, 13):
+        np.testing.assert_allclose(online_attention(scores, values, block), direct,
+                                   rtol=1e-12, atol=1e-12)
+    errors[&#x27;online_softmax&#x27;] = float(np.max(abs(online_attention(scores, values, 2)-direct)))
+    np.testing.assert_allclose(softmax(np.array([1.,2.,3.])),
+                               softmax(np.array([1001.,1002.,1003.])), atol=1e-13)
+    try:
+        softmax(np.array([-np.inf, -np.inf]))
+    except ValueError:
+        pass
+    else:
+        raise AssertionError(&quot;全遮罩行须被拒绝&quot;)
+    # 教程容量算例：默认 GQA 为 1 GiB。
+    assert 2*32*1*8192*8*128*2 == 2**30
+    for cache in full_cache:
+        assert cache[0].shape == (2, 2, 11, 8)
+    result = dict(status=&#x27;passed&#x27;, dtype=&#x27;float64&#x27;, numpy_version=np.__version__,
+                  checks=[&#x27;full_vs_token_decode&#x27;,&#x27;full_vs_chunked_prefill&#x27;,&#x27;cache_shape&#x27;,
+                          &#x27;future_isolation&#x27;,&#x27;gqa_group_mapping&#x27;,&#x27;rope_norm_and_shift&#x27;,
+                          &#x27;online_softmax_four_block_sizes&#x27;,&#x27;softmax_shift_and_mask&#x27;,
+                          &#x27;kv_capacity_formula&#x27;], max_absolute_errors=errors,
+                  limitations=&#x27;未训练模型；NumPy 数学参考，未测试 GPU/NPU 性能或低精度内核。&#x27;)
+    Path(__file__).with_name(&#x27;verification.json&#x27;).write_text(
+        json.dumps(result, ensure_ascii=False, indent=2), encoding=&#x27;utf-8&#x27;)
+    return result
+
+
+if __name__ == &#x27;__main__&#x27;:
+    print(json.dumps(self_test(), ensure_ascii=False, indent=2))
+</code>
+</pre>
+</details>
+<h3>23.4 如何迁移到 PyTorch 或具体后端？</h3>
+<p>先保持形状与 mask 不变，把查表、矩阵乘、归约与 reshape 换成相应张量操作；优先对齐 FP32 reference，再引入 SDPA、融合 Norm、量化与分页缓存。SDPA 是否选择某个 fused backend，受设备、dtype、head dim、mask 等条件影响，不能只凭函数名保证执行了某个特定内核。</p>
+<p>若直接使用 SDPA，要遵循你实际版本的 bool mask 语义与非方阵因果偏置规则。若使用缓存专用内核，则查清它接收的是新 token 长度、总上下文长度、slot mapping 还是块表；这些名字相近的长度不能混用。</p>
+<p class="source">官方算子接口对照：<a href="https://docs.pytorch.org/docs/2.9/generated/torch.nn.functional.scaled_dot_product_attention.html">PyTorch 2.9 SDPA</a>；代码阅读补充：<a href="https://nlp.seas.harvard.edu/2018/04/03/attention.html">The Annotated Transformer</a>。附带实现由本教程独立编写。</p>
+</div>
+<div class="tf-chapter" id="interview">
+<h2>二十四、面试题库：36 个必须能展开的回答</h2>
+<p class="tf-chapter-subtitle">先尝试口述，再展开答案；每组都连接到工程判断。</p>
+<p class="lead">准备方式：先遮住答案，用一张纸画形状、标缓存，再回答“为什么”。每题先给 30 秒结论，再用 2 分钟展开；涉及性能时主动说清假设与验证方法。</p>
+<h3>基础与模块 · 01—12</h3>
+<details>
+<summary>01 · Transformer 为什么比 RNN 更便于训练并行？</summary>
+<p>已知整段输入时，同一层各位置不依赖前一位置刚计算出的循环隐状态，可以组织成矩阵运算。层与层仍顺序依赖；自回归生成未知后续 token 时，也仍有逐步依赖。因果遮罩只限制可见性，不阻止已知位置批量计算。</p>
+</details>
+<details>
+<summary>02 · Tokenizer 与 Embedding 有什么不同？</summary>
+<p>Tokenizer 把文本按既定规则映射成离散 ID；Embedding 用 ID 查可训练向量表。前者决定序列与词表，后者是模型参数。词表不兼容时，单独更换 tokenizer 会打乱权重与编号的对应关系。</p>
+</details>
+<details>
+<summary>03 · 为什么有 Q/K/V 三组，而不是直接 X 与 X 点积？</summary>
+<p>独立投影允许查询特征、匹配特征和传递内容使用不同表示，QKᵀ 也不必对称。可以设计共享或简化变体，但那改变了约束与表达。矩阵 W 是参数，Q/K/V 是输入依赖的激活。</p>
+</details>
+<details>
+<summary>04 · 为什么缩放是 1/√dₖ？</summary>
+<p>独立、零均值、单位方差的简化假设下，dₖ 项乘积之和的方差约为 dₖ，标准差为 √dₖ。按此缩放控制 logits 尺度，缓解 softmax 饱和。它不是对训练后真实分布的严格保证，也不是所有变体唯一可用的归一化。</p>
+</details>
+<details>
+<summary>05 · Causal mask 为什么加 −∞，不能把分数乘 0？</summary>
+<p>exp(−∞)=0，可从 softmax 分母中排除；exp(0)=1，仍会分走权重。还要区分 padding mask、causal mask 和布尔 mask 的 API 约定。全遮罩行必须明确处理，避免 NaN。</p>
+</details>
+<details>
+<summary>06 · 多头是把输入切成几段吗？WO 有什么作用？</summary>
+<p>每个头有自己的投影参数，可读到整个输入向量；大投影后 reshape 只是常见实现。Concat 保留各头通道，WO 学习混合并映回残差宽度。应画出 [B,S,H,dh] 与 [B,H,S,dh] 的变换。</p>
+</details>
+<details>
+<summary>07 · FFN 为什么升维再降维？</summary>
+<p>提供更多中间非线性特征，再组合回 D。没有非线性，多层线性可折叠。升维比例是容量与成本选择，不是证明 4D 永远最优的数学定理。FFN 在同层位置间共享参数，不直接跨 token 混合。</p>
+</details>
+<details>
+<summary>08 · ReLU、GELU、SiLU 与 SwiGLU 如何区分？</summary>
+<p>前三者是逐元素函数：max(0,x)、xΦ(x)、xσ(x)。SwiGLU 是带可学习双分支的门控 FFN 结构，使用 SiLU 门控与另一分支逐元素相乘，再投影。它的“门”不局限在 0 到 1。</p>
+</details>
+<details>
+<summary>09 · LayerNorm、RMSNorm 与 softmax 有何区别？</summary>
+<p>LayerNorm 沿特征轴减均值、除标准差，再学习缩放平移；RMSNorm 通常不减均值，用均方根缩放。softmax 则沿指定轴构造和为 1 的权重。把 norm 输出称为概率，或把常见 LN 归约轴说成 batch，都不准确。</p>
+</details>
+<details>
+<summary>10 · Pre-Norm 为什么常用于深层模型？</summary>
+<p>y=x+F(Norm(x)) 保留较直接的残差主干，通常有利于训练稳定性。Post-Norm 为 Norm(x+F(x))。要同时说明具体 Norm 类型、放置次序和栈末 final norm；不能在已训练模型中随意互换并期待相同输出。</p>
+</details>
+<details>
+<summary>11 · RoPE 怎样让相对位置进入注意力？</summary>
+<p>对 Q/K 的二维通道对分别旋转，(R_mq)ᵀ(R_nk)=qᵀR_(n−m)k。必须说出这是点积中的位置差结构，而非“距离一样就一定分数一样”。长上下文质量还依赖频率设置与训练。</p>
+</details>
+<details>
+<summary>12 · 交叉熵为什么是 −log p(正确 token)？</summary>
+<p>最大化语料条件概率，等价于最小化负对数似然；对数把连乘变为加和。与 softmax 组合的 logits 梯度是 p−one_hot(y)。训练的 target 右移、loss mask 与 causal mask 都应正确，防止泄漏或监督错位。</p>
+</details>
+<h3>推理与系统 · 13—28</h3>
+<details>
+<summary>13 · 为什么缓存 KV，而通常不缓存 Q？</summary>
+<p>未来新 token 的 Q 要检索历史 K，并按分数混合历史 V；历史 Q 不参与这次检索。因果结构使历史逐层 K/V 不依赖新增 token，因而可复用。普通解码仍要读增长中的历史，并没有变成常数时间。</p>
+</details>
+<details>
+<summary>14 · 第一个生成 token 由 prefill 还是 decode 产生？</summary>
+<p>通常由 prompt 最后位置的 logits 采样得到。该输出 token 下一次被送入网络时，才生成自己的 K/V。说清“输出 token 已选择”和“它已写入缓存”之间差一轮，可避免计数与位置错误。</p>
+</details>
+<details>
+<summary>15 · 如何口算一个模型的 KV 显存？</summary>
+<p>普通同构 GQA：2LΣTᵢHkv·dh·b。说明单位，区分 GB/GiB，再加页尾、比例因子、对齐等实际开销。TP/PP、MLA、混合状态要按实际分片或每层类型重新求和。</p>
+</details>
+<details>
+<summary>16 · GQA 把 KV 头从 32 降到 8，attention FLOPs 也变成四分之一吗？</summary>
+<p>不应这么说。Q 仍有 32 个头，各头都有分数和内容混合；KV 投影、缓存和可复用的数据载荷下降。核心点积与 AV 的 query 头数仍在。实现若物化重复 KV，还会损失部分系统收益。</p>
+</details>
+<details>
+<summary>17 · PagedAttention 是减少计算复杂度的算法吗？</summary>
+<p>主要组织与读取非连续 KV 块，减少连续分配、预留和共享带来的浪费。它不自动删除稠密注意力中的 Q/K 连接。页表、块大小、尾部碎片与共享生命周期是核心。</p>
+</details>
+<details>
+<summary>18 · Prefix Cache 命中后，decode 为什么还要读旧 KV？</summary>
+<p>命中省的是重复生成旧 KV 的 prefill 工作。新的 Q 仍要检索历史内容。兼容的模型、适配器、位置与输入条件也要一致；语义近似或相同后缀不构成普通前缀复用依据。</p>
+</details>
+<details>
+<summary>19 · FlashAttention 是近似注意力吗？把平方计算变线性了吗？</summary>
+<p>标准 dense 版本计算同一注意力函数，主要通过融合、分块与在线 softmax 降低 HBM 读写和中间存储。实数数学等价，浮点可有舍入差异；核心全连接点积计算仍是平方规模。</p>
+</details>
+<details>
+<summary>20 · 不同块 softmax 后直接平均为什么错？</summary>
+<p>各块的概率质量不同，独立归一化抹掉了块间相对权重。应合并 m、ℓ、u，按新最大值重缩放，再统一相除。这个思路同样适用于不同设备分段 KV 的注意力归约。</p>
+</details>
+<details>
+<summary>21 · Prefill 一定计算受限、decode 一定带宽受限吗？</summary>
+<p>不是。常见趋势来自矩阵形状与复用差异。用实际 FLOPs、字节数、算术强度、设备时间线与通信占比判断；大 batch、长上下文、MoE、混合模型与量化都可转移瓶颈。</p>
+</details>
+<details>
+<summary>22 · 增大 batch 为什么可能提高吞吐却增加延迟？</summary>
+<p>权重与矩阵单元复用更好，但每轮工作、KV 读取或排队可能增加。要在目标输入/输出分布下，比较满足 TTFT/ITL SLO 的 goodput，不只看满载总 tokens/s。</p>
+</details>
+<details>
+<summary>23 · 为什么 GQA 的 KV 显存不能一律除以 TP？</summary>
+<p>实际要看 Hkv 能否分片、TP 大小、内核布局和复制安排。Hkv 小于 TP 或不能均分时，一些实现会复制。还要区分整网 KV 总量与每个 rank 承载的层和头。</p>
+</details>
+<details>
+<summary>24 · INT4 权重更小，为什么可能没有更快？</summary>
+<p>存在解包、反量化、重排、scale 读取与不理想的矩阵形状。硬件未提供合适低位计算路径或当前任务不受权重载荷限制时，容量收益不一定转成速度。按 batch/长度扫测并验证精度。</p>
+</details>
+<details>
+<summary>25 · EP 最重要的开销在哪里？</summary>
+<p>不止专家 GEMM，还包括 token 分桶重排、dispatch/combine、跨卡/节点交换、热点专家与同步长尾。按每层路由分布和网络拓扑分析，不能用专家计算量单独预测整层时间。</p>
+</details>
+<details>
+<summary>26 · MoE 激活 37B，能按一个 37B Dense 模型估算显存吗？</summary>
+<p>不能。总专家权重要在参与服务的设备/分级存储中放置，另有公共权重、KV 与工作区；batch 还会访问多个不同专家。激活参数只粗略描述当前 token 的部分计算，不能代替总容量。</p>
+</details>
+<details>
+<summary>27 · Chunked Prefill 如何影响 TTFT 与 ITL？</summary>
+<p>缩小 prefill 块能给 decode 更频繁的调度机会，但可能增加开销、降低大矩阵效率或拉长该 prompt 完成时间。实际收益取决于 token 预算、优先级、到达率和缓存，不存在适合所有流量的固定块大小。</p>
+</details>
+<details>
+<summary>28 · PD 分离何时可能不划算？</summary>
+<p>当 prompt 很短、状态传输成本大、链路或队列成为瓶颈、资源池不均衡时。先估算缓存字节/有效带宽的传输下界，再计入分配、转换、同步和负载，比较端到端目标。</p>
+</details>
+<h3>进阶与排障 · 29—36</h3>
+<details>
+<summary>29 · 投机解码如何保持目标分布？</summary>
+<p>不仅比较“猜中没猜中”。经典随机版由 q 提议，按 min(1,p/q) 接受，拒绝时用归一化正残差 max(p−q,0) 修正采样。具体变体必须满足相应正确性条件；只做任意启发式接受不保证分布一致。</p>
+</details>
+<details>
+<summary>30 · MLA 为什么需要矩阵吸收与解耦 RoPE？</summary>
+<p>只存 latent 若每步全量重建历史 KV，可能非常低效。结合律可把上投影移到 query/输出侧，但位置相关旋转阻碍简单固定吸收。把内容匹配与位置匹配解耦，可兼顾压缩与可执行性。</p>
+</details>
+<details>
+<summary>31 · 混合线性模型对缓存系统提出了什么新要求？</summary>
+<p>除了 KV，还可能有递归/卷积等状态；状态形状与可分段恢复方式不同。前缀命中、分支、抢占迁移、投机回滚都要有正确检查点，不能假设每层都有可独立拼接的逐 token KV。</p>
+</details>
+<details>
+<summary>32 · 稀疏 attention 少算很多，为什么实际不一定快？</summary>
+<p>选择器、Top-k、索引、非连续读取、低效小块以及通信可能抵消主计算节省。还要看模型是否适配稀疏模式，验证精度。DSA 的主 attention 与 indexer 应分别测量。</p>
+</details>
+<details>
+<summary>33 · 全量正常，带缓存错误，你先查哪里？</summary>
+<p>用同一 token 序列对齐全量与增量的每层输出，检查 global position、长方形 mask、K 重复 RoPE、cache 长度、写入槽位与分组。再覆盖 P&gt;0 且本次 q&gt;1 的情况，这是容易遗漏的分块/验证路径。</p>
+</details>
+<details>
+<summary>34 · 长上下文突然 NaN 或精度下降，你怎样缩小范围？</summary>
+<p>先找第一处非有限值或显著误差，检查 softmax 减最大、全遮罩行、低精度归约、位置计算精度与配置、缓存越界或块映射。再验证量化 scale/异常值、shape 支持和后端选择，避免只看最终乱码猜原因。</p>
+</details>
+<details>
+<summary>35 · 你会怎样设计有说服力的性能基准？</summary>
+<p>固定模型/硬件/版本/精度，记录真实输入输出长度与到达模型，控制预热与缓存条件，报告 TTFT/ITL 分位数、goodput、吞吐、错误率和资源占用。分别扫 batch、T、输出长度与并行配置，结合 profiler 验证瓶颈。</p>
+</details>
+<details>
+<summary>36 · 面试讲一次优化项目，什么回答最有含金量？</summary>
+<p>交代工作负载与 SLO → 给出可复现基线 → 用时间线/算量/字节数定位瓶颈 → 说明改动如何针对它 → 做正确性验证 → 报告相同条件下的收益与退化区间。能解释一次无收益或变慢的尝试，往往比只列优化名词更能体现判断力。</p>
+</details>
+</div>
+<div class="tf-chapter" id="exercises">
+<h2>二十五、动手练习：把“听懂”变成“能推、能写、能排查”</h2>
+<p class="tf-chapter-subtitle">10 道有答案的练习与四步实践路径。</p>
+<h3>25.1 十道纸笔与代码练习</h3>
+<details>
+<summary>练习 1 · 手算注意力：q=[1,1]，K/V 用第 6 章设置</summary>
+<p>点积为 [1,1,2]；除 √2 后对最后一轴 softmax，权重约 [0.2483,0.2483,0.5035]；输出约 [1.7587,1.0000]。再把最后一个位置遮住，前两项各 0.5，输出为 [0.5,1]。如果你把被遮分数改成 0 而非 −∞，不会得到这个结果。</p>
+</details>
+<details>
+<summary>练习 2 · P=5，本次 q=2，写出正确的 2×7 可见矩阵</summary>
+<pre>
+<code>query 全局位置 5：1 1 1 1 1 1 0
+query 全局位置 6：1 1 1 1 1 1 1</code>
+</pre>
+<p>1 表示允许。关键条件 j≤P+i，而不是 j≤i。然后把 q 改成 1，再检查你的 API 是否使用了正确对齐。</p>
+</details>
+<details>
+<summary>练习 3 · 对 [1,2,3] 比较 LayerNorm 与 RMSNorm</summary>
+<p>忽略 ε，γ=1、β=0。LN 的均值为 2、方差为 2/3，输出约 [−1.2247,0,1.2247]；RMS 为 √(14/3)，输出约 [0.4629,0.9258,1.3887]。后者不减均值。再自行改变 γ 看输出为什么不必保持原来的统计量。</p>
+</details>
+<details>
+<summary>练习 4 · 32 层、8 KV 头、128 维、BF16，4 条各 16384 token</summary>
+<p>元素载荷 2×32×4×16384×8×128×2=8,589,934,592 字节=8 GiB。若同配置换成 32 KV 头的 MHA，则为 32 GiB。实际申请还要计算尾块、对齐与元数据。</p>
+</details>
+<details>
+<summary>练习 5 · 把 F=4D 的普通 FFN 换成相同参数预算的 SwiGLU</summary>
+<p>普通约 2D×4D=8D²，SwiGLU 约 3DFg，令两者相等，Fg=8D/3。D=4096 时约 10922.7；实际需要选可实现且适合硬件对齐的整数宽度，且真实模型可以采用不同预算。</p>
+</details>
+<details>
+<summary>练习 6 · 方形 Linear 的 B 从 1 变成 32，算术强度怎样变化？</summary>
+<p>按第 16 章理想载荷假设，I=2BD²/[2(D²+2BD)]，D=4096。B=1 时约 1 FLOP/Byte；B=32 时约 31.51。它解释权重复用，不代表整体 batch 延迟只按这个比例变化。</p>
+</details>
+<details>
+<summary>练习 7 · 为什么两个块的 attention 输出不能直接平均？</summary>
+<p>使用实验的分数 [2,1] 与 [3,0]，两个块的指数总质量不同。按共同最大值 3 缩放，第一块分母为 e⁻¹+e⁻²，第二块为 1+e⁻³；应按这些质量合并。自己使用 m/ℓ/u 递推，再与整行 softmax 对比。</p>
+</details>
+<details>
+<summary>练习 8 · MoE logits=[2,1,0,−1]，Top-2，专家输出 2 与 −1</summary>
+<p>按选中项归一化，g₀=e²/(e²+e)=0.7311，g₁=0.2689，混合约 1.1932。若 batch 有 8 枚 token、k=2，总分派数应为 16；专家接收计数总和可以用来检查路由索引。</p>
+</details>
+<details>
+<summary>练习 9 · 9 枚 token、块容量 4、物理映射 [7,2,11]</summary>
+<p>逻辑 token 0—3 在物理块 7；4—7 在块 2；8 在块 11 的偏移 0。共分配 12 槽，尾部空 3。新增 token 9 进入块 11 的偏移 1，无需把此前所有缓存搬到新的连续区域。</p>
+</details>
+<details>
+<summary>练习 10 · 为一个缓存 attention 内核设计最小有效验证集</summary>
+<p>至少包括：无历史的整段计算；P&gt;0 的单 token；P&gt;0 且 q&gt;1 的不等长 chunk；GQA 头映射；跨页边界；不同请求长度与 padding；未来 token 隔离；RoPE offset；极端 logits 与全遮罩约定。比较可解释的中间张量/输出误差，而不只看生成文本。</p>
+</details>
+<h3>25.2 四个循序渐进的实践成果</h3>
+<ol>
+<li>
+<b>能在纸上解释：</b>不看资料，写出 QKᵀ、softmax、AV 的形状，手算三枚 token 的例子，解释 √dₖ 和遮罩。</li>
+<li>
+<b>能在代码中验证：</b>运行参考实现，把某个 chunk 的 position offset 故意写错，观察自检失败，再定位最早误差。也可把分块 softmax 改成错误平均，亲自证伪。</li>
+<li>
+<b>能测出成本：</b>在你的框架中固定模型/硬件，分别扫 batch、上下文和输入长度，记录阶段耗时、显存和 TTFT/ITL，不把理论示意当作测量值。</li>
+<li>
+<b>能讲清改动：</b>选择一个真正测到的瓶颈，完成一次有正确性验证的优化，报告收益范围与退化条件，写出别人能复现的配置。</li>
+</ol>
+<h3>25.3 一分钟口述骨架</h3>
+<p>“文本先经模板与 tokenizer 变成 ID，再查 embedding。每个 Decoder block 用 Norm 稳定输入，Q/K/V 投影与位置机制构造匹配；因果 attention 混合可见位置的内容，经输出投影回到残差流，再由 FFN 做逐位置非线性加工。最后 Norm 和词表投影得到 logits，采样器选择下一 token。推理把已知前缀的逐层 K/V 缓存起来；性能由具体矩阵形状、缓存读取、内存组织、调度与跨卡通信共同决定。现代改进分别作用于模块、状态、精度和执行方式，必须按工作负载验证。”</p>
+<p>这段骨架的价值，在于每个名词你都能继续展开公式、形状和生产问题。若只能复述一句话却推不出缓存容量、解释不了增量 mask，就还需要回到对应实验。</p>
+</div>
+<section class="references-section" id="sources">
+<h2>二十六、参考资料：从入门图解到一手实现</h2>
+<p class="tf-chapter-subtitle">按问题回到原始出处；图与数值的来源边界。</p>
+<p>全文的教学图、交互数值、容量计算和参考代码独立构造，未把示意图当成训练模型的实测结果。下面列出核对过的阅读入口。原文中的历史性能比较只适用于当年的实验，不作为当前服务选型结论。</p>
+<h3>入门与原版结构</h3>
+<ol class="reference-list" start="1">
+<li>
+<a href="https://jalammar.github.io/illustrated-transformer/">Jay Alammar · The Illustrated Transformer</a>：入门图解线索。</li>
+<li>
+<a href="https://blog.csdn.net/yujianmin1990/article/details/85221271">The Illustrated Transformer 中文译文</a>：中文对照材料，非本教程新增技术结论的主要依据。</li>
+<li>
+<a href="https://arxiv.org/abs/1706.03762">Attention Is All You Need</a>：Encoder–Decoder、缩放点积、多头与 FFN 的结构基准。</li>
+<li>
+<a href="https://nlp.seas.harvard.edu/2018/04/03/attention.html">Harvard · The Annotated Transformer</a>：从公式阅读实现；页面同时链接更新版。</li>
+<li>
+<a href="https://arxiv.org/abs/1810.04805">BERT</a>：Encoder-only 的代表性训练与架构。</li>
+</ol>
+<h3>基础模块</h3>
+<ol class="reference-list" start="6">
+<li>
+<a href="https://huggingface.co/docs/tokenizers/main/en/components">Tokenizers Components</a> 与 <a href="https://arxiv.org/abs/1808.06226">SentencePiece</a>：分词系统与算法区别。</li>
+<li>
+<a href="https://arxiv.org/abs/1606.08415">GELU</a> 与 <a href="https://arxiv.org/abs/2002.05202">GLU Variants</a>：逐元素函数和门控结构。</li>
+<li>
+<a href="https://arxiv.org/abs/1910.07467">RMSNorm</a> 与 <a href="https://arxiv.org/abs/2002.04745">On Layer Normalization</a>：归一化与放置次序。</li>
+<li>
+<a href="https://arxiv.org/abs/2104.09864">RoFormer / RoPE</a>、<a href="https://arxiv.org/abs/2108.12409">ALiBi</a>、<a href="https://arxiv.org/abs/2309.00071">YaRN</a>：位置机制与扩展。</li>
+</ol>
+<h3>推理与系统</h3>
+<ol class="reference-list" start="10">
+<li>
+<a href="https://arxiv.org/abs/1911.02150">MQA</a> 与 <a href="https://arxiv.org/abs/2305.13245">GQA</a>：KV 共享。</li>
+<li>
+<a href="https://arxiv.org/abs/2205.14135">FlashAttention</a> 与 <a href="https://arxiv.org/abs/2603.05451">FlashAttention-4（2026）</a>：等价注意力的数据移动与硬件协同。</li>
+<li>
+<a href="https://arxiv.org/abs/2309.06180">PagedAttention</a>：KV 分页与共享。</li>
+<li>
+<a href="https://docs.vllm.ai/en/latest/features/automatic_prefix_caching/">vLLM Prefix Caching</a> 与 <a href="https://docs.vllm.ai/en/latest/configuration/optimization/">Optimization</a>：当前实现文档；默认项可能随版本更新。</li>
+<li>
+<a href="https://docs.pytorch.org/docs/2.9/generated/torch.nn.functional.scaled_dot_product_attention.html">PyTorch 2.9 SDPA</a>：本教程明确引用的 mask、非方阵对齐与 GQA 接口版本。</li>
+<li>
+<a href="https://arxiv.org/abs/2210.17323">GPTQ</a>、<a href="https://arxiv.org/abs/2306.00978">AWQ</a>、<a href="https://arxiv.org/abs/2211.10438">SmoothQuant</a>：不同低精度路线。</li>
+<li>
+<a href="https://arxiv.org/abs/2211.17192">Speculative Decoding</a>：提议与验证的分布保持条件。</li>
+</ol>
+<h3>现代模型与状态机制</h3>
+<ol class="reference-list" start="17">
+<li>
+<a href="https://arxiv.org/abs/2407.21783">The Llama 3 Herd of Models</a>：现代 Decoder 代表。</li>
+<li>
+<a href="https://arxiv.org/abs/2405.04434">DeepSeek-V2</a>：MLA 与解耦 RoPE。</li>
+<li>
+<a href="https://arxiv.org/abs/2412.19437">DeepSeek-V3</a>：MoE 路由、均衡与系统协同。</li>
+<li>
+<a href="https://arxiv.org/abs/2512.02556">DeepSeek-V3.2</a>：DSA 的索引与稀疏主注意力。</li>
+<li>
+<a href="https://huggingface.co/Qwen/Qwen3-Next-80B-A3B-Instruct">Qwen3-Next 官方模型卡</a> 与 <a href="https://arxiv.org/abs/2510.26692">Kimi Linear</a>：线性与完整检索机制的混合路线。</li>
+</ol>
+<div class="callout">
+<b>阅读时保持同一套问题。</b>它改变了哪个函数？训练是否需要适配？哪些张量变小？哪些读写或通信减少？新成本在哪里？在什么输入与硬件条件下验证？沿着这些问题，新模型的名字会不断变化，分析方法仍然适用。</div>
+</section>
+</section>
+      <section class="comments-section" id="comments" aria-label="Discussion">
+<div class="comments-header">
+<h2>Discussion</h2>
+</div>
+<div id="utterances-container" class="utterances-container">
+</div>
+<noscript>请启用 JavaScript 后查看评论区。</noscript>
+</section>
+    </article>
+  </div>
+</main>
+  <script src="../../assets/transformer-anatomy/labs.js?v=1">
+</script>
+  <script src="../../app.js?v=44">
+</script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" crossorigin="anonymous">
+</script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js" crossorigin="anonymous" onload="renderMathInElement(document.querySelector('.transformer-article'),{delimiters:[{left:'\\[',right:'\\]',display:true},{left:'\\(',right:'\\)',display:false}]});">
+</script>
+</body>
+</html>
