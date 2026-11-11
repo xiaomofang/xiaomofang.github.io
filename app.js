@@ -6,6 +6,8 @@
   let searchQuery = "";
 
   const KEYWORD_LABELS = {
+    "vllm-ascend": "vLLM × Ascend",
+    parallelism: "并行与通信",
     pymotor: "PyMotor",
     speculative: "投机推理",
     attention: "Attention 加速",

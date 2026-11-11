@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="night">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <script>(function(){try{var s=localStorage.getItem("yichuan-theme");document.documentElement.setAttribute("data-theme",s||(matchMedia("(prefers-color-scheme: dark)").matches?"night":"day"));}catch(e){}})();</script>
+  <link rel="stylesheet" href="../../styles.css?v=70" />
+  <link rel="stylesheet" href="../../assets/vllm-ascend/reader.css?v=1" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous" />
+  <title>推理引擎解剖室：vLLM × Ascend · 专栏与研究路线</title>
+  <meta name="description" content="从张量布局、通信、缓存所有权与执行边界理解 vLLM / vLLM Ascend。以 SP 深度解析为起点，规划 CP、MoE、缓存分层、投机解码、调度与模型加载的源码研究路线。" />
+  <link rel="canonical" href="https://xiaomofang.github.io/posts/inference/vllm-ascend-00-series.html" />
+</head>
+<body class="engine-post">
+  <header class="site-header">
+<div class="header-inner">
+<a href="../../index.html" class="logo">
+<span class="logo-dot">
+</span>
+<span class="logo-text">MOFANG</span>
+</a>
+<div class="header-actions">
+<nav class="site-nav">
+<a href="../../index.html">首页</a>
+</nav>
+<button id="theme-toggle" class="theme-toggle" type="button" aria-label="切换日夜主题">切换日夜</button>
+</div>
+</div>
+</header>
+  <main class="site-main">
+<div class="ve-layout">
+    <aside class="ve-rail">
+<details open>
+<summary>推理引擎解剖室</summary>
+<ol>
+<li>
+<a href="vllm-ascend-00-series.html" aria-current="page">00 · 专栏与研究路线</a>
+</li>
+<li>
+<a href="vllm-ascend-01-sequence-parallel.html">01 · SP 与上下文并行</a>
+</li>
+<li>
+<a href="#roadmap">后续特性选题</a>
+</li>
+<li>
+<a href="#method">每篇怎样研究</a>
+</li>
+<li>
+<a href="#prerequisites">已有基础文章</a>
+</li>
+</ol>
+<small>vLLM × Ascend<br />从一次执行，到一套可解释的系统。</small>
+</details>
+</aside>
+    <article class="post-page">
+      <header class="post-page-header">
+        <p class="post-page-category">Inference · 专栏入口</p>
+        <h1 class="post-page-title">推理引擎解剖室：vLLM × Ascend</h1>
+        <p class="post-lead">一个特性开关，改变了哪一份张量、哪一段通信、哪个状态的所有权？这个专栏沿着实际执行回答这些问题，以 <a href="https://github.com/vllm-project/vllm">vLLM</a> 与 <a href="https://github.com/vllm-project/vllm-ascend">vLLM Ascend</a> 的源码为依据，把概念、代数、实现条件与性能证据连接起来。</p>
+        <div class="post-page-keywords">
+<a class="post-keyword-chip" href="../../index.html?keyword=vllm-ascend">vLLM × Ascend</a>
+<a class="post-keyword-chip" href="../../index.html?keyword=inference-systems">推理框架</a>
+<a class="post-keyword-chip" href="../../index.html?keyword=parallelism">并行与通信</a>
+</div>
+        <p class="post-page-meta" data-date="2026-11-11" data-author="MOFANG" data-minutes="">
+</p>
+        <p class="ve-source-note">专栏建立于 2026-11-11。下列「待研究」是选题计划，不代表文章已经完成或功能已经实测；文档入口固定到 Ascend 提交 89eb8a5e，后续每篇另行记录自己的版本。</p>
+      </header>
+      <div class="logic-map" aria-label="专栏研究方法">
+        <div class="map-node map-node--start">
+<span>1</span>
+<strong>找到问题</strong>
+<p>先定义负载、目标和瓶颈。</p>
+</div>
+<div class="map-arrow">→</div>
+        <div class="map-node map-node--ar">
+<span>2</span>
+<strong>画出执行</strong>
+<p>跟踪张量、状态与依赖。</p>
+</div>
+<div class="map-arrow">→</div>
+        <div class="map-node map-node--par">
+<span>3</span>
+<strong>定位源码</strong>
+<p>核对开关、分支与边界。</p>
+</div>
+<div class="map-arrow">→</div>
+        <div class="map-node map-node--conv">
+<span>4</span>
+<strong>验证代价</strong>
+<p>让正确性和收益各有证据。</p>
+</div>
+      </div>
+      <section class="post-page-content">
+        <h2 id="purpose">一、为什么从「解剖一次执行」开始</h2>
+        <p>推理系统文档里有许多并行、缓存和调度特性。按名字逐项记忆，容易把「功能可以启用」误读成「当前模型已经走到该分支」，也容易把一个版本的收益沿用到另一个版本。这个专栏把研究单位缩小到一次执行：请求在哪一步等待，张量在哪一维分片，谁拥有缓存，哪一次通信真正解除后续计算的依赖。</p>
+        <p>「解剖室」强调把完整系统拆开再接回去。「vLLM × Ascend」既覆盖上游通用机制，也追踪 Ascend 适配中的算子、通信和运行时差异。专栏保留 MOFANG 博客的整体名称，为这些文章建立一个持续扩展的入口。</p>
+        <div class="callout">
+<strong>每篇都区分四类结论：</strong>严格的数学关系、固定版本的代码事实、教学模型的复算结果、真实环境的性能测量。证据适用于哪一层，结论就写到哪一层。</div>
+
+        <h2 id="published">二、已经发布的起点</h2>
+        <ol class="ve-series-list">
+          <li>
+<span class="ve-status published">01 · 已发布</span>
+<h3>
+<a href="vllm-ascend-01-sequence-parallel.html">SP 到底切了什么：从 Transformer Block 到 PCP、DCP 与 DSA-CP</a>
+</h3>
+<p>用两张卡、四个 token 解释 all-gather、all-reduce、reduce-scatter；推导 attention o_proj 与 FFN down_proj 的部分贡献，解释 RMSNorm 的本地计算条件，再进入 PCP query 分配与 DCP softmax 合并。</p>
+<p>包含逐步交互图、版本对照、通信和显存手算，以及可运行的 NumPy 等价性检查。适合从「为什么 FFN 也要 all-gather」开始建立张量布局的直觉。</p>
+</li>
+        </ol>
+        <aside class="aside-card">第一篇刻意保留版本差异：v0.30.0 的 Dense SP 与旧 DSA-CP 不等于当前主分支的同名配置。后续文章也会把「概念能否组合」与「目标版本是否实现并验证」分别说明。</aside>
+
+        <h2 id="roadmap">三、后续可深度研究的特性与问题</h2>
+        <p>下面覆盖本次整理的特性清单，并补上理解它们所需的执行背景。每项先提出可检验的问题，再决定是否值得单独成篇；计划编号用于阅读顺序，未完成条目不创建空文章链接。</p>
+        <ol class="ve-series-list">
+          <li>
+<span class="ve-status">02 · 待研究 · 上下文与缓存分片</span>
+<h3>长上下文分给谁：PCP、DCP 与稀疏注意力</h3>
+<p>继续展开 PCP 的头尾分配、变长请求、prefix cache、chunked prefill、slot mapping 与 restore map；推导 DCP 的 partial output/LSE 合并，并核对 MLA、GQA、SFA、DSA 各后端的差异。</p>
+<p>研究入口：<a href="https://github.com/vllm-project/vllm-ascend/blob/89eb8a5e7a76d085b453a1aeadb6883e12d5ea2d/docs/source/user_guide/feature_guide/context_parallel.md">Context Parallel</a>、<a href="https://github.com/vllm-project/vllm-ascend/blob/89eb8a5e7a76d085b453a1aeadb6883e12d5ea2d/docs/source/user_guide/feature_guide/sequence_parallelism.md">Sequence Parallelism</a>。计划产出是一张 query、KV、头、权重与 rank 的所有权图，以及带版本和后端条件的组合矩阵。</p>
+</li>
+          <li>
+<span class="ve-status">03 · 待研究 · 模型分工与流水</span>
+<h3>每层为什么不必使用同样的并行度</h3>
+<p>从 attention、o_proj、MLP 的矩阵形状出发，研究不同层的 TP 度数怎样改变通信、临时权重视图和 decode 开销；再分析 PP 的阶段边界与 Dynamic Chunk Pipeline 如何安排计算和等待。</p>
+<p>研究入口：<a href="https://github.com/vllm-project/vllm-ascend/blob/89eb8a5e7a76d085b453a1aeadb6883e12d5ea2d/docs/source/user_guide/feature_guide/Fine_grained_TP.md">Fine-grained TP</a>、<a href="https://github.com/vllm-project/vllm-ascend/blob/89eb8a5e7a76d085b453a1aeadb6883e12d5ea2d/docs/source/user_guide/feature_guide/pipeline_parallel.md">Pipeline Parallelism</a>、<a href="https://github.com/vllm-project/vllm-ascend/blob/89eb8a5e7a76d085b453a1aeadb6883e12d5ea2d/docs/source/user_guide/feature_guide/dynamic_chunk_pipeline_parallel.md">Dynamic Chunk Pipeline Parallel</a>。计划通过一张流水时间图解释气泡从哪里产生、何时值得换并行配置。</p>
+</li>
+          <li>
+<span class="ve-status">04 · 待研究 · 专家并行</span>
+<h3>token 怎样找到专家，专家又怎样迁移</h3>
+<p>区分模型 Router、token dispatch/combine、专家权重布局和服务端负载均衡；追踪热门专家造成的跨卡不均衡，以及调整专家映射时哪些状态必须保持一致。进一步研究 attention 与专家阶段分离后的边界成本。</p>
+<p>研究入口：<a href="https://github.com/vllm-project/vllm-ascend/blob/89eb8a5e7a76d085b453a1aeadb6883e12d5ea2d/docs/source/user_guide/feature_guide/expert_parallelism_load_balancer.md">Expert Parallelism Load Balancer</a>、<a href="https://github.com/vllm-project/vllm-ascend/blob/89eb8a5e7a76d085b453a1aeadb6883e12d5ea2d/docs/source/user_guide/feature_guide/large_scale_ep.md">Large Scale EP</a>、<a href="https://github.com/vllm-project/vllm-ascend/blob/89eb8a5e7a76d085b453a1aeadb6883e12d5ea2d/docs/source/user_guide/feature_guide/epd_disaggregation.md">EPD Disaggregation</a>。计划产出 token 归属与 expert 归属两张表，并记录路由倾斜、通信和专家迁移的成本口径。</p>
+</li>
+          <li>
+<span class="ve-status">05 · 待研究 · 缓存池与逐层传输</span>
+<h3>KV 从一块显存变成跨实例资源</h3>
+<p>逐层传输什么时候可以与计算重叠，依赖怎样保证，混合注意力中的普通 KV、卷积状态和递推状态如何交接？同时核对 KVPP 的具体所有权与流水边界，避免只凭缩写推断实现。</p>
+<p>研究入口：<a href="https://github.com/vllm-project/vllm-ascend/blob/89eb8a5e7a76d085b453a1aeadb6883e12d5ea2d/docs/source/user_guide/feature_guide/kv_cache_pool_ascend_store.md">KV Cache Pool / Ascend Store</a>、<a href="https://github.com/vllm-project/vllm-ascend/blob/89eb8a5e7a76d085b453a1aeadb6883e12d5ea2d/docs/source/user_guide/feature_guide/mooncake_layerwise_adaptation_and_optimization.md">Mooncake Layerwise Adaptation and Optimization</a>、<a href="https://github.com/vllm-project/vllm-ascend/blob/89eb8a5e7a76d085b453a1aeadb6883e12d5ea2d/docs/source/user_guide/feature_guide/mooncake_hybrid_attention.md">Mooncake Layerwise Hybrid Attention</a>、<a href="https://github.com/vllm-project/vllm-ascend/blob/89eb8a5e7a76d085b453a1aeadb6883e12d5ea2d/docs/source/user_guide/feature_guide/kvpp.md">KVPP</a>。</p>
+</li>
+          <li>
+<span class="ve-status">06 · 待研究 · 缓存分层与抢占</span>
+<h3>把缓存挪到 CPU，什么时候比重新计算划算</h3>
+<p>从重算、下沉、预取、恢复四个阶段核算带宽与延迟；区分 decoder KV、encoder cache、稀疏/分层缓存和抢占上下文。计划比较缓存生命周期与调度队列如何耦合，再评估恢复时间和尾延迟。</p>
+<p>研究入口：<a href="https://github.com/vllm-project/vllm-ascend/blob/89eb8a5e7a76d085b453a1aeadb6883e12d5ea2d/docs/source/user_guide/feature_guide/layerwise_and_sparse_kv_cache_offloading.md">Layerwise and Sparse KV Cache Offloading</a>、<a href="https://github.com/vllm-project/vllm-ascend/blob/89eb8a5e7a76d085b453a1aeadb6883e12d5ea2d/docs/source/user_guide/feature_guide/kv_cache_cpu_offload.md">KV Cache CPU Offload</a>、<a href="https://github.com/vllm-project/vllm-ascend/blob/89eb8a5e7a76d085b453a1aeadb6883e12d5ea2d/docs/source/user_guide/feature_guide/encoder_cache_cpu_offload.md">Encoder Cache CPU Offload</a>、<a href="https://github.com/vllm-project/vllm-ascend/blob/89eb8a5e7a76d085b453a1aeadb6883e12d5ea2d/docs/source/user_guide/feature_guide/preempt_offload_connector.md">Preempt Offload</a>、<a href="https://github.com/vllm-project/vllm-ascend/blob/89eb8a5e7a76d085b453a1aeadb6883e12d5ea2d/docs/source/user_guide/feature_guide/ucm_deployment.md">UCM Deployment</a>、<a href="https://github.com/vllm-project/vllm-ascend/blob/89eb8a5e7a76d085b453a1aeadb6883e12d5ea2d/docs/source/user_guide/feature_guide/lmcache_ascend_deployment.md">LMCache Ascend Deployment</a>。</p>
+</li>
+          <li>
+<span class="ve-status">07 · 待研究 · 注意力与投机执行</span>
+<h3>一次多算几个 token，怎样真正缩短生成时间</h3>
+<p>连接 FlashAttention 的分块、IO 账本与投机解码的起草/验证周期；分析 acceptance length、验证批大小、回滚状态和缓存写入怎样影响收益。已有文章解释算法演进，后续转向 Ascend 具体执行图与 CP、图模式的组合。</p>
+<p>研究入口：<a href="https://github.com/vllm-project/vllm-ascend/blob/89eb8a5e7a76d085b453a1aeadb6883e12d5ea2d/docs/source/user_guide/feature_guide/speculative_decoding.md">Speculative Decoding</a>、<a href="https://github.com/vllm-project/vllm-ascend/blob/89eb8a5e7a76d085b453a1aeadb6883e12d5ea2d/docs/source/user_guide/feature_guide/flash_attention.md">Flash Attention</a>；可先读站内<a href="speculative-decoding-evolution-mtp-eagle-dflash-dspark.html">投机解码演进</a>与<a href="flash-attention-deep-dive.html">FlashAttention 深入解析</a>。</p>
+</li>
+          <li>
+<span class="ve-status">08 · 待研究 · 执行图与数值</span>
+<h3>换一批请求，为什么数值可能变化</h3>
+<p>研究不同 batch shape、归约顺序、量化、图捕获与 padding 如何影响 logits；明确 Batch Invariance 保障的边界，并把「数学等价」「容差内相同」「逐位一致」分别验证。图捕获的稳定地址与动态请求之间也需要一张状态图。</p>
+<p>研究入口：<a href="https://github.com/vllm-project/vllm-ascend/blob/89eb8a5e7a76d085b453a1aeadb6883e12d5ea2d/docs/source/user_guide/feature_guide/batch_invariance.md">Batch Invariance</a>、<a href="https://github.com/vllm-project/vllm-ascend/blob/89eb8a5e7a76d085b453a1aeadb6883e12d5ea2d/docs/source/user_guide/feature_guide/graph_mode.md">Graph Mode</a>、<a href="https://github.com/vllm-project/vllm-ascend/blob/89eb8a5e7a76d085b453a1aeadb6883e12d5ea2d/docs/source/user_guide/feature_guide/quantization.md">Quantization</a>。后两项是理解性能特性所补充的执行背景。</p>
+</li>
+          <li>
+<span class="ve-status">09 · 待研究 · 服务调度</span>
+<h3>一次更快的计算，为什么未必让请求更快结束</h3>
+<p>用相同请求集合比较长短请求混合、在线与批处理混合、prefill 插入和缓存压力；把等待时间、TTFT、TPOT、吞吐与尾延迟同时纳入。研究调度策略改变了谁先获得 token budget，而不只比较单次 forward 时间。</p>
+<p>研究入口：<a href="https://github.com/vllm-project/vllm-ascend/blob/89eb8a5e7a76d085b453a1aeadb6883e12d5ea2d/docs/source/user_guide/feature_guide/short_request_first.md">ShortRequestFirst Prefill Scheduling</a>、<a href="https://github.com/vllm-project/vllm-ascend/blob/89eb8a5e7a76d085b453a1aeadb6883e12d5ea2d/docs/source/user_guide/feature_guide/batch_job_aware_scheduler.md">Batch-Job-Aware Scheduler</a>。计划用可复算的小型队列轨迹解释策略的得失，再设计真实负载实验。</p>
+</li>
+          <li>
+<span class="ve-status">10 · 待研究 · 加载、启动与扩缩容</span>
+<h3>一份模型怎样变成可服务的实例</h3>
+<p>研究模型权重从存储到设备的各段成本、重复实例能复用哪些资源，以及 fork 类机制在设备上下文和进程生命周期中的边界。把冷启动拆成读取、传输、初始化、图准备和进入调度池，避免用一个总秒数掩盖瓶颈。</p>
+<p>研究入口：<a href="https://github.com/vllm-project/vllm-ascend/blob/89eb8a5e7a76d085b453a1aeadb6883e12d5ea2d/docs/source/user_guide/feature_guide/netloader.md">NetLoader</a>、<a href="https://github.com/vllm-project/vllm-ascend/blob/89eb8a5e7a76d085b453a1aeadb6883e12d5ea2d/docs/source/user_guide/feature_guide/rfork.md">RFork</a>。可以与<a href="pymotor-01-startup.html">PyMotor 实例上线</a>连接，区分引擎加载完成和服务真正可调度。</p>
+</li>
+        </ol>
+        <div class="callout">
+<strong>研究顺序沿依赖推进：</strong>先理解张量与并行，再理解专家和缓存，最后连接执行图、调度与实例生命周期。同一项特性若依赖多个子系统，会在对应主题之间互相链接。</div>
+
+        <h2 id="method">四、后续每篇怎样形成可靠的结论</h2>
+        <h3>4.1 先冻结版本，再确认优化实际生效</h3>
+        <p>记录源码 commit、模型 architecture、权重精度、NPU 与互联、CANN/框架版本和关键配置。阅读启用谓词、模型分支、算子注册和日志，再检查实际执行 shape。文档是入口，配置校验和调用链是机制证据，真实机器的 trace 才能解释时间花在哪里。</p>
+        <h3>4.2 一张图、一份算例、一组可追溯的指标</h3>
+        <p>图负责展示执行顺序与状态所有权；手算或小脚本验证形状和等价关系；性能实验在固定基线下只改变少数因素。没有硬件测量时，就停在源码和数学证据，不把估算画成实际 benchmark。若出现兼容性结论，记录模型、后端、版本与完整组合，而不只写一个勾。</p>
+        <h3>4.3 把失败与回退也纳入模型</h3>
+        <p>一个特性可能因为 token 数、精度、设备能力、图模式或通信拓扑而没有匹配到预期实现。文章需要回答回退到哪里、正确性依赖是否保持、代价如何变化。排障线与成功执行线共同构成可复用的理解。</p>
+        <aside class="aside-card">后续计划不会自动等同于部署建议。涉及大量设备、缓存池或多机网络的方案，需要针对目标负载另做容量、正确性与性能验证，不能只用文档标题决定启用。</aside>
+
+        <h2 id="prerequisites">五、与已有文章形成一条阅读路径</h2>
+        <ul>
+          <li>
+<a href="../basic/attention-mechanism-evolution-mha-mqa-gqa-mla.html">注意力机制演进：MHA、MQA、GQA、MLA</a>：先理解 query 头与 KV 头的分工。</li>
+          <li>
+<a href="llm-inference-prefill-decode-bottleneck-analysis.html">推理性能分析</a>：建立计算、访存、通信与 serving 指标的关系。</li>
+          <li>
+<a href="mooncake-architecture-overview.html">Mooncake 架构与源码阅读地图</a>：连接 KV 存储、传输与复用。</li>
+          <li>
+<a href="speculative-decoding-evolution-mtp-eagle-dflash-dspark.html">MTP、EAGLE、DFlash、DSpark 演进</a>：理解多 token 起草与验证。</li>
+          <li>
+<a href="temperature-zero-determinism.html">Temperature=0 与确定性</a>：区分采样、浮点误差和执行路径。</li>
+          <li>
+<a href="pymotor-00-overview.html">PyMotor 系统阅读系列</a>：把单个引擎放回资源编排与请求调度系统。</li>
+        </ul>
+        <div class="callout">
+<strong>已经可以开始的阅读顺序：</strong>注意力基础 → 推理性能 → 本专栏 SP 首篇 → PCP/DCP 源码 → 专家与缓存 → 服务生命周期。后续文章将围绕这一知识图谱扩展。</div>
+        <div class="essay-ending">从一个 token 的隐藏向量出发，追踪它经过的权重、通信与缓存，直到变成客户端可见的输出。每拆开一个特性，都让它重新回到这条完整路径里：它解决了什么依赖，节省了什么成本，又把代价放到了哪里。</div>
+        <section class="references-section" aria-label="参考与版本入口">
+<h2>参考与版本入口</h2>
+<ol class="reference-list">
+          <li>
+<a href="https://github.com/vllm-project/vllm-ascend/tree/89eb8a5e7a76d085b453a1aeadb6883e12d5ea2d">vLLM Ascend：固定主分支快照 89eb8a5e</a>
+<span>本页未来研究入口均来自该快照的真实文档路径。</span>
+</li>
+          <li>
+<a href="https://github.com/vllm-project/vllm-ascend/tree/c09d3e20b9c45c80b34ae3781440d90904a44023">vLLM Ascend v0.30.0：c09d3e20</a>
+<span>SP 首篇的 Dense SP 与旧 DSA-CP 实现依据。</span>
+</li>
+          <li>
+<a href="https://github.com/vllm-project/vllm">vLLM 上游</a>
+<span>通用模型、并行组、执行器、调度与缓存接口的阅读入口。</span>
+</li>
+          <li>
+<a href="vllm-ascend-01-sequence-parallel.html">SP 首篇与复算材料</a>
+<span>专栏第一份完整的「机制—源码—验证」示例。</span>
+</li>
+        </ol>
+</section>
+      </section>
+      <section class="comments-section" id="comments" aria-label="Discussion">
+<div class="comments-header">
+<h2>Discussion</h2>
+</div>
+<div id="utterances-container" class="utterances-container">
+</div>
+<noscript>请启用 JavaScript 后查看评论区。</noscript>
+</section>
+    </article>
+  </div>
+</main>
+  <script src="../../app.js?v=47">
+</script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" crossorigin="anonymous">
+</script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js" crossorigin="anonymous" onload="renderMathInElement(document.body,{delimiters:[{left:'\\[',right:'\\]',display:true},{left:'\\(',right:'\\)',display:false}]});">
+</script>
+</body>
+</html>

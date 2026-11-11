@@ -89,6 +89,8 @@
         <span class="keyword-label">关键词</span>
         <nav id="keywords" class="keyword-cloud" aria-label="Keywords">
           <button class="keyword-pill active" data-keyword="all" type="button">全部</button>
+          <button class="keyword-pill" data-keyword="vllm-ascend" type="button">vLLM × Ascend</button>
+          <button class="keyword-pill" data-keyword="parallelism" type="button">并行与通信</button>
           <button class="keyword-pill" data-keyword="pymotor" type="button">PyMotor</button>
           <button class="keyword-pill" data-keyword="speculative" type="button">投机推理</button>
           <button class="keyword-pill" data-keyword="attention" type="button">Attention 加速</button>
@@ -108,6 +110,24 @@
 
     <section id="blog" class="section">
       <div class="post-list" id="post-list">
+        <article class="post-card" data-category="inference" data-keywords="vllm-ascend parallelism inference-systems attention" data-date="2026-11-11" data-title="SP 到底切了什么：从 Transformer Block 到 PCP、DCP 与 DSA-CP">
+          <a href="posts/inference/vllm-ascend-01-sequence-parallel.html" class="post-card-link">
+            <div class="post-meta-row"><span class="post-tag">Inference · 推理引擎解剖室 01</span></div>
+            <h3 class="post-title">SP 到底切了什么：从 Transformer Block 到 PCP、DCP 与 DSA-CP</h3>
+            <p class="post-excerpt">从两张卡、四个 token 推导 TP 与 Dense SP 的完整执行，解释 RMSNorm、FFN all-gather、PCP query 分片和 DCP softmax 合并。附逐步交互图、源码版本边界与可运行的数值验证。</p>
+            <p class="post-card-stats">2026年11月11日 · 29 分钟 · 8498 字 · MOFANG</p>
+          </a>
+          <div class="post-card-keywords"><button class="post-keyword-chip" data-keyword="vllm-ascend" type="button">vLLM × Ascend</button><button class="post-keyword-chip" data-keyword="parallelism" type="button">并行与通信</button><button class="post-keyword-chip" data-keyword="attention" type="button">Attention 加速</button></div>
+        </article>
+        <article class="post-card" data-category="inference" data-keywords="vllm-ascend inference-systems parallelism" data-date="2026-11-11" data-title="推理引擎解剖室：vLLM × Ascend · 专栏与研究路线">
+          <a href="posts/inference/vllm-ascend-00-series.html" class="post-card-link">
+            <div class="post-meta-row"><span class="post-tag">Inference · 专栏入口</span></div>
+            <h3 class="post-title">推理引擎解剖室：vLLM × Ascend</h3>
+            <p class="post-excerpt">沿着张量、通信、缓存与状态理解推理特性。从 SP 首篇出发，规划上下文并行、专家负载均衡、缓存分层、投机解码、调度、NetLoader 与 RFork 的后续研究路线。</p>
+            <p class="post-card-stats">2026年11月11日 · 9 分钟 · 2523 字 · MOFANG</p>
+          </a>
+          <div class="post-card-keywords"><button class="post-keyword-chip" data-keyword="vllm-ascend" type="button">vLLM × Ascend</button><button class="post-keyword-chip" data-keyword="inference-systems" type="button">推理框架</button></div>
+        </article>
         <!-- PYMOTOR_SERIES_START -->
         <article class="post-card" data-category="inference" data-keywords="pymotor inference-systems pd-disagg" data-date="2026-11-11" data-title="PyMotor · 把一条请求放进 PyMotor">
           <a href="posts/inference/pymotor-00-overview.html" class="post-card-link">
@@ -471,6 +491,6 @@
     </span>
   </footer>
 
-  <script src="app.js?v=46"></script>
+  <script src="app.js?v=47"></script>
 </body>
 </html>
