@@ -193,6 +193,7 @@
         <h3>「完整」必须同时说明哪个维度、哪个数值</h3>
         <p>「A 的完整 8 维」表示 A 的所有隐藏特征都在本卡，并且该层需要的 TP 贡献已经合并。它不要求 B/C/D 也在本卡。反过来，o_proj 的部分输出虽然也有 8 列，仍不能直接当作完整隐藏向量归一化。</p>
         <h2 id="collectives">拼接 token 与合并贡献是两件事</h2>
+        <p>后文会用到三个缩写：<strong>AG = All-Gather（全收集）</strong>，把各卡的分片收齐；<strong>AR = All-Reduce（全归约）</strong>，把各卡的对应位置求和，让每卡都拿到完整结果；<strong>RS = Reduce-Scatter（归约分散）</strong>，同样先求和，但每卡只拿结果中的一片。这里的归约都指求和，AG 则只拼接、不求和。</p>
         <h3>用一个可以手算的数组区分拼接与求和</h3>
         <p>每个 token 暂时只显示一个坐标。卡 0 产生贡献 [1,2,3,4]，卡 1 产生贡献 [10,20,30,40]。这里使用 SUM 归约。</p>
         <table class="calc-table decision-table">
@@ -206,19 +207,19 @@
 </thead>
 <tbody>
           <tr>
-<td>All-reduce</td>
+<td>AR · All-Reduce（求和后每卡拿全量）</td>
 <td>[11,22,33,44]</td>
 <td>[11,22,33,44]</td>
 <td>对应位置求和，每卡拿全量结果。</td>
 </tr>
           <tr>
-<td>Reduce-scatter</td>
+<td>RS · Reduce-Scatter（求和后每卡拿一片）</td>
 <td>[11,22]</td>
 <td>[33,44]</td>
 <td>对应位置求和，结果按块归不同卡。</td>
 </tr>
           <tr>
-<td>对上一行再 All-gather</td>
+<td>对上一行再 AG · All-Gather（收齐分片）</td>
 <td>[11,22,33,44]</td>
 <td>[11,22,33,44]</td>
 <td>收齐各卡结果块，不再相加。</td>
@@ -327,13 +328,15 @@ Q [4,2] × Kᵀ [2,4] → 分数 [4,4]
         <p>普通 TP 的层间隐藏状态往往在每卡保存 NH 个元素；token 分片后，本卡保留 NH/T 个。残差与相应 Norm、add 的逐元素工作也按这种分工缩小。以 BF16、N=4096、H=4096、T=8 为例，一份 [N,H] 张量为 32 MiB，层间分片为每卡 4 MiB。</p>
         <p>这不等于总显存、KV cache 或整层峰值显存都缩小 8 倍。权重、中间激活、收齐后的输入、通信暂存区、图捕获缓冲和 KV cache 各有自己的布局。特别是 all-gather 附近仍会出现全量 token 视图，需要区分「层间常驻大小」与「运行时峰值」。</p>
         <h3>同一 dtype 下，拆分并不自动减少通信字节</h3>
-        <p>设一次待归约张量大小为 M=NHb 字节，b 为每元素字节数。在理想 ring 算法的发送量口径下：</p>
+        <p>下面公式中的 AG 是 All-Gather（收齐分片），AR 是 All-Reduce（求和后每卡拿全量），RS 是 Reduce-Scatter（求和后每卡拿一片）。V 统计一次操作中<strong>每张卡累计发送的字节数</strong>，T 是参与通信的卡数。M=NHb 是完整结果张量的大小，N 为 token 数，H 为隐藏维度，b 为每元素字节数；在 AG 中，每卡起初只持有 M/T 字节。</p>
+        <p>理想 ring 算法把结果分成 T 块，每块 M/T 字节。RS 与 AG 都各有 T−1 轮、每轮发送一块，因此各发送 (T−1)M/T 字节；按 RS 加 AG 两阶段实现的 AR，则把两段发送量相加：</p>
         <div class="math-block">\[
           V_{\mathrm{RS}}=\frac{T-1}{T}M,\quad
           V_{\mathrm{AG}}=\frac{T-1}{T}M,\quad
           V_{\mathrm{AR}}=2\frac{T-1}{T}M.
         \]</div>
-        <p>因此一对 RS+AG 与一次 AR 的理想发送字节量相同。M=32 MiB、T=8 时，每次 RS 或 AG 发送 28 MiB，AR 为 56 MiB。一个有两个合并点的 block，2 次 AR 与 2 次 RS+2 次 AG 都对应每 rank 112 MiB 的这一理想发送量。此处不再把接收字节重复计入，也不是 HCCL 实测链路流量。</p>
+        <p>沿用前面的双卡数组，RS 先让卡 0 拿到求和结果的前半段 [11,22]、卡 1 拿到后半段 [33,44]；再执行 AG，两卡就都拿到 [11,22,33,44]。AR 一次操作交付的也是这个完整结果。SP 利用的正是中间「每卡只拿一片」的状态，在收齐前先处理本地 token 的 Norm 和残差。</p>
+        <p>因此，「求和后分片，再收齐」与一次「求和后每卡拿全量」的理想发送字节量相同。M=32 MiB、T=8 时，每次 RS 或 AG 发送 28 MiB，AR 为 56 MiB。一个有两个合并点的 block，普通 TP 的两次 AR 与 Dense SP 的两次 RS、两次 AG，都对应每卡 112 MiB 的这一理想发送量。此处只计发送量，不把接收量再加一遍；它也不是 HCCL 实测链路流量。</p>
         <h3>收益来自边界重排，速度必须实测</h3>
         <p>RS 后的 Norm 和残差运算可只做本卡 token，通信又可与相邻矩阵计算融合或重叠。量化还可能改变交换张量的 dtype，从而改变字节账本。反过来，更多 collective 调用、同步、padding 和小矩阵会抵消节省。小 batch decode 的收益尤其不能由长 prefill 的结果推断。</p>
         <p>Sequence Parallelism 早期与选择性重计算一起用于训练激活优化，但训练中的反向保存和重计算问题不能直接搬成推理加速百分比。理解其布局结构，可参阅 <a href="https://arxiv.org/abs/2205.05198">Reducing Activation Recomputation in Large Transformer Models</a>；部署收益则要回到具体模型、硬件和负载。</p>
