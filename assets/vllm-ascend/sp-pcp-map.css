@@ -1,0 +1,37 @@
+.ve-workmap {
+  margin: 28px 0;
+  padding: 20px 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  font-size: 15px;
+  line-height: 1.8;
+  scroll-margin-top: 24px;
+}
+.ve-workmap figcaption { font-size: 17px; font-weight: 600; }
+.ve-workmap .ve-workmap-key { margin: 16px 0 10px; color: var(--text-soft); font-size: 13px; }
+.ve-workmap-matrix {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) repeat(4, minmax(0, 1fr));
+  gap: 5px;
+}
+.ve-workmap-axis { display: grid; place-items: center; padding: 8px 0; text-align: center; min-width: 0; }
+.ve-workmap-axis:first-child { font-size: 12px; color: var(--text-soft); }
+.ve-workmap-query { display: grid; align-content: center; min-width: 0; padding: 8px 0; }
+.ve-workmap-query small { color: var(--text-soft); font-size: 12px; }
+.ve-workmap-cell { display: grid; place-items: center; min-width: 0; min-height: 60px; }
+.ve-workmap-cell[data-rank="0"] { background: color-mix(in srgb, var(--hue-blue) 20%, transparent); }
+.ve-workmap-cell[data-rank="1"] { background: color-mix(in srgb, var(--hue-orange) 20%, transparent); }
+.ve-workmap-cell[data-rank="2"] { background: color-mix(in srgb, var(--hue-purple) 20%, transparent); }
+.ve-workmap-cell[data-rank="3"] { background: color-mix(in srgb, var(--accent) 20%, transparent); }
+.ve-workmap .ve-workmap-state { margin-top: 16px; }
+.ve-workmap .ve-workmap-state[hidden] { display: none; }
+.ve-workmap .ve-workmap-state p { margin: 0 0 6px; font-size: 14px; line-height: 1.8; }
+.ve-workmap .ve-workmap-state p:last-child { margin-bottom: 0; font-size: 13px; color: var(--text-soft); }
+.ve-workmap .ve-workmap-note { display: block; margin-top: 12px; font-size: 12px; color: var(--text-soft); }
+@media (max-width: 600px) {
+  .ve-workmap { font-size: 14px; padding: 18px 0; }
+  .ve-workmap .ve-button { min-height: 44px; }
+  .ve-workmap-matrix { gap: 4px; }
+  .ve-workmap-cell { min-height: 54px; }
+}

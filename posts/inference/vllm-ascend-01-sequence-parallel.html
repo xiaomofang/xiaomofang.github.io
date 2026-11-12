@@ -6,6 +6,7 @@
   <script>(function(){try{var s=localStorage.getItem("yichuan-theme");document.documentElement.setAttribute("data-theme",s||(matchMedia("(prefers-color-scheme: dark)").matches?"night":"day"));}catch(e){}})();</script>
   <link rel="stylesheet" href="../../styles.css?v=70">
   <link rel="stylesheet" href="../../assets/vllm-ascend/reader.css?v=2">
+  <link rel="stylesheet" href="../../assets/vllm-ascend/sp-pcp-map.css?v=1">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous">
   <title>SP 到底切了什么：从 Transformer Block 到 PCP、DCP 与 DSA-CP · 推理引擎解剖室 01</title>
   <meta name="description" content="从两张卡、四个 token 出发，推导 TP、Dense SP、SP MoE 的完整计算与通信过程，解释 RMSNorm、FFN all-gather、PCP query 分片、DCP softmax 合并，并按固定源码核对组合边界。">
@@ -411,27 +412,57 @@ Q [4,2] × Kᵀ [2,4] → 分数 [4,4]
         <h2 id="context-parallel">PCP 分 query，DCP 分历史 KV</h2>
         <h3>PCP 把注意力内部的 query 行也分开</h3>
         <p>前面的 Dense SP+TP2 中，两卡都计算 A/B/C/D 的 query，但各负责两个头。若用一个普通全注意力、TP1、PCP2 的教学模型，每卡可处理全部头、只负责部分 query。例如头尾配对后，卡 0 处理 A/D，卡 1 处理 B/C。</p>
-        <table class="decision-table">
-<thead>
-<tr>
-<th>注意力核中的工作</th>
-<th>卡 0</th>
-<th>卡 1</th>
-</tr>
-</thead>
-<tbody>
-          <tr>
-<td>Dense SP + TP2</td>
-<td>Q(A/B/C/D)，头 1、2</td>
-<td>Q(A/B/C/D)，头 3、4</td>
-</tr>
-          <tr>
-<td>PCP2 + TP1</td>
-<td>Q(A/D)，全部四个头</td>
-<td>Q(B/C)，全部四个头</td>
-</tr>
-        </tbody>
-</table>
+        <figure class="ve-workmap" id="sp-pcp-work-map" data-sp-pcp-map>
+          <figcaption>注意力计算分工：query × 注意力头</figcaption>
+          <div class="ve-controls" role="group" aria-label="切换注意力并行方式">
+            <button class="ve-button" type="button" data-workmap-mode="sp" aria-pressed="true" aria-controls="workmap-state-sp" disabled>TP2 + Dense SP</button>
+            <button class="ve-button" type="button" data-workmap-mode="pcp" aria-pressed="false" aria-controls="workmap-state-pcp" disabled>PCP2 · TP1</button>
+            <button class="ve-button" type="button" data-workmap-mode="both" aria-pressed="false" aria-controls="workmap-state-both" disabled>TP2 × PCP2</button>
+          </div>
+          <div class="ve-workmap-key">每格＝一个 query 在一个头上的完整注意力计算；格内标出执行它的卡。</div>
+          <div class="ve-workmap-matrix" role="img" aria-label="全部 query 的头 1、2 由卡 0 计算，头 3、4 由卡 1 计算" data-workmap-matrix>
+            <div class="ve-workmap-axis">query／可见 KV</div>
+            <div class="ve-workmap-axis">头 1</div>
+            <div class="ve-workmap-axis">头 2</div>
+            <div class="ve-workmap-axis">头 3</div>
+            <div class="ve-workmap-axis">头 4</div>
+            <div class="ve-workmap-query"><span>A</span> <small>1 个 key</small></div>
+            <div class="ve-workmap-cell" data-workmap-query="A" data-head="1" data-rank="0">卡 0</div>
+            <div class="ve-workmap-cell" data-workmap-query="A" data-head="2" data-rank="0">卡 0</div>
+            <div class="ve-workmap-cell" data-workmap-query="A" data-head="3" data-rank="1">卡 1</div>
+            <div class="ve-workmap-cell" data-workmap-query="A" data-head="4" data-rank="1">卡 1</div>
+            <div class="ve-workmap-query"><span>B</span> <small>2 个 key</small></div>
+            <div class="ve-workmap-cell" data-workmap-query="B" data-head="1" data-rank="0">卡 0</div>
+            <div class="ve-workmap-cell" data-workmap-query="B" data-head="2" data-rank="0">卡 0</div>
+            <div class="ve-workmap-cell" data-workmap-query="B" data-head="3" data-rank="1">卡 1</div>
+            <div class="ve-workmap-cell" data-workmap-query="B" data-head="4" data-rank="1">卡 1</div>
+            <div class="ve-workmap-query"><span>C</span> <small>3 个 key</small></div>
+            <div class="ve-workmap-cell" data-workmap-query="C" data-head="1" data-rank="0">卡 0</div>
+            <div class="ve-workmap-cell" data-workmap-query="C" data-head="2" data-rank="0">卡 0</div>
+            <div class="ve-workmap-cell" data-workmap-query="C" data-head="3" data-rank="1">卡 1</div>
+            <div class="ve-workmap-cell" data-workmap-query="C" data-head="4" data-rank="1">卡 1</div>
+            <div class="ve-workmap-query"><span>D</span> <small>4 个 key</small></div>
+            <div class="ve-workmap-cell" data-workmap-query="D" data-head="1" data-rank="0">卡 0</div>
+            <div class="ve-workmap-cell" data-workmap-query="D" data-head="2" data-rank="0">卡 0</div>
+            <div class="ve-workmap-cell" data-workmap-query="D" data-head="3" data-rank="1">卡 1</div>
+            <div class="ve-workmap-cell" data-workmap-query="D" data-head="4" data-rank="1">卡 1</div>
+          </div>
+          <div aria-live="polite">
+            <div class="ve-workmap-state" id="workmap-state-sp" data-workmap-state="sp">
+              <p>Norm／残差处：卡 0 存 A/B，卡 1 存 C/D；All-Gather（收齐分片）后，两卡都计算全部 query。</p>
+              <p>TP 通信组 {卡 0，卡 1}；Dense SP 也用这两张卡，不增加卡数。</p>
+            </div>
+            <div class="ve-workmap-state" id="workmap-state-pcp" data-workmap-state="pcp" hidden>
+              <p>注意力中：卡 0 只计算 A/D 的 query，卡 1 只计算 B/C 的 query；各 query 仍须获得正确的上下文 KV。</p>
+              <p>TP 各为单卡；每卡都有全部头的权重，query 分到两卡。</p>
+            </div>
+            <div class="ve-workmap-state" id="workmap-state-both" data-workmap-state="both" hidden>
+              <p>PCP 分片 0 负责 A/D，PCP 分片 1 负责 B/C；每片内部再按 TP 分头。</p>
+              <p>TP 组 {卡 0，卡 1}、{卡 2，卡 3}；PCP 组 {卡 0，卡 2}、{卡 1，卡 3}，共 4 卡。</p>
+            </div>
+          </div>
+          <small class="ve-workmap-note">普通全注意力的教学分工图；各 query 保留原始位置和因果关系。具体模型与后端的组合边界见下文。</small>
+        </figure>
         <p>PCP 仍需给本地 query 提供正确的上下文。D 必须能读取 A/B/C/D 的有效 KV；交换的是 KV、缓存更新输入，还是某种前处理结果，要看后端。不能只算两个互不交流的局部序列，再拼接 attention 输出。头尾配对使 A 与 D 的因果工作量 1+4，恰好与 B、C 的 2+3 均衡；真实实现还处理变长请求和 padding。</p>
         <p>如果这个 TP1 教学模型在每卡完整保存稠密 FFN 权重，FFN 就能只算本卡 token；叠加 TP 或 EP 后，还会出现对应权重分片或专家路径的通信。PCP 是独立的 rank 维度，SP 通常复用 TP 组；两者因此可以作用于不同层次，不能仅因都沿 token 切分就视为同义词。</p>
         <h3>DCP 沿历史长度分片保存 KV</h3>
@@ -728,6 +759,8 @@ python assets/vllm-ascend/verify-layouts.py</code>
   <script src="../../app.js?v=47">
 </script>
   <script defer src="../../assets/vllm-ascend/sp-lab.js?v=1">
+</script>
+  <script defer src="../../assets/vllm-ascend/sp-pcp-map.js?v=1">
 </script>
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" crossorigin="anonymous">
 </script>
