@@ -64,7 +64,7 @@
       <header class="post-page-header">
         <p class="post-page-category">Inference · 推理引擎解剖室 01</p>
         <h1 class="post-page-title">SP 到底切了什么：从 Transformer Block 到 PCP、DCP 与 DSA-CP</h1>
-        <p class="post-lead">把 A/B 留在卡 0，C/D 留在卡 1 之后，RMSNorm 可以各算各的，FFN 前却需要把四个 token 收齐。这个看似绕远的步骤，来自 TP 权重仍分在两卡上。沿一个 block 走完，就能看出 SP 省下的计算、没有省下的通信，以及它与 PCP、DCP 的区别。</p>
+        <p class="post-lead">在 Qwen3.5 Dense SP 中，把 A/B 留在卡 0，C/D 留在卡 1 之后，RMSNorm 可以各算各的，FFN 前却需要把四个 token 收齐。这个看似绕远的步骤，来自 TP 权重仍分在两卡上。沿一个 block 走完，就能看出这条 SP 路径省下的计算、没有省下的通信，以及它与 PCP、DCP、DSA-CP 的区别。</p>
         <div class="post-page-keywords">
 <a class="post-keyword-chip" href="../../index.html?keyword=vllm-ascend">vLLM × Ascend</a>
 <a class="post-keyword-chip" href="../../index.html?keyword=parallelism">并行与通信</a>
@@ -73,7 +73,7 @@
 </div>
         <p class="post-page-meta" data-date="2026-11-11" data-author="MOFANG" data-minutes="">
 </p>
-        <p class="ve-source-note">Dense SP 示例对应 vLLM Ascend v0.30.0 的 Qwen3.5 稠密路径，<a href="#source-versions">源码版本差异见文末</a>。</p>
+        <p class="ve-source-note">下方的逐步执行图对应 vLLM Ascend v0.30.0 的 Qwen3.5 Dense SP，不是所有 SP/DSA-CP 后端的通用流程。2026-11-16 补充了 <a href="#dsa-cp-v030">v0.30.0 enable_dsa_cp 路径</a>与<a href="#source-versions">版本对照</a>。</p>
 </header>
       <div class="ve-lab" id="block-lab" data-sp-lab>
           <p class="ve-lab-heading">一个 block 的双卡执行过程</p>
@@ -478,16 +478,33 @@ Q [4,2] × Kᵀ [2,4] → 分数 [4,4]
         <p>手算一个只有两个 key 的例子：卡 0 的 score=0、value=2，所以 Z₀=1、O₀=2；卡 1 的 score=ln 3、value=10，所以 Z₁=3、O₁=10。正确全局输出为 (1×2+3×10)/(1+3)=8。直接平均局部输出得到 6，直接相加得到 12，都不对。实现会交换 partial output 与 LSE 等统计量，不能把它简单理解成普通 TP 的一次 SUM。</p>
         <h3>DSA 选择 KV 位置，MoE 选择专家</h3>
         <p>DeepSeek Sparse Attention 在主注意力之前通过 indexer 选择重要上下文位置，再让主 attention 处理这些位置。以 V3.2 为例，主计算的稀疏性与前面 FFN 的 MoE 是不同机制：一个 token 可以先执行 DSA attention，再进入 MoE FFN。Indexer 本身仍有计算与缓存成本，不能把整体成本不加条件地写成只有 top-k 那部分。[<a href="https://huggingface.co/docs/transformers/en/model_doc/deepseek_v32#deepseek-sparse-attention-dsa">DSA 结构说明</a>]</p>
-        <p>旧的 DSA-CP 是 Ascend 为这类稀疏注意力设计的专门执行路径，依赖相应 SP/FlashComm 布局。它还要适配 indexer、KV 和输出投影；某些 prefill 路径会临时 gather 投影权重，使本卡可以投影本地 token。主分支中的 <code>context_parallel/dsa_cp.py</code> 则已经是 PCP group 上的 DSA 后端，文件名不能作为旧开关仍存在的证据。</p>
+        <h3 id="dsa-cp-v030">v0.30.0 的 enable_dsa_cp：在 TP 组内分配 query</h3>
+        <p>vLLM Ascend v0.30.0 同时包含两条入口：<strong><code>enable_dsa_cp</code> 配合 Runner V1，复用 TP 组和 SP MoE 的 token 分片；PCP 配合 Runner V2，通过 <code>prefill_context_parallel_size</code> 建立独立的上下文并行维度。</strong>该版本的 PCP 仍标为实验性，文档计划在 PCP 就绪后淘汰前一条路径。「旧版 DSA-CP」如果指前一条设计，只是在与 PCP 方案比较，不意味着它在 v0.30.0 已经失效。二者在同一版本内并存，用具体开关和 Runner 区分才不会混淆。[<a href="https://github.com/vllm-project/vllm-ascend/blob/c09d3e20b9c45c80b34ae3781440d90904a44023/docs/source/user_guide/feature_guide/context_parallel.md">v0.30.0 两条入口的说明</a>]</p>
+        <p>设置 <code>additional_config.enable_dsa_cp=true</code> 会使 FlashComm 自动生效，但不会替用户设置 TP、开启 EP、切换 Runner，或打开 PCP/DCP。最终还要满足模型具有 <code>index_topk</code>、TP&gt;1、EP 已开以及通信后端支持 SP MoE。缺少模型或 SP 条件会使最终 DSA-CP 开关关闭；与 Runner V2 或 PCP&gt;1 同时配置会直接报错。该开关控制稀疏注意力的并行执行方式，关闭它不等于让模型失去 DSA 稀疏性。[<a href="https://github.com/vllm-project/vllm-ascend/blob/c09d3e20b9c45c80b34ae3781440d90904a44023/vllm_ascend/ascend_config.py#L697">配置检查与自动启用</a>；<a href="https://github.com/vllm-project/vllm-ascend/blob/c09d3e20b9c45c80b34ae3781440d90904a44023/vllm_ascend/patch/platform/patch_parallel_config.py#L7">SP MoE 条件</a>]</p>
+        <p><strong>这条路径不能套用前面 Dense SP 图中的「收齐 token，每卡计算一半头」。</strong>下面限定为 v0.30.0 中采用 <code>GlmMoeDsaForCausalLM</code> / <code>AscendDSACPModel</code> 的兼容 GLM/SFA Prefill 路径。令 TP=2、PCP=DCP=1，在已经保持 SP 的兼容中间层，两卡的主注意力分工如下；AB/CD 是连续 token 分片，不是 PCP 的头尾配对：</p>
+        <pre><code>卡 0：A/B 的完整隐藏向量 → 本地 RMSNorm → 本地 Q/KV
+卡 1：C/D 的完整隐藏向量 → 本地 RMSNorm → 本地 Q/KV
+
+两卡交换主注意力所需的 KV；indexer 的 K 另行收齐
+
+卡 0：A/B 的 query，各计算全部 4 个主注意力头
+卡 1：C/D 的 query，各计算全部 4 个主注意力头
+
+适用的 Prefill 分支临时收齐完整 o_proj 权重
+卡 0：得到 A/B 的完整注意力输出
+卡 1：得到 C/D 的完整注意力输出
+各自执行本地残差 / Norm，再进入 MoE</code></pre>
+        <p>能够计算全部头，是因为权重布局也变了：<code>q_b_proj</code> 与 <code>kv_b_proj</code> 使用完整权重加载方式，而非普通 TP 的头分片；它们不需要在每轮重新收齐这两份权重。主注意力的 latent KV 等缓存输入在 TP 组内 All-Gather，query 仍留在所属卡。对于无 KV transfer 配置或 KV producer 的适用 Prefill 分支，运行时临时收齐完整 <code>o_proj</code> 权重，于是「本地 token 的全部头输出 × 完整投影」已经给出本地完整结果，无须再求和另一张卡的头贡献。[<a href="https://github.com/vllm-project/vllm-ascend/blob/c09d3e20b9c45c80b34ae3781440d90904a44023/vllm_ascend/ops/linear_op.py#L387">全头投影权重</a>；<a href="https://github.com/vllm-project/vllm-ascend/blob/c09d3e20b9c45c80b34ae3781440d90904a44023/vllm_ascend/attention/context_parallel/sfa_cp.py#L620">DSA-CP 的 query、KV 与输出投影</a>；<a href="https://github.com/vllm-project/vllm-ascend/blob/c09d3e20b9c45c80b34ae3781440d90904a44023/vllm_ascend/utils.py#L1702">完整 o_proj 的角色条件</a>]</p>
+        <p>该版本的 <code>AscendGlmMoeDsaForCausalLM</code> 在满足条件时选择 <code>AscendDSACPModel</code>，允许连续兼容 MoE 层保留同一份 token 分片，局部 Norm、attention 与 MoE 由此衔接。MoE 的专家 dispatch/combine 仍可能跨卡。首层转换、非 SP 层边界和末层出口另有布局恢复；Decode 和非完整投影分支也可能交换头布局并执行 Reduce-Scatter。其他模型是否沿用这份层间布局，要看其模型适配，不能仅凭「GLM」或「DSA-CP」名称判断；上图也不表示整条请求永远没有隐藏状态 All-Gather 或输出 Reduce-Scatter。[<a href="https://github.com/vllm-project/vllm-ascend/blob/c09d3e20b9c45c80b34ae3781440d90904a44023/vllm_ascend/models/deepseek_mtp.py#L95">兼容 GLM 层的分片与边界处理</a>]</p>
         <p>
 <strong>判断分工要看实际 query 行、头范围和缓存所有权。</strong>PCP 也可能 all-gather 隐藏状态用于全局缓存或索引处理，随后仍然只计算本地 query。看到一个 gather，不能马上断言所有卡都回到了 Dense SP 的全部 query 计算。</p>
 
         <h2 id="compatibility">哪些并行方式能叠加</h2>
-        <h3>不能把四个开关全部叠上</h3>
-        <p>SP MoE、PCP、DCP 具有组合路径，但必须满足模型、attention backend、通信后端、rank 规模及版本限制。旧 DSA-CP 与 PCP 在 v0.30.0 配置中显式互斥，因而这四项不存在一个不加条件的「全部开启」。更不能把 MoE/MLA/SFA 的组合支持外推成 Qwen 混合 GDN 的 Dense SP 也自动支持相同组合。</p>
+        <h3>SP、PCP、DCP 与 enable_dsa_cp 的组合边界</h3>
+        <p>SP MoE、PCP、DCP 具有组合路径，但必须满足模型、attention backend、通信后端、rank 规模及版本限制。v0.30.0 的 <code>enable_dsa_cp</code> 与 PCP&gt;1 显式互斥，不能把该开关和 PCP 当成两个可以叠加的 query 分片层次。MoE/MLA/SFA 的组合支持，也不能直接外推到 Qwen 混合 GDN 的 Dense SP。</p>
         <div class="ve-table-scroll">
 <table class="decision-table">
-<caption>版本与条件对照；窄屏可横向滑动查看完整表格。</caption>
+<caption>含 enable_dsa_cp 的行均指 v0.30.0 Runner V1 路径；窄屏可横向滑动。</caption>
 <thead>
 <tr>
 <th>组合</th>
@@ -512,20 +529,20 @@ Q [4,2] × Kᵀ [2,4] → 分数 [4,4]
 <td>SP 是 TP 周围的激活布局，PCP 分 query，DCP 分 KV；不能用任意两两支持替代整组模型验证。本文未在 NPU 上执行这组三开实验。</td>
 </tr>
           <tr>
-<td>旧 DSA-CP + SP</td>
+<td><code>enable_dsa_cp</code> + SP MoE</td>
 <td>在 v0.30.0 是依赖关系。</td>
-<td>旧开关会自动启用 FlashComm，并检查 indexer 与 sequence-parallel MoE 条件。</td>
+<td>该开关使 FlashComm 自动生效；仍需模型 indexer、TP&gt;1、EP 与支持的通信后端，不会自动补齐这些配置。</td>
 </tr>
           <tr>
-<td>旧 DSA-CP + PCP</td>
+<td><code>enable_dsa_cp</code> + PCP&gt;1</td>
 <td>v0.30.0 明确禁止。</td>
 <td>
-<code>AscendConfig.derive_and_validate</code> 对这组配置直接抛错；旧路径要求 Runner V1，PCP 使用 Runner V2。</td>
+<code>AscendConfig.derive_and_validate</code> 对这组配置直接抛错；该版本的 enable_dsa_cp 路径要求 Runner V1，PCP 使用 Runner V2。</td>
 </tr>
           <tr>
-<td>旧 DSA-CP + DCP</td>
+<td><code>enable_dsa_cp</code> + DCP</td>
 <td>不作通用组合承诺。</td>
-<td>这是专门稀疏执行路径，不能把 PCP+DCP 的矩阵机械套入。需要单独核对模型分支和测试；也不能与 PCP 一并凑成四开。</td>
+<td>enable_dsa_cp 不会自动打开 DCP；另行配置时需核对模型对应的组合后端，不能套用 PCP+DCP 的拓扑，也不能再叠加 PCP&gt;1。</td>
 </tr>
           <tr>
 <td>Dense SP + 任意 CP</td>
@@ -535,7 +552,7 @@ Q [4,2] × Kᵀ [2,4] → 分数 [4,4]
         </tbody>
 </table>
 </div>
-        <p>v0.30.0 的旧开关互斥与依赖，可直接定位 <a href="https://github.com/vllm-project/vllm-ascend/blob/c09d3e20b9c45c80b34ae3781440d90904a44023/vllm_ascend/ascend_config.py#L697">AscendConfig 校验</a>；当前固定快照的 PCP/DCP 组合尺寸，见<a href="https://github.com/vllm-project/vllm-ascend/blob/89eb8a5e7a76d085b453a1aeadb6883e12d5ea2d/docs/source/user_guide/feature_guide/context_parallel.md">Context Parallel Guide</a>。支持表给出适用范围，配置谓词决定是否实际启用，硬件测试再确认正确性和收益。</p>
+        <p>v0.30.0 的 <code>enable_dsa_cp</code> 互斥与依赖，可直接定位 <a href="https://github.com/vllm-project/vllm-ascend/blob/c09d3e20b9c45c80b34ae3781440d90904a44023/vllm_ascend/ascend_config.py#L697">AscendConfig 校验</a>；PCP/DCP 组合尺寸见固定 main 快照的<a href="https://github.com/vllm-project/vllm-ascend/blob/89eb8a5e7a76d085b453a1aeadb6883e12d5ea2d/docs/source/user_guide/feature_guide/context_parallel.md">Context Parallel Guide</a>。支持表给出适用范围，配置谓词决定是否实际启用，硬件测试再确认正确性和收益。</p>
         <h3>TP2 × PCP2 × DCP4 为什么仍然是四张卡</h3>
         <p>令 DP=PP=1。PCP 增加进程 rank；SP 复用 TP 组，DCP 复用已有 TP/PCP rank。对支持该拓扑的 MLA/SFA，TP2、PCP2、DCP4 的主 worker 数为 2×2=4，而不是再乘 4 得到 16。</p>
         <figure class="diagram-figure">
@@ -580,8 +597,9 @@ Q [4,2] × Kᵀ [2,4] → 分数 [4,4]
           </svg>
           <figcaption>图 2：行方向按头或权重分工，列方向分配 PCP query，DCP 沿支持的已有 rank 组织缓存协作。EP 的规模也应从实际组定义读取，不能见到一个并行缩写就额外乘一次设备数。</figcaption>
         </figure>
-        <h3>旧 DSA-CP 与 DSA PCP 不要只按名字匹配</h3>
-        <p>在 v0.30.0，<code>enable_dsa_cp</code> 是 Runner V1 的专门开关；PCP 是 Runner V2 的通用上下文并行入口。到本文固定的 main 提交，旧字段已不在 <a href="https://github.com/vllm-project/vllm-ascend/blob/89eb8a5e7a76d085b453a1aeadb6883e12d5ea2d/vllm_ascend/ascend_config.py">配置模型</a>中，<a href="https://github.com/vllm-project/vllm-ascend/blob/89eb8a5e7a76d085b453a1aeadb6883e12d5ea2d/vllm_ascend/attention/context_parallel/dsa_cp.py">同名 DSA CP 文件</a>实现的是 PCP 后端。旧教程中的字段与当前源码文件不是一一对应关系。</p>
+        <h3 id="dsa-cp-version-boundary">v0.30.0 支持该开关，v0.32.0rc1 已移除</h3>
+        <p>截至 2026-11-16，本文核查到的 vLLM Ascend 正式版仍为 <a href="https://github.com/vllm-project/vllm-ascend/releases/tag/v0.30.0">v0.30.0</a>；<a href="https://github.com/vllm-project/vllm-ascend/releases/tag/v0.32.0rc1">v0.32.0rc1</a> 是预发布版本，不能省掉 rc1 写成已经发布的 Ascend v0.32.0。上游 vLLM 与 vLLM Ascend 的发布版本也应分别确认。</p>
+        <p>v0.32.0rc1 的 <a href="https://github.com/vllm-project/vllm-ascend/blob/24487f4f48ee99cf45d86d1c504e645549b8c1ef/vllm_ascend/ascend_config.py">AscendConfig</a> 已没有 <code>enable_dsa_cp</code> 字段，2026-11-16 的 main 快照也一样。该系列通过 <code>prefill_context_parallel_size</code> 进入 PCP；<a href="https://github.com/vllm-project/vllm-ascend/blob/24487f4f48ee99cf45d86d1c504e645549b8c1ef/vllm_ascend/attention/context_parallel/dsa_cp.py">context_parallel/dsa_cp.py</a> 实现的是 PCP group 上的 DSA 后端。文件名保留 DSA CP，不代表 Runner V1 的开关仍然存在，也不会把该开关自动转换成 PCP 配置。</p>
         <h2 id="request">从 prefill 走到逐 token decode</h2>
         <h3>Prefill 输出第一个生成 token</h3>
         <p>设 prompt 分词后为 A/B/C/D。模型先准备 embedding 与位置，再经过全部 decoder block。每层全注意力写入自己对应的 K/V 缓存；通常从最后一个有效位置 D 的末层输出计算词表分数，采样出 E。一次处理四个 prompt token，不表示一次生成四个新 token。</p>
@@ -607,10 +625,10 @@ python assets/vllm-ascend/verify-layouts.py</code>
 </pre>
         <p>本次复算覆盖有效 token 数 1、4、5、9，包括补齐到 2、4、6、10 行的情况。普通 TP 与 Dense SP 对完整参考 block 的最大绝对误差均不超过 4.45×10⁻¹⁶；四 token PCP 示例误差为 0。DCP 手算例的全局结果与分区合并均为 8，而错误的未加权平均为 6。它们验证本文的代数与教学布局，不运行 vLLM、不调用 HCCL，也不证明真实后端的速度或所有 mask/量化分支正确。</p>
         <h3 id="source-versions">这份执行顺序对应哪个版本</h3>
-<p>Dense SP 的调用顺序来自 v0.30.0 的 Qwen3.5 补丁。2026 年 11 月 11 日核对的主分支中，这个 helper 已经删除，旧 DSA-CP 配置入口也已变化；具体区别如下。</p>
+<p>Dense SP 的逐步执行图以 v0.30.0 的 Qwen3.5 补丁为落点；GLM/SFA 的 <code>enable_dsa_cp</code> Prefill 示例也固定在该版本。主分支会继续变化：2026-11-11 的快照缺少这里讨论的 Dense SP helper，2026-11-16 的快照已经重新包含 Dense SP 入口，不能把前一次检查写成主分支永久不支持。</p>
 <div class="ve-table-scroll">
 <table class="decision-table">
-<caption>本文用到的两个实现版本</caption>
+<caption>固定版本与主分支快照；日期指核查时点。</caption>
 <thead>
 <tr>
 <th>源码快照</th>
@@ -622,14 +640,26 @@ python assets/vllm-ascend/verify-layouts.py</code>
           <tr>
 <td>v0.30.0，<a href="https://github.com/vllm-project/vllm-ascend/tree/c09d3e20b9c45c80b34ae3781440d90904a44023">c09d3e20</a>
 </td>
-<td>包含 Qwen3.5 稠密家族的 <code>enable_dense_sp</code>、decoder 补丁，以及旧 <code>enable_dsa_cp</code> 路径。</td>
-<td>Dense SP 的计算与通信推导以这份代码为落点。</td>
+<td>包含 Qwen3.5 Dense SP；同时保留 Runner V1 的 <code>enable_dsa_cp</code> 与 Runner V2 的实验性 PCP。</td>
+<td>本文的 Dense SP 与 GLM/SFA DSA-CP 示例分别对应这份代码的不同路径，不能共用同一张逐算子执行图。</td>
+</tr>
+          <tr>
+<td>v0.32.0rc1，<a href="https://github.com/vllm-project/vllm-ascend/tree/24487f4f48ee99cf45d86d1c504e645549b8c1ef">24487f4f</a>
+</td>
+<td>配置模型已移除 <code>enable_dsa_cp</code>；DSA 上下文并行通过 PCP 入口组织。</td>
+<td>这是预发布版；截至 2026-11-16，不能把它称为已发布的 Ascend v0.32.0 正式版。</td>
 </tr>
           <tr>
 <td>2026-11-11 main，<a href="https://github.com/vllm-project/vllm-ascend/tree/89eb8a5e7a76d085b453a1aeadb6883e12d5ea2d">89eb8a5e</a>
 </td>
-<td>该快照的 <code>enable_sp</code> 只返回 MoE SP 判定；同名 Qwen 补丁已没有上述 Dense SP helper；配置模型中也不再有旧 DSA-CP 字段。</td>
-<td>不能把旧开关直接当作这份主分支的 Dense SP 或 DSA-CP 启用方式。</td>
+<td>该历史快照的 <code>enable_sp</code> 只返回 MoE SP 判定，同名 Qwen 补丁没有上述 Dense SP helper；也没有 <code>enable_dsa_cp</code> 字段。</td>
+<td>这里只记录当时的代码状态，不代表后续主分支永久缺少 Dense SP。</td>
+</tr>
+          <tr>
+<td>2026-11-16 main，<a href="https://github.com/vllm-project/vllm-ascend/tree/c6857b4d3a311de571cd36ee3cd5c1793a6f5844">c6857b4d</a>
+</td>
+<td><code>enable_sp</code> 已重新衔接 Qwen3.5 补丁中的 Dense SP 判定；<code>enable_dsa_cp</code> 字段仍已移除。</td>
+<td>Dense SP 是否可用与 DSA-CP 配置迁移是两件事，不能从一个开关的删除推断另一个特性消失。</td>
 </tr>
         </tbody>
 </table>
@@ -663,9 +693,9 @@ python assets/vllm-ascend/verify-layouts.py</code>
 </tr>
           <tr>
 <td>
-<a href="https://github.com/vllm-project/vllm-ascend/blob/89eb8a5e7a76d085b453a1aeadb6883e12d5ea2d/vllm_ascend/utils.py#L1038">main enable_sp</a>
+<a href="https://github.com/vllm-project/vllm-ascend/blob/c6857b4d3a311de571cd36ee3cd5c1793a6f5844/vllm_ascend/utils.py">2026-11-16 main enable_sp</a>
 </td>
-<td>新的固定版本是否仍保留同一启用谓词；不要只读旧文章。</td>
+<td>MoE SP 与 Qwen3.5 Dense SP 分别如何判定，哪些模型和硬件条件会使开关无效。</td>
 </tr>
           <tr>
 <td>
@@ -692,11 +722,23 @@ python assets/vllm-ascend/verify-layouts.py</code>
 </li>
           <li>
 <a href="https://github.com/vllm-project/vllm-ascend/blob/c09d3e20b9c45c80b34ae3781440d90904a44023/vllm_ascend/ascend_config.py">v0.30.0：AscendConfig</a>
-<span>旧 DSA-CP 与 PCP 的互斥，以及 FlashComm 依赖。</span>
+<span>enable_dsa_cp 与 PCP 的互斥、最终生效条件，以及 FlashComm 的自动启用。</span>
+</li>
+          <li>
+<a href="https://github.com/vllm-project/vllm-ascend/blob/c09d3e20b9c45c80b34ae3781440d90904a44023/vllm_ascend/attention/context_parallel/sfa_cp.py">v0.30.0：GLM/SFA DSA-CP 后端</a>
+<span>TP 组内按 token 分 query、全部头计算、KV 收齐与 Prefill 输出投影。</span>
+</li>
+          <li>
+<a href="https://github.com/vllm-project/vllm-ascend/blob/c09d3e20b9c45c80b34ae3781440d90904a44023/vllm_ascend/models/deepseek_mtp.py">v0.30.0：AscendDSACPModel</a>
+<span>GlmMoeDsaForCausalLM 适配下的层间 SP，以及首层、非兼容层和输出边界处理。</span>
+</li>
+          <li>
+<a href="https://github.com/vllm-project/vllm-ascend/blob/24487f4f48ee99cf45d86d1c504e645549b8c1ef/vllm_ascend/ascend_config.py">v0.32.0rc1：AscendConfig</a>
+<span>该预发布版本已不再包含 enable_dsa_cp 字段。</span>
 </li>
           <li>
 <a href="https://github.com/vllm-project/vllm-ascend/blob/89eb8a5e7a76d085b453a1aeadb6883e12d5ea2d/docs/source/user_guide/feature_guide/context_parallel.md">main 89eb8a5e：Context Parallel Guide</a>
-<span>当前固定快照的拓扑、组合约束与 GQA DCP 退役说明。</span>
+<span>2026-11-11 固定快照的拓扑、组合约束与 GQA DCP 退役说明。</span>
 </li>
           <li>
 <a href="https://github.com/vllm-project/vllm-ascend/blob/89eb8a5e7a76d085b453a1aeadb6883e12d5ea2d/docs/source/developer_guide/Design_Documents/context_parallel.md">Context Parallel 设计</a>
