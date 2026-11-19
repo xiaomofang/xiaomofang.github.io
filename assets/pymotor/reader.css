@@ -3,25 +3,18 @@
   --pm-accent: var(--accent);
   --pm-on-accent: #0c0c0c;
   --pm-wash: color-mix(in srgb, var(--pm-accent) 8%, var(--pm-canvas));
-  --pm-canvas: #f8f8f4;
-  --pm-muted: #63716b;
-  --pm-line: #dce3de;
+  --pm-canvas: var(--bg);
+  --pm-muted: var(--text-soft);
+  --pm-line: var(--border);
   --pm-danger: #ab514a;
-  --pm-code: #edf0eb;
+  --pm-code: var(--code-bg);
   background: var(--pm-canvas);
   color: var(--text);
   font-size: 16px;
   font-family: system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
 }
 [data-theme="night"] .pymotor-post {
-  --pm-canvas: #141a18;
-  --pm-muted: #a3b4ac;
-  --pm-line: #33443c;
   --pm-danger: #e19a8e;
-  --pm-code: #1c2621;
-  --text: #e1e9e3;
-  --text-soft: #becac2;
-  --text-faint: #8c9e93;
 }
 .pymotor-post .site-header {
   position: static;

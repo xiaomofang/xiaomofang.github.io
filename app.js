@@ -49,10 +49,17 @@
   }
 
   function initStars() {
-    const canvas = document.getElementById("star-canvas");
-    if (!canvas) return;
+    let canvas = document.getElementById("star-canvas");
+    // Article layouts share this effect even when they omit the decorative canvas.
+    if (!canvas) {
+      canvas = document.createElement("canvas");
+      canvas.id = "star-canvas";
+      document.body.appendChild(canvas);
+    }
+    canvas.setAttribute("aria-hidden", "true");
 
     const ctx = canvas.getContext("2d");
+    if (!ctx) return;
     const stars = [];
 
     function resize() {
