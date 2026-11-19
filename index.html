@@ -19,7 +19,7 @@
     html[data-theme="night"], html[data-theme="night"] body { background: #0c0c0c; color: #ededed; color-scheme: dark; }
     html[data-theme="day"], html[data-theme="day"] body { background: #ffffff; color: #1a1a1a; color-scheme: light; }
   </style>
-  <link rel="stylesheet" href="styles.css?v=64" />
+  <link rel="stylesheet" href="styles.css?v=65" />
   <title>MOFANG's Blog</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="description" content="LLM notes — understanding, one question at a time." />
@@ -89,6 +89,7 @@
         <span class="keyword-label">关键词</span>
         <nav id="keywords" class="keyword-cloud" aria-label="Keywords">
           <button class="keyword-pill active" data-keyword="all" type="button">全部</button>
+          <button class="keyword-pill" data-keyword="quantization" type="button">模型量化</button>
           <button class="keyword-pill" data-keyword="transformer" type="button">Transformer</button>
           <button class="keyword-pill" data-keyword="vllm-ascend" type="button">vLLM × Ascend</button>
           <button class="keyword-pill" data-keyword="parallelism" type="button">并行与通信</button>
@@ -111,6 +112,15 @@
 
     <section id="blog" class="section">
       <div class="post-list" id="post-list">
+        <article class="post-card" data-category="inference" data-keywords="quantization inference-systems hardware training" data-date="2026-11-19" data-title="大模型量化全景：从数值原理到算法、工具与部署选择">
+          <a href="posts/inference/llm-quantization-guide.html" class="post-card-link">
+            <div class="post-meta-row"><span class="post-tag">Inference · 模型量化</span></div>
+            <h3 class="post-title">大模型量化全景：从数值原理到算法、工具与部署选择</h3>
+            <p class="post-excerpt">从 scale 与 zero point 的手算出发，串起 GPTQ、AWQ、SmoothQuant、FP8／FP4 与 KV Cache，区分 PTQ、QAT 和 QLoRA。含 7 幅原理与结构图、工具选型、部署评测及 16 道面试题。</p>
+            <p class="post-card-stats" data-quantization-stats>2026年11月19日 · 51 分钟 · 15203 字 · MOFANG</p>
+          </a>
+          <div class="post-card-keywords"><button class="post-keyword-chip" data-keyword="quantization" type="button">模型量化</button><button class="post-keyword-chip" data-keyword="inference-systems" type="button">推理框架</button><button class="post-keyword-chip" data-keyword="hardware" type="button">硬件与 Kernel</button></div>
+        </article>
         <article class="post-card" data-category="basic inference" data-keywords="transformer attention inference-systems rope parallelism" data-date="2026-11-11" data-title="Transformer 结构剖析：从基础模块到推理框架">
           <a href="posts/basic/transformer-anatomy.html" class="post-card-link">
             <div class="post-meta-row"><span class="post-tag">Basic Knowledge · Transformer</span></div>
@@ -502,6 +512,6 @@
     </span>
   </footer>
 
-  <script src="app.js?v=48"></script>
+  <script src="app.js?v=49"></script>
 </body>
 </html>

@@ -1,0 +1,1169 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="day">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<link rel="canonical" href="https://xiaomofang.github.io/posts/inference/llm-quantization-guide.html" />
+<meta property="og:type" content="article" />
+<meta property="og:title" content="大模型量化全景：从数值原理到算法、工具与部署选择" />
+<meta property="og:description" content="用公式、结构图与手算例子理解大模型量化，覆盖算法对比、工具选型、部署评测和16道面试题。" />
+<meta property="og:url" content="https://xiaomofang.github.io/posts/inference/llm-quantization-guide.html" />
+<meta name="description" content="系统理解大模型量化的原理、方法与发展，对比 GPTQ、AWQ、SmoothQuant、FP8、FP4、KV Cache 量化和主流工具链。" />
+<script>(function(){try{var saved=localStorage.getItem('yichuan-theme');document.documentElement.setAttribute('data-theme',saved||(window.matchMedia('(prefers-color-scheme: dark)').matches?'night':'day'));}catch(e){}})();</script>
+<link rel="stylesheet" href="../../styles.css?v=65" />
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous" />
+<title>大模型量化全景：从数值原理到算法、工具与部署选择 · MOFANG</title>
+</head>
+<body class="transformer-post quant-post">
+<header class="site-header"><div class="header-inner">
+<a href="../../index.html" class="logo"><span class="logo-dot"></span><span class="logo-text">MOFANG</span></a>
+<div class="header-actions"><nav class="site-nav"><a href="../../index.html">返回博客</a></nav><button id="theme-toggle" class="theme-toggle" type="button" aria-label="切换明暗主题">明 / 暗</button></div>
+</div></header>
+<main class="site-main"><div class="tf-layout">
+<aside class="tf-rail" aria-label="文章目录"><details open><summary>文章目录</summary><ol><li><a href="#section-1"><span>01</span>显存与收益</a></li><li><a href="#section-2"><span>02</span>数值原理与手算</a></li><li><a href="#section-3"><span>03</span>读懂量化配置</a></li><li><a href="#section-4"><span>04</span>PTQ、QAT 与 QLoRA</a></li><li><a href="#section-5"><span>05</span>代表算法与对比</a></li><li><a href="#section-6"><span>06</span>FP8 与 FP4 格式</a></li><li><a href="#section-7"><span>07</span>KV Cache 量化</a></li><li><a href="#section-8"><span>08</span>性能与推理瓶颈</a></li><li><a href="#section-9"><span>09</span>发展脉络</a></li><li><a href="#section-10"><span>10</span>工具地图</a></li><li><a href="#section-11"><span>11</span>选型与实践流程</a></li><li><a href="#section-12"><span>12</span>质量与性能评测</a></li><li><a href="#section-13"><span>13</span>常见误解</a></li><li><a href="#section-14"><span>14</span>面试问答与场景题</a></li><li><a href="#section-15"><span>15</span>参考与延伸阅读</a></li></ol></details></aside>
+<article class="post-page transformer-article quant-article">
+<header class="post-page-header">
+<p class="post-page-category">INFERENCE · 模型量化</p>
+<h1 class="post-page-title">大模型量化全景<span class="q-subtitle">从数值原理到算法、工具与部署选择</span></h1>
+<p class="post-lead">从一个 INT4 手算例子出发，理解量化如何改变权重、激活和缓存，再把算法、格式、内核与工具放回同一张部署地图。<a href="https://huggingface.co/docs/transformers/main/quantization/concept_guide" target="_blank" rel="noopener noreferrer">基础概念参考</a>。</p>
+<div class="post-page-keywords" aria-label="关键词"><a class="post-keyword-chip" href="../../index.html?keyword=quantization">模型量化</a><a class="post-keyword-chip" href="../../index.html?keyword=inference-systems">推理框架</a><a class="post-keyword-chip" href="../../index.html?keyword=hardware">硬件与 Kernel</a></div>
+<p class="post-page-meta" data-date="2026-11-19" data-author="MOFANG">2026年11月19日 · MOFANG</p>
+<p class="tf-source-note">论文与工具资料核对至 2026-11-19 · 7 幅原理与结构图 · 16 道面试题</p>
+<nav class="q-reading-links" aria-label="快速阅读"><a href="#section-2">理解数值原理 →</a><a href="#section-5">对比量化算法 →</a><a href="#section-10">选择工具 →</a><a href="#section-14">准备面试 →</a></nav>
+</header>
+<section class="post-page-content"><p>一个 8B 模型，BF16 权重的理论体积约为 16 GB，换成 4 bit 后约为 4 GB。这个数字很诱人，但它没有回答三个真正影响部署的问题：模型还能不能完成原来的任务，运行时到底占多少显存，以及生成速度会不会变快。</p>
+<p>大模型量化，就是在这些问题之间寻找合适的折中。它把权重、激活或缓存中的数值，映射到更少的可表示值，从而降低存储、搬运或计算成本。剪枝主要减少连接或结构，蒸馏主要训练一个更小的模型；量化主要改变数值表示，通常保留原来的网络结构。</p>
+<p>理解量化最有用的视角是：<strong>哪些数值被压缩，误差怎样被控制，硬件实际执行了什么。</strong> 本文以大语言模型推理为主，同时解释 QLoRA、QAT 和原生低比特训练的关系。方法年份采用首次公开论文年份；工具状态核对至 2026 年 11 月 19 日，具体能力以实际安装版本的支持矩阵为准。</p>
+
+<section class="tf-chapter" id="section-1"><h2>1 为什么量化能省显存，却不一定同比例提速</h2>
+<h3>1.1 先算清权重体积</h3>
+<p>如果模型有 \(N\) 个参数，每个参数占 \(b\) bit，忽略额外信息时：</p>
+<div class="math-block">\[
+M_{\mathrm{weights}} = \frac{Nb}{8}\quad\text{bytes}.
+\]</div>
+<p>以恰好 80 亿参数为例，理论权重体积为：</p>
+<div class="tf-table-wrap"><table class="decision-table">
+<thead>
+<tr>
+<th>表示</th>
+<th style="text-align: right;">每参数位数</th>
+<th style="text-align: right;">十进制体积</th>
+<th style="text-align: right;">二进制体积</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>FP32</td>
+<td style="text-align: right;">32</td>
+<td style="text-align: right;">32 GB</td>
+<td style="text-align: right;">29.80 GiB</td>
+</tr>
+<tr>
+<td>FP16 / BF16</td>
+<td style="text-align: right;">16</td>
+<td style="text-align: right;">16 GB</td>
+<td style="text-align: right;">14.90 GiB</td>
+</tr>
+<tr>
+<td>INT8 / FP8</td>
+<td style="text-align: right;">8</td>
+<td style="text-align: right;">8 GB</td>
+<td style="text-align: right;">7.45 GiB</td>
+</tr>
+<tr>
+<td>4 bit 权重载荷</td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">4 GB</td>
+<td style="text-align: right;">3.73 GiB</td>
+</tr>
+</tbody>
+</table></div>
+<p>这里 1 GB 为 \(10^9\) 字节，1 GiB 为 \(2^{30}\) 字节。表格是理论计算，4 bit 一行也只计算权重载荷，并不表示某个具体模型能在 4 GB 显存中完整运行。</p>
+<p>真正的推理显存还包括：</p>
+<div class="math-block">\[
+M_{\mathrm{total}}\approx M_{\mathrm{weights}}+M_{\mathrm{scales/zeros}}+M_{\mathrm{KV}}+M_{\mathrm{activations}}+M_{\mathrm{workspace}}+M_{\mathrm{runtime}}.
+\]</div>
+<p>量化尺度、零点、未量化层、KV Cache、临时缓冲和运行时预留都要计入。使用分组量化时，假设每 128 个权重共享一个 16 bit scale，4 bit 权重的平均开销就变成：</p>
+<div class="math-block">\[
+b_{\mathrm{effective}}=4+\frac{16}{128}=4.125\quad\text{bit/weight}.
+\]</div>
+<p>若再假设每组保存一个 16 bit 零点，则是 4.25 bit/weight。实际零点的编码、填充和层间混合精度可能不同，所以应查看真实文件大小和运行时占用。</p>
+<h3>1.2 省下的是哪种成本</h3>
+<p>权重量化最直接减少模型文件和权重读取量。激活量化有机会让矩阵乘法使用更高吞吐的低精度指令。KV Cache 量化则主要缓解长上下文和多请求的缓存容量、带宽压力。</p>
+<p>这些收益不是同一件事。例如 W4A16 可以把权重以 4 bit 保存，但计算时仍由内核解包、反量化，再与 FP16/BF16 激活相乘；它可能主要节省显存带宽。真正的 W8A8 路径则可能直接使用 INT8 或 FP8 的矩阵计算，前提是格式与硬件匹配。低位宽格式、计算路径和硬件兼容性，需要一起核对。<a href="https://huggingface.co/docs/transformers/main/quantization/concept_guide" target="_blank" rel="noopener noreferrer">Hugging Face 量化概念</a></p>
+</section>
+<section class="tf-chapter" id="section-2"><h2>2 量化的数学原理：用有限刻度近似连续数值</h2>
+<h3>2.1 scale 与 zero point</h3>
+<p>最常见的均匀仿射量化可以写成：</p>
+<div class="math-block">\[
+q=\operatorname{clip}\left(\operatorname{round}(x/s)+z,\ q_{\min},\ q_{\max}\right),\qquad \hat{x}=s(q-z).
+\]</div>
+<p>其中 \(s&gt;0\) 是 scale，决定相邻刻度的间距；\(z\) 是整数 zero point，决定浮点零对应哪个整数；\(q\) 是保存的整数编码；\(\hat{x}\) 是反量化后的近似值。反量化恢复的是近似值，无法恢复舍入时丢失的信息。</p>
+<p>若选定覆盖零的截断区间 \([a,c]\)，常见的参数选择为：</p>
+<div class="math-block">\[
+s=\frac{c-a}{q_{\max}-q_{\min}},\qquad z=\operatorname{clip}\left(\operatorname{round}(q_{\min}-a/s),q_{\min},q_{\max}\right).
+\]</div>
+<p>INT8 的有符号编码通常为 -128 到 127。对称量化围绕零设置范围，常取 \(z=0\)；非对称量化允许范围偏移，更容易覆盖偏斜分布。对称量化有时会主动舍弃一个负端编码，例如使用 -127 到 127，以保持正负对称。非对称方案需要处理额外的零点项，是否值得取决于精度收益和内核实现。<a href="https://pytorch.org/blog/quantization-in-practice/" target="_blank" rel="noopener noreferrer">PyTorch 量化基础</a>、<a href="https://onnxruntime.ai/docs/performance/model-optimizations/quantization.html" target="_blank" rel="noopener noreferrer">ONNX Runtime 量化表示</a></p>
+<h3>2.2 一个可以手算的 INT4 例子</h3>
+<p>对权重 \([-1.2,-0.7,0.1,0.9]\)，选择对称编码 -7 到 7，零点为 0：</p>
+<div class="math-block">\[
+s=\frac{1.2}{7}\approx0.171429,\qquad q=[-7,-4,1,5].
+\]</div>
+<p>反量化得到：</p>
+<div class="math-block">\[
+\hat{w}=[-1.2,-0.685714,0.171429,0.857143].
+\]</div>
+<p>0.1 被近似成 0.171429，绝对误差约为 0.071429。没有裁剪时，就近舍入的误差不超过半个步长，即 \(s/2\)。但如果输入是 2.0，它会被截断到 1.2，误差达到 0.8；这个误差就不是半个步长能够约束的了。</p>
+<p>量化误差因而至少包含两部分：<strong>刻度太稀带来的舍入误差，以及范围太窄带来的裁剪误差。</strong> 扩大范围可以减少裁剪，却会增大步长；缩小范围可以精细表示多数值，却会牺牲尾部数值。</p>
+<figure class="q-figure" id="figure-1"><div class="q-figure-scroll" tabindex="0" aria-label="图 1，可横向滚动"><svg viewBox="0 0 840 425" role="img" aria-labelledby="q-rounding-title"><title id="q-rounding-title">均匀INT4的阶梯映射、裁剪范围与手算示例</title><text x="32.00" y="34.00" class="q-title" text-anchor="start" >(a) 有限刻度与饱和</text><text x="466.00" y="34.00" class="q-title" text-anchor="start" >(b) 放大一个舍入过程</text><rect x="70.0" y="87.0" width="45.0" height="248" class="q-tint-orange"/><rect x="340.0" y="87.0" width="45.0" height="248" class="q-tint-orange"/><line x1="70.00" y1="293.67" x2="385.00" y2="293.67" class="q-grid" /><text x="59.00" y="298.67" class="q-small" text-anchor="end" >-1.2</text><text x="122.50" y="358.00" class="q-small" text-anchor="middle" >-1.2</text><line x1="70.00" y1="211.00" x2="385.00" y2="211.00" class="q-grid" /><text x="59.00" y="216.00" class="q-small" text-anchor="end" >0</text><text x="227.50" y="358.00" class="q-small" text-anchor="middle" >0</text><line x1="70.00" y1="128.33" x2="385.00" y2="128.33" class="q-grid" /><text x="59.00" y="133.33" class="q-small" text-anchor="end" >1.2</text><text x="332.50" y="358.00" class="q-small" text-anchor="middle" >1.2</text><line x1="70.00" y1="335.00" x2="385.00" y2="335.00" class="q-axis" /><line x1="70.00" y1="335.00" x2="70.00" y2="87.00" class="q-axis" /><line x1="70.00" y1="335.00" x2="385.00" y2="87.00" class="q-dash" /><polyline points="70.00,293.67 130.00,293.67 130.00,281.86 145.00,281.86 145.00,270.05 160.00,270.05 160.00,258.24 175.00,258.24 175.00,246.43 190.00,246.43 190.00,234.62 205.00,234.62 205.00,222.81 220.00,222.81 220.00,211.00 235.00,211.00 235.00,199.19 250.00,199.19 250.00,187.38 265.00,187.38 265.00,175.57 280.00,175.57 280.00,163.76 295.00,163.76 295.00,151.95 310.00,151.95 310.00,140.14 325.00,140.14 325.00,128.33 385.00,128.33" class="q-series-blue"/><text x="70.00" y="66.00" class="q-small" text-anchor="start" >恢复值 x̂</text><text x="228.00" y="392.00" class="q-text" text-anchor="middle" >原始值 x</text><text x="96.00" y="110.00" class="q-small" text-anchor="middle" >裁剪</text><text x="360.00" y="110.00" class="q-small" text-anchor="middle" >裁剪</text><line x1="466.00" y1="91.00" x2="804.00" y2="91.00" class="q-grid" /><text x="466.00" y="77.00" class="q-small" text-anchor="start" >原值</text><text x="630.00" y="77.00" class="q-small" text-anchor="start" >编码 q</text><text x="804.00" y="77.00" class="q-small" text-anchor="end" >恢复值</text><text x="466.00" y="125.00" class="q-mono" text-anchor="start" >-1.2</text><text x="650.00" y="125.00" class="q-mono" text-anchor="middle" >-7</text><text x="804.00" y="125.00" class="q-mono" text-anchor="end" >-1.200000</text><text x="466.00" y="159.00" class="q-mono" text-anchor="start" >-0.7</text><text x="650.00" y="159.00" class="q-mono" text-anchor="middle" >-4</text><text x="804.00" y="159.00" class="q-mono" text-anchor="end" >-0.685714</text><text x="466.00" y="193.00" class="q-mono" text-anchor="start" >0.1</text><text x="650.00" y="193.00" class="q-mono" text-anchor="middle" >1</text><text x="804.00" y="193.00" class="q-mono" text-anchor="end" >0.171429</text><text x="466.00" y="227.00" class="q-mono" text-anchor="start" >0.9</text><text x="650.00" y="227.00" class="q-mono" text-anchor="middle" >5</text><text x="804.00" y="227.00" class="q-mono" text-anchor="end" >0.857143</text><line x1="466.00" y1="246.00" x2="804.00" y2="246.00" class="q-grid" /><line x1="490.00" y1="307.00" x2="780.00" y2="307.00" class="q-axis" /><line x1="490.00" y1="300.00" x2="490.00" y2="314.00" class="q-axis" /><text x="490.00" y="339.00" class="q-small" text-anchor="middle" >0</text><line x1="635.00" y1="300.00" x2="635.00" y2="314.00" class="q-axis" /><text x="635.00" y="339.00" class="q-small" text-anchor="middle" >0.171429</text><line x1="780.00" y1="300.00" x2="780.00" y2="314.00" class="q-axis" /><text x="780.00" y="339.00" class="q-small" text-anchor="middle" >0.342857</text><circle cx="574.58" cy="307" r="5" class="q-fill-orange"/><circle cx="635.00" cy="307" r="5" class="q-fill-blue"/><text x="574.58" y="283.00" class="q-small" text-anchor="middle" >x = 0.1</text><line x1="583.58" y1="295.00" x2="626.00" y2="295.00" class="q-line" /><text x="635.00" y="383.00" class="q-mono" text-anchor="middle" >|误差| ≈ 0.071429 &lt; s/2</text></svg></div><span class="q-scroll-hint">横向滑动查看完整图</span><figcaption><span>图 1.</span> 均匀 INT4 示例，编码范围 −7 至 7，s = 1.2/7，z = 0。蓝线为量化后的恢复值，灰虚线为理想映射，浅橙区域发生裁剪；所有数值由正文公式计算。</figcaption></figure>
+<h3>2.3 为什么异常值特别麻烦</h3>
+<p>假设一组数大多数在 -1 到 1，只有一个值达到 20。若 INT4 的 scale 由最大绝对值决定，步长约为 \(20/7=2.86\)，大量小数都会被压到零附近。为了容纳一个异常值，整组普通数值的分辨率被一起降低。</p>
+<p>LLM 的一些激活特征会出现显著的幅度差异，这也是直接对整个张量做低位宽量化容易退化的原因。后文的异常值分离、平滑、旋转，本质上都在处理“少数维度占用了太多数值范围”这个问题。<a href="https://arxiv.org/abs/2208.07339" target="_blank" rel="noopener noreferrer">LLM.int8()</a></p>
+<h3>2.4 权重误差小，不代表输出误差小</h3>
+<p>统一采用线性层 \(Y=XW\) 的数学约定；框架实际存储的权重可能转置。只优化 \(\|W-\hat W\|\)，会忽略哪些输入特征更重要。更贴近模型行为的目标是：</p>
+<div class="math-block">\[
+\min_{\hat W}\|XW-X\hat W\|_F^2.
+\]</div>
+<p>例如输入为 \(X=[1,10]\)，权重为 \(W=[0.23,0.23]^T\)，输出为 2.53。把第一个权重单独改成 0.20，输出减少 0.03；把第二个权重单独改成 0.20，输出减少 0.30。权重误差同样是 0.03，影响却相差十倍。</p>
+<p>因此，量化不是简单寻找“最接近原权重的整数”。校准数据提供真实输入分布的信息，帮助算法在有限位宽下优先保留对输出更重要的部分。GPTQ 的层重构目标就是这种思路的一种代表。<a href="https://arxiv.org/abs/2210.17323" target="_blank" rel="noopener noreferrer">GPTQ</a></p>
+</section>
+<section class="tf-chapter" id="section-3"><h2>3 读懂量化配置：对象、粒度与数据格式</h2>
+<h3>3.1 W、A、KV 分别是什么</h3>
+<p>W 表示权重，A 表示激活，KV 表示注意力缓存。因此 W4A16 通常表示 4 bit 权重、16 bit 激活；W8A8 表示两者都使用 8 bit 表示；KV8 表示缓存采用 8 bit。部分工具把缓存写作 C，例如 W8A8C8，需要以该工具的定义为准。</p>
+<p><strong>位宽记号不是完整规格。</strong> W8A8 可能是 INT8，也可能是 FP8；它还没有告诉你 scale 的粒度、激活是否动态量化、哪些层被排除，以及采用何种累加精度。归一化、Softmax、残差等路径经常保留较高精度。INT8 乘法也不意味着累加器只有 8 bit，常见实现会用更宽的累加类型。</p>
+<figure class="q-figure" id="figure-2">
+  <div class="q-figure-scroll" tabindex="0" aria-label="图 2，可横向滚动">
+    <svg viewBox="0 0 840 530" role="img" aria-labelledby="q-objects-title">
+      <title id="q-objects-title">自回归注意力中的权重、激活与 KV Cache 量化位置。权重参与 QKV 投影，激活沿计算路径流动，K 和 V 追加进随序列增长的缓存。</title>
+      <defs><marker id="q-objects-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M1 1 L7 4 L1 7" class="q-line"/></marker></defs>
+      <text x="32" y="34" class="q-title q-ink">三个量化对象，三种不同的生命周期</text>
+      <text x="32" y="67" class="q-small q-muted">单层自回归注意力示意 · 省略位置编码、残差与归一化</text>
+
+      <rect x="172" y="104" width="174" height="66" rx="5" class="q-blue"/>
+      <text x="259" y="131" text-anchor="middle" class="q-text q-accent-blue">W · 投影权重</text>
+      <text x="259" y="154" text-anchor="middle" class="q-small q-muted">W<tspan baseline-shift="sub" font-size="12">Q</tspan>、W<tspan baseline-shift="sub" font-size="12">K</tspan>、W<tspan baseline-shift="sub" font-size="12">V</tspan></text>
+      <path d="M259 170 V213" class="q-line" marker-end="url(#q-objects-arrow)"/>
+
+      <rect x="32" y="213" width="104" height="64" rx="5" class="q-orange"/>
+      <text x="84" y="240" text-anchor="middle" class="q-text q-accent-orange">输入 X</text>
+      <text x="84" y="262" text-anchor="middle" class="q-small q-muted">激活 A</text>
+      <path d="M136 245 H172" class="q-line" marker-end="url(#q-objects-arrow)"/>
+      <rect x="172" y="213" width="174" height="64" rx="5" class="q-node"/>
+      <text x="259" y="240" text-anchor="middle" class="q-text q-ink">线性投影</text>
+      <text x="259" y="262" text-anchor="middle" class="q-small q-muted">三组矩阵乘法</text>
+
+      <path d="M346 245 H368 V175 H390" class="q-line" marker-end="url(#q-objects-arrow)"/>
+      <path d="M368 245 H390" class="q-line" marker-end="url(#q-objects-arrow)"/>
+      <path d="M368 245 V315 H390" class="q-line" marker-end="url(#q-objects-arrow)"/>
+      <rect x="390" y="150" width="86" height="50" rx="5" class="q-orange"/>
+      <rect x="390" y="220" width="86" height="50" rx="5" class="q-orange"/>
+      <rect x="390" y="290" width="86" height="50" rx="5" class="q-orange"/>
+      <text x="433" y="182" text-anchor="middle" class="q-text q-accent-orange">Q<tspan baseline-shift="sub" font-size="12">t</tspan></text>
+      <text x="433" y="252" text-anchor="middle" class="q-text q-accent-orange">K<tspan baseline-shift="sub" font-size="12">t</tspan></text>
+      <text x="433" y="322" text-anchor="middle" class="q-text q-accent-orange">V<tspan baseline-shift="sub" font-size="12">t</tspan></text>
+
+      <path d="M476 175 H568" class="q-line" marker-end="url(#q-objects-arrow)"/>
+      <rect x="568" y="135" width="156" height="80" rx="5" class="q-node"/>
+      <text x="646" y="169" text-anchor="middle" class="q-text q-ink">注意力计算</text>
+      <text x="646" y="193" text-anchor="middle" class="q-small q-muted">Q 与历史 K / V</text>
+      <path d="M724 175 H752" class="q-line" marker-end="url(#q-objects-arrow)"/>
+      <rect x="752" y="150" width="56" height="50" rx="5" class="q-orange"/>
+      <text x="780" y="182" text-anchor="middle" class="q-text q-accent-orange">O<tspan baseline-shift="sub" font-size="12">t</tspan></text>
+
+      <path d="M476 245 H516 V314 H560" class="q-line" marker-end="url(#q-objects-arrow)"/>
+      <path d="M476 315 H496 V364 H560" class="q-line" marker-end="url(#q-objects-arrow)"/>
+      <rect x="560" y="288" width="164" height="102" rx="5" class="q-purple"/>
+      <text x="642" y="318" text-anchor="middle" class="q-text q-accent-purple">KV Cache</text>
+      <text x="642" y="344" text-anchor="middle" class="q-small q-muted">K₁ … K<tspan baseline-shift="sub" font-size="12">t</tspan></text>
+      <text x="642" y="368" text-anchor="middle" class="q-small q-muted">V₁ … V<tspan baseline-shift="sub" font-size="12">t</tspan></text>
+      <path d="M646 288 V215" class="q-line" marker-end="url(#q-objects-arrow)"/>
+      <text x="668" y="255" class="q-small q-muted">读取历史</text>
+      <text x="390" y="384" class="q-small q-muted">追加当前 K / V</text>
+
+      <path d="M32 423 H808" class="q-line"/>
+      <text x="32" y="456" class="q-text q-accent-blue">W · 请求间共享</text>
+      <text x="32" y="485" class="q-small q-muted">模型加载后驻留的参数</text>
+      <text x="306" y="456" class="q-text q-accent-orange">A · 随计算产生</text>
+      <text x="306" y="485" class="q-small q-muted">当前输入与中间结果</text>
+      <text x="580" y="456" class="q-text q-accent-purple">KV · 随上下文积累</text>
+      <text x="580" y="485" class="q-small q-muted">缓存历史 token 的状态</text>
+    </svg>
+  </div>
+  <figcaption><span>图 2.</span> 权重量化压缩常驻参数，激活量化改变计算输入，KV Cache 量化压缩历史状态。三者可以分别配置；图中颜色标识张量类别，不代表这些张量必须全部量化。</figcaption>
+</figure>
+
+<h3>3.2 per-tensor、per-channel、per-group、per-token</h3>
+<div class="tf-table-wrap"><table class="decision-table">
+<thead>
+<tr>
+<th>粒度</th>
+<th>scale 共享范围</th>
+<th>主要取舍</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Per-tensor</td>
+<td>整个张量</td>
+<td>元数据少，但异常值影响范围大</td>
+</tr>
+<tr>
+<td>Per-channel</td>
+<td>每个通道</td>
+<td>能适应通道间差异，需明确沿哪个轴</td>
+</tr>
+<tr>
+<td>Per-group / Per-block</td>
+<td>一组元素或一个小块</td>
+<td>低位宽权重常用，组越小通常表示越细，但元数据和处理成本增加</td>
+</tr>
+<tr>
+<td>Per-token</td>
+<td>每个 token 的特征向量</td>
+<td>适应不同 token 的激活范围，常与运行时动态量化结合</td>
+</tr>
+</tbody>
+</table></div>
+<p>“group size 128”本身不够完整：128 个元素沿哪个维度划分，是否跨行，以及如何打包，都会影响兼容性。更细粒度通常有利于控制误差，但不能只凭 group size 断言某份模型一定更准或更快。<a href="https://huggingface.co/docs/transformers/main/quantization/concept_guide" target="_blank" rel="noopener noreferrer">量化粒度说明</a></p>
+<figure class="q-figure" id="figure-3" id="figure-granularity"><div class="q-figure-scroll" tabindex="0" aria-label="图 3，可横向滚动"><svg viewBox="0 0 840 432" role="img" aria-labelledby="granularity-title">
+<title id="granularity-title">同一个四行八列权重矩阵，逐张量、逐输出通道和每行四元素分组分别共享一个、四个和八个尺度</title>
+<text x="32" y="34" class="q-title q-ink">同一权重矩阵，不同尺度共享范围</text>
+<text x="32" y="64" class="q-small q-muted">存储布局 W[out,in]：4 个输出通道 × 8 个输入通道</text>
+<text x="32" y="112" class="q-text q-ink">(a) Per-tensor</text>
+<rect x="32" y="144" width="192" height="166" rx="3" class="q-blue"/>
+<rect x="32" y="144" width="24" height="24" rx="0" class="q-node"/>
+<rect x="56" y="144" width="24" height="24" rx="0" class="q-node"/>
+<rect x="80" y="144" width="24" height="24" rx="0" class="q-node"/>
+<rect x="104" y="144" width="24" height="24" rx="0" class="q-node"/>
+<rect x="128" y="144" width="24" height="24" rx="0" class="q-node"/>
+<rect x="152" y="144" width="24" height="24" rx="0" class="q-node"/>
+<rect x="176" y="144" width="24" height="24" rx="0" class="q-node"/>
+<rect x="200" y="144" width="24" height="24" rx="0" class="q-node"/>
+<line x1="56" y1="144" x2="56" y2="168" class="q-line"/>
+<line x1="80" y1="144" x2="80" y2="168" class="q-line"/>
+<line x1="104" y1="144" x2="104" y2="168" class="q-line"/>
+<line x1="128" y1="144" x2="128" y2="168" class="q-line"/>
+<line x1="152" y1="144" x2="152" y2="168" class="q-line"/>
+<line x1="176" y1="144" x2="176" y2="168" class="q-line"/>
+<line x1="200" y1="144" x2="200" y2="168" class="q-line"/>
+<line x1="32" y1="144" x2="224" y2="144" class="q-line"/>
+<line x1="32" y1="168" x2="224" y2="168" class="q-line"/>
+<rect x="32" y="188" width="24" height="24" rx="0" class="q-node"/>
+<rect x="56" y="188" width="24" height="24" rx="0" class="q-node"/>
+<rect x="80" y="188" width="24" height="24" rx="0" class="q-node"/>
+<rect x="104" y="188" width="24" height="24" rx="0" class="q-node"/>
+<rect x="128" y="188" width="24" height="24" rx="0" class="q-node"/>
+<rect x="152" y="188" width="24" height="24" rx="0" class="q-node"/>
+<rect x="176" y="188" width="24" height="24" rx="0" class="q-node"/>
+<rect x="200" y="188" width="24" height="24" rx="0" class="q-node"/>
+<line x1="56" y1="188" x2="56" y2="212" class="q-line"/>
+<line x1="80" y1="188" x2="80" y2="212" class="q-line"/>
+<line x1="104" y1="188" x2="104" y2="212" class="q-line"/>
+<line x1="128" y1="188" x2="128" y2="212" class="q-line"/>
+<line x1="152" y1="188" x2="152" y2="212" class="q-line"/>
+<line x1="176" y1="188" x2="176" y2="212" class="q-line"/>
+<line x1="200" y1="188" x2="200" y2="212" class="q-line"/>
+<line x1="32" y1="188" x2="224" y2="188" class="q-line"/>
+<line x1="32" y1="212" x2="224" y2="212" class="q-line"/>
+<rect x="32" y="232" width="24" height="24" rx="0" class="q-node"/>
+<rect x="56" y="232" width="24" height="24" rx="0" class="q-node"/>
+<rect x="80" y="232" width="24" height="24" rx="0" class="q-node"/>
+<rect x="104" y="232" width="24" height="24" rx="0" class="q-node"/>
+<rect x="128" y="232" width="24" height="24" rx="0" class="q-node"/>
+<rect x="152" y="232" width="24" height="24" rx="0" class="q-node"/>
+<rect x="176" y="232" width="24" height="24" rx="0" class="q-node"/>
+<rect x="200" y="232" width="24" height="24" rx="0" class="q-node"/>
+<line x1="56" y1="232" x2="56" y2="256" class="q-line"/>
+<line x1="80" y1="232" x2="80" y2="256" class="q-line"/>
+<line x1="104" y1="232" x2="104" y2="256" class="q-line"/>
+<line x1="128" y1="232" x2="128" y2="256" class="q-line"/>
+<line x1="152" y1="232" x2="152" y2="256" class="q-line"/>
+<line x1="176" y1="232" x2="176" y2="256" class="q-line"/>
+<line x1="200" y1="232" x2="200" y2="256" class="q-line"/>
+<line x1="32" y1="232" x2="224" y2="232" class="q-line"/>
+<line x1="32" y1="256" x2="224" y2="256" class="q-line"/>
+<rect x="32" y="276" width="24" height="24" rx="0" class="q-node"/>
+<rect x="56" y="276" width="24" height="24" rx="0" class="q-node"/>
+<rect x="80" y="276" width="24" height="24" rx="0" class="q-node"/>
+<rect x="104" y="276" width="24" height="24" rx="0" class="q-node"/>
+<rect x="128" y="276" width="24" height="24" rx="0" class="q-node"/>
+<rect x="152" y="276" width="24" height="24" rx="0" class="q-node"/>
+<rect x="176" y="276" width="24" height="24" rx="0" class="q-node"/>
+<rect x="200" y="276" width="24" height="24" rx="0" class="q-node"/>
+<line x1="56" y1="276" x2="56" y2="300" class="q-line"/>
+<line x1="80" y1="276" x2="80" y2="300" class="q-line"/>
+<line x1="104" y1="276" x2="104" y2="300" class="q-line"/>
+<line x1="128" y1="276" x2="128" y2="300" class="q-line"/>
+<line x1="152" y1="276" x2="152" y2="300" class="q-line"/>
+<line x1="176" y1="276" x2="176" y2="300" class="q-line"/>
+<line x1="200" y1="276" x2="200" y2="300" class="q-line"/>
+<line x1="32" y1="276" x2="224" y2="276" class="q-line"/>
+<line x1="32" y1="300" x2="224" y2="300" class="q-line"/>
+<text x="238" y="234" class="q-mono q-accent-blue">s₀</text>
+<line x1="230" y1="144" x2="230" y2="310" class="q-line"/>
+<line x1="226" y1="144" x2="230" y2="144" class="q-line"/>
+<line x1="226" y1="310" x2="230" y2="310" class="q-line"/>
+<text x="128" y="365" class="q-text q-accent-blue" text-anchor="middle">1 个 scale</text>
+<text x="312" y="112" class="q-text q-ink">(b) Per-channel</text>
+<rect x="312" y="144" width="192" height="24" rx="2" class="q-blue"/>
+<rect x="312" y="144" width="24" height="24" rx="0" class="q-node"/>
+<rect x="336" y="144" width="24" height="24" rx="0" class="q-node"/>
+<rect x="360" y="144" width="24" height="24" rx="0" class="q-node"/>
+<rect x="384" y="144" width="24" height="24" rx="0" class="q-node"/>
+<rect x="408" y="144" width="24" height="24" rx="0" class="q-node"/>
+<rect x="432" y="144" width="24" height="24" rx="0" class="q-node"/>
+<rect x="456" y="144" width="24" height="24" rx="0" class="q-node"/>
+<rect x="480" y="144" width="24" height="24" rx="0" class="q-node"/>
+<rect x="312" y="144" width="192" height="24" rx="2" class="q-blue"/>
+<text x="517" y="162" class="q-mono q-accent-blue">s₀</text>
+<line x1="336" y1="144" x2="336" y2="168" class="q-line"/>
+<line x1="360" y1="144" x2="360" y2="168" class="q-line"/>
+<line x1="384" y1="144" x2="384" y2="168" class="q-line"/>
+<line x1="408" y1="144" x2="408" y2="168" class="q-line"/>
+<line x1="432" y1="144" x2="432" y2="168" class="q-line"/>
+<line x1="456" y1="144" x2="456" y2="168" class="q-line"/>
+<line x1="480" y1="144" x2="480" y2="168" class="q-line"/>
+<line x1="312" y1="144" x2="504" y2="144" class="q-line"/>
+<line x1="312" y1="168" x2="504" y2="168" class="q-line"/>
+<rect x="312" y="188" width="192" height="24" rx="2" class="q-blue"/>
+<rect x="312" y="188" width="24" height="24" rx="0" class="q-node"/>
+<rect x="336" y="188" width="24" height="24" rx="0" class="q-node"/>
+<rect x="360" y="188" width="24" height="24" rx="0" class="q-node"/>
+<rect x="384" y="188" width="24" height="24" rx="0" class="q-node"/>
+<rect x="408" y="188" width="24" height="24" rx="0" class="q-node"/>
+<rect x="432" y="188" width="24" height="24" rx="0" class="q-node"/>
+<rect x="456" y="188" width="24" height="24" rx="0" class="q-node"/>
+<rect x="480" y="188" width="24" height="24" rx="0" class="q-node"/>
+<rect x="312" y="188" width="192" height="24" rx="2" class="q-blue"/>
+<text x="517" y="206" class="q-mono q-accent-blue">s₁</text>
+<line x1="336" y1="188" x2="336" y2="212" class="q-line"/>
+<line x1="360" y1="188" x2="360" y2="212" class="q-line"/>
+<line x1="384" y1="188" x2="384" y2="212" class="q-line"/>
+<line x1="408" y1="188" x2="408" y2="212" class="q-line"/>
+<line x1="432" y1="188" x2="432" y2="212" class="q-line"/>
+<line x1="456" y1="188" x2="456" y2="212" class="q-line"/>
+<line x1="480" y1="188" x2="480" y2="212" class="q-line"/>
+<line x1="312" y1="188" x2="504" y2="188" class="q-line"/>
+<line x1="312" y1="212" x2="504" y2="212" class="q-line"/>
+<rect x="312" y="232" width="192" height="24" rx="2" class="q-blue"/>
+<rect x="312" y="232" width="24" height="24" rx="0" class="q-node"/>
+<rect x="336" y="232" width="24" height="24" rx="0" class="q-node"/>
+<rect x="360" y="232" width="24" height="24" rx="0" class="q-node"/>
+<rect x="384" y="232" width="24" height="24" rx="0" class="q-node"/>
+<rect x="408" y="232" width="24" height="24" rx="0" class="q-node"/>
+<rect x="432" y="232" width="24" height="24" rx="0" class="q-node"/>
+<rect x="456" y="232" width="24" height="24" rx="0" class="q-node"/>
+<rect x="480" y="232" width="24" height="24" rx="0" class="q-node"/>
+<rect x="312" y="232" width="192" height="24" rx="2" class="q-blue"/>
+<text x="517" y="250" class="q-mono q-accent-blue">s₂</text>
+<line x1="336" y1="232" x2="336" y2="256" class="q-line"/>
+<line x1="360" y1="232" x2="360" y2="256" class="q-line"/>
+<line x1="384" y1="232" x2="384" y2="256" class="q-line"/>
+<line x1="408" y1="232" x2="408" y2="256" class="q-line"/>
+<line x1="432" y1="232" x2="432" y2="256" class="q-line"/>
+<line x1="456" y1="232" x2="456" y2="256" class="q-line"/>
+<line x1="480" y1="232" x2="480" y2="256" class="q-line"/>
+<line x1="312" y1="232" x2="504" y2="232" class="q-line"/>
+<line x1="312" y1="256" x2="504" y2="256" class="q-line"/>
+<rect x="312" y="276" width="192" height="24" rx="2" class="q-blue"/>
+<rect x="312" y="276" width="24" height="24" rx="0" class="q-node"/>
+<rect x="336" y="276" width="24" height="24" rx="0" class="q-node"/>
+<rect x="360" y="276" width="24" height="24" rx="0" class="q-node"/>
+<rect x="384" y="276" width="24" height="24" rx="0" class="q-node"/>
+<rect x="408" y="276" width="24" height="24" rx="0" class="q-node"/>
+<rect x="432" y="276" width="24" height="24" rx="0" class="q-node"/>
+<rect x="456" y="276" width="24" height="24" rx="0" class="q-node"/>
+<rect x="480" y="276" width="24" height="24" rx="0" class="q-node"/>
+<rect x="312" y="276" width="192" height="24" rx="2" class="q-blue"/>
+<text x="517" y="294" class="q-mono q-accent-blue">s₃</text>
+<line x1="336" y1="276" x2="336" y2="300" class="q-line"/>
+<line x1="360" y1="276" x2="360" y2="300" class="q-line"/>
+<line x1="384" y1="276" x2="384" y2="300" class="q-line"/>
+<line x1="408" y1="276" x2="408" y2="300" class="q-line"/>
+<line x1="432" y1="276" x2="432" y2="300" class="q-line"/>
+<line x1="456" y1="276" x2="456" y2="300" class="q-line"/>
+<line x1="480" y1="276" x2="480" y2="300" class="q-line"/>
+<line x1="312" y1="276" x2="504" y2="276" class="q-line"/>
+<line x1="312" y1="300" x2="504" y2="300" class="q-line"/>
+<text x="408" y="365" class="q-text q-accent-blue" text-anchor="middle">4 个 scale</text>
+<text x="592" y="112" class="q-text q-ink">(c) Per-group</text>
+<rect x="592" y="144" width="92" height="24" rx="2" class="q-blue"/>
+<line x1="615" y1="144" x2="615" y2="168" class="q-line"/>
+<line x1="638" y1="144" x2="638" y2="168" class="q-line"/>
+<line x1="661" y1="144" x2="661" y2="168" class="q-line"/>
+<text x="638" y="186" class="q-mono q-accent-blue" text-anchor="middle">s₀</text>
+<rect x="692" y="144" width="92" height="24" rx="2" class="q-blue"/>
+<line x1="715" y1="144" x2="715" y2="168" class="q-line"/>
+<line x1="738" y1="144" x2="738" y2="168" class="q-line"/>
+<line x1="761" y1="144" x2="761" y2="168" class="q-line"/>
+<text x="738" y="186" class="q-mono q-accent-blue" text-anchor="middle">s₁</text>
+<rect x="592" y="188" width="92" height="24" rx="2" class="q-blue"/>
+<line x1="615" y1="188" x2="615" y2="212" class="q-line"/>
+<line x1="638" y1="188" x2="638" y2="212" class="q-line"/>
+<line x1="661" y1="188" x2="661" y2="212" class="q-line"/>
+<text x="638" y="230" class="q-mono q-accent-blue" text-anchor="middle">s₂</text>
+<rect x="692" y="188" width="92" height="24" rx="2" class="q-blue"/>
+<line x1="715" y1="188" x2="715" y2="212" class="q-line"/>
+<line x1="738" y1="188" x2="738" y2="212" class="q-line"/>
+<line x1="761" y1="188" x2="761" y2="212" class="q-line"/>
+<text x="738" y="230" class="q-mono q-accent-blue" text-anchor="middle">s₃</text>
+<rect x="592" y="232" width="92" height="24" rx="2" class="q-blue"/>
+<line x1="615" y1="232" x2="615" y2="256" class="q-line"/>
+<line x1="638" y1="232" x2="638" y2="256" class="q-line"/>
+<line x1="661" y1="232" x2="661" y2="256" class="q-line"/>
+<text x="638" y="274" class="q-mono q-accent-blue" text-anchor="middle">s₄</text>
+<rect x="692" y="232" width="92" height="24" rx="2" class="q-blue"/>
+<line x1="715" y1="232" x2="715" y2="256" class="q-line"/>
+<line x1="738" y1="232" x2="738" y2="256" class="q-line"/>
+<line x1="761" y1="232" x2="761" y2="256" class="q-line"/>
+<text x="738" y="274" class="q-mono q-accent-blue" text-anchor="middle">s₅</text>
+<rect x="592" y="276" width="92" height="24" rx="2" class="q-blue"/>
+<line x1="615" y1="276" x2="615" y2="300" class="q-line"/>
+<line x1="638" y1="276" x2="638" y2="300" class="q-line"/>
+<line x1="661" y1="276" x2="661" y2="300" class="q-line"/>
+<text x="638" y="318" class="q-mono q-accent-blue" text-anchor="middle">s₆</text>
+<rect x="692" y="276" width="92" height="24" rx="2" class="q-blue"/>
+<line x1="715" y1="276" x2="715" y2="300" class="q-line"/>
+<line x1="738" y1="276" x2="738" y2="300" class="q-line"/>
+<line x1="761" y1="276" x2="761" y2="300" class="q-line"/>
+<text x="738" y="318" class="q-mono q-accent-blue" text-anchor="middle">s₇</text>
+<text x="688" y="365" class="q-text q-accent-blue" text-anchor="middle">8 个 scale</text>
+<line x1="32" y1="389" x2="808" y2="389" class="q-line"/>
+<text x="32" y="419" class="q-small q-muted">每个小格表示一个权重；色框表示共享尺度的范围，不表示权重数值。</text>
+</svg></div><span class="q-scroll-hint">横向滑动查看完整图</span><figcaption><span>图 3.</span> 三种粒度作用于同一张 4 × 8 权重矩阵；右图 group size 为 4，每个输出通道分成两组。图中采用 W[out,in] 存储布局，对应正文 Y = XW 中数学权重的转置；这里只统计 scale，不计零点。</figcaption></figure>
+<h3>3.3 INT4、NF4、FP4 不是同一种 4 bit</h3>
+<p>INT4 的整数码值经线性缩放后形成均匀刻度。NF4 使用为近似正态分布设计的非均匀码本，是 QLoRA 中的重要组成；它不等同于硬件原生 FP4 浮点类型。FP4 则属于低位浮点表示，例如 E2M1 由符号位、指数位、尾数位组成，通常还依靠块尺度扩展有效范围。<a href="https://arxiv.org/abs/2305.14314" target="_blank" rel="noopener noreferrer">QLoRA</a></p>
+<p>FP16 与 BF16 都是 16 bit，但 BF16 分配更多指数位、较少尾数位，范围和精度不同。同理，FP8 的 E4M3、E5M2 具有不同的范围与有效精度，具体变体还可能有不同的特殊值约定。比较数据类型时，除了“多少 bit”，还要看数值范围、有效精度、缩放方式和原生指令支持。</p>
+<h3>3.4 静态与动态：量化参数什么时候确定</h3>
+<p>静态激活量化在部署前利用校准数据确定范围或尺度，运行时直接使用；动态激活量化根据当前 token、批次或块的数值计算尺度，适应输入变化，但增加统计与缩放开销。权重通常固定，可以提前量化。这里的“动态”主要描述参数确定时机，不意味着每个请求都重新训练或重新压缩整个模型。<a href="https://onnxruntime.ai/docs/performance/model-optimizations/quantization.html" target="_blank" rel="noopener noreferrer">ONNX Runtime 静态与动态量化</a></p>
+<p>静态／动态、逐张量／逐通道、PTQ／QAT 是不同的分类轴。例如，训练后制作的模型也可以在推理时使用 per-token 动态激活量化。</p>
+</section>
+<section class="tf-chapter" id="section-4"><h2>4 PTQ、QAT、QLoRA 与低比特预训练</h2>
+<h3>4.1 PTQ 训练后量化</h3>
+<p>PTQ 从已经训练好的模型出发，确定量化参数，必要时用少量校准样本做重构或优化，再导出低精度模型。它一般不需要重新进行完整预训练，因此是部署已有模型的重要路径。</p>
+<p>PTQ 不等于“完全不使用数据”，也不等于“没有任何梯度计算”。权重 RTN、基础 HQQ 可以不使用外部校准样本；GPTQ、AWQ 会利用输入统计或重构信息；OmniQuant 会优化量化相关参数，仍属于论文所讨论的 PTQ 路线。<a href="https://arxiv.org/abs/2308.13137" target="_blank" rel="noopener noreferrer">OmniQuant</a></p>
+<h3>4.2 QAT 量化感知训练</h3>
+<p>QAT 在训练或微调过程中模拟目标量化误差，让可训练参数适应低精度部署。常见做法是插入 fake quant：前向执行量化再反量化，反向通过直通估计器等近似传递梯度。</p>
+<p>Fake quant 的张量可能仍由浮点数保存，它主要模拟数值误差；真正的内存与算子收益通常要在转换、导出后体现。QAT 能提供更强的适应能力，但增加训练成本，而且训练模拟的格式必须与最终推理内核一致。<a href="https://docs.pytorch.org/ao/stable/workflows/qat.html" target="_blank" rel="noopener noreferrer">torchao QAT</a></p>
+<h3>4.3 QLoRA 是低显存微调方案</h3>
+<p>QLoRA 冻结量化后的基础权重，训练低秩适配器。原论文使用 NF4、double quantization 和 paged optimizers，降低基础权重及相关状态的内存成本。Double quantization 指进一步量化量化常数，不是把模型反复量化两遍；分页优化器主要应对内存峰值，不代表所有训练状态都变成 4 bit。<a href="https://arxiv.org/abs/2305.14314" target="_blank" rel="noopener noreferrer">QLoRA 原论文</a></p>
+<p>因此，QLoRA 不能简单当作 GPTQ、AWQ 的同类部署算法。它首先回答“如何用较少显存微调大模型”。微调结束后，如何加载适配器、是否合并、是否重新量化，仍要单独选择。合并适配器并重新量化会引入新误差，需要重新评测。</p>
+<h3>4.4 原生低比特模型改变了训练前提</h3>
+<p>BitNet b1.58 的代表性思路，是在训练中使用三值权重 \(\{-1,0,+1\}\)。1.58 来自 \(\log_2 3\) 的信息量，而非任意硬件中每个权重实际恰好占 1.58 bit。尺度、其他层和打包方式仍有成本。<a href="https://arxiv.org/abs/2402.17764" target="_blank" rel="noopener noreferrer">BitNet b1.58</a></p>
+<p>这条路线让训练过程直接适应极低位宽，与“拿一个已经训练好的 BF16 模型进行压缩”有不同的前提。不能据此推导出任意现有模型都能无损转换成 1.58 bit。</p>
+<figure class="q-figure" id="figure-4">
+  <div class="q-figure-scroll" tabindex="0" aria-label="图 4，可横向滚动">
+    <svg viewBox="0 0 840 610" role="img" aria-labelledby="q-routes-title">
+      <title id="q-routes-title">PTQ、QAT 与 QLoRA 的制作路径。PTQ 对已有模型校准和重构，QAT 在模拟量化误差时更新可训练参数，QLoRA 冻结低比特基座并只训练低秩适配器。</title>
+      <defs><marker id="q-routes-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M1 1 L7 4 L1 7" class="q-line"/></marker></defs>
+      <text x="32" y="34" class="q-title q-ink">量化适应与低显存微调，优化的对象不同</text>
+      <text x="174" y="77" class="q-small q-muted">起点</text>
+      <text x="390" y="77" class="q-small q-muted">制作或训练过程</text>
+      <text x="624" y="77" class="q-small q-muted">主要产物</text>
+
+      <text x="32" y="125" class="q-title q-ink">(a) PTQ</text>
+      <text x="32" y="153" class="q-small q-muted">已有模型</text>
+      <text x="32" y="175" class="q-small q-muted">训练后量化</text>
+      <rect x="174" y="105" width="160" height="86" rx="5" class="q-blue"/>
+      <text x="254" y="140" text-anchor="middle" class="q-text q-accent-blue">已训练权重</text>
+      <text x="254" y="165" text-anchor="middle" class="q-small q-muted">高精度模型</text>
+      <path d="M334 148 H390" class="q-line" marker-end="url(#q-routes-arrow)"/>
+      <rect x="390" y="105" width="180" height="86" rx="5" class="q-orange"/>
+      <text x="480" y="133" text-anchor="middle" class="q-text q-accent-orange">量化参数与重构</text>
+      <text x="480" y="158" text-anchor="middle" class="q-small q-muted">校准 / 优化</text>
+      <text x="480" y="180" text-anchor="middle" class="q-small q-muted">是否需要依算法而定</text>
+      <path d="M570 148 H624" class="q-line" marker-end="url(#q-routes-arrow)"/>
+      <rect x="624" y="105" width="184" height="86" rx="5" class="q-purple"/>
+      <text x="716" y="140" text-anchor="middle" class="q-text q-accent-purple">量化权重与元数据</text>
+      <text x="716" y="165" text-anchor="middle" class="q-small q-muted">由推理引擎加载</text>
+      <path d="M32 226 H808" class="q-line"/>
+
+      <text x="32" y="275" class="q-title q-ink">(b) QAT</text>
+      <text x="32" y="303" class="q-small q-muted">训练或微调</text>
+      <text x="32" y="325" class="q-small q-muted">适应量化误差</text>
+      <rect x="174" y="255" width="160" height="86" rx="5" class="q-blue"/>
+      <text x="254" y="290" text-anchor="middle" class="q-text q-accent-blue">可训练模型</text>
+      <text x="254" y="315" text-anchor="middle" class="q-small q-muted">指定目标量化方案</text>
+      <path d="M334 298 H390" class="q-line" marker-end="url(#q-routes-arrow)"/>
+      <rect x="390" y="255" width="180" height="86" rx="5" class="q-orange"/>
+      <text x="480" y="283" text-anchor="middle" class="q-text q-accent-orange">模拟量化误差</text>
+      <text x="480" y="308" text-anchor="middle" class="q-small q-muted">Fake quant</text>
+      <text x="480" y="330" text-anchor="middle" class="q-small q-muted">更新可训练参数</text>
+      <path d="M570 298 H624" class="q-line" marker-end="url(#q-routes-arrow)"/>
+      <rect x="624" y="255" width="184" height="86" rx="5" class="q-purple"/>
+      <text x="716" y="290" text-anchor="middle" class="q-text q-accent-purple">转换并导出</text>
+      <text x="716" y="315" text-anchor="middle" class="q-small q-muted">真实低精度表示</text>
+      <path d="M32 376 H808" class="q-line"/>
+
+      <text x="32" y="425" class="q-title q-ink">(c) QLoRA</text>
+      <text x="32" y="453" class="q-small q-muted">参数高效微调</text>
+      <text x="32" y="475" class="q-small q-muted">降低训练显存</text>
+      <rect x="174" y="405" width="160" height="86" rx="5" class="q-blue"/>
+      <text x="254" y="440" text-anchor="middle" class="q-text q-accent-blue">4 bit 基座</text>
+      <text x="254" y="465" text-anchor="middle" class="q-small q-muted">冻结基础权重</text>
+      <path d="M334 448 H390" class="q-line" marker-end="url(#q-routes-arrow)"/>
+      <rect x="390" y="405" width="180" height="86" rx="5" class="q-orange"/>
+      <text x="480" y="433" text-anchor="middle" class="q-text q-accent-orange">只更新 LoRA</text>
+      <text x="480" y="458" text-anchor="middle" class="q-small q-muted">量化基座参与前向</text>
+      <text x="480" y="480" text-anchor="middle" class="q-small q-muted">梯度流向适配器</text>
+      <path d="M570 448 H624" class="q-line" marker-end="url(#q-routes-arrow)"/>
+      <rect x="624" y="405" width="184" height="86" rx="5" class="q-purple"/>
+      <text x="716" y="440" text-anchor="middle" class="q-text q-accent-purple">基座 + LoRA</text>
+      <text x="716" y="465" text-anchor="middle" class="q-small q-muted">部署格式另行选择</text>
+
+      <path d="M32 526 H808" class="q-line"/>
+      <text x="32" y="558" class="q-small q-muted">Fake quant 模拟数值误差；转换到部署格式后，才由实际低精度内核兑现收益。</text>
+      <text x="32" y="584" class="q-small q-muted">QLoRA 的低显存训练收益，不能直接当作量化推理的加速结论。</text>
+    </svg>
+  </div>
+  <figcaption><span>图 4.</span> PTQ 与 QAT 关注模型如何适应量化表示；QLoRA 冻结量化基座来训练适配器。三条路径的产物和优化对象不同，不能只凭“是否使用 4 bit”把它们视为同一类方案。</figcaption>
+</figure>
+</section>
+<section class="tf-chapter" id="section-5"><h2>5 代表算法：它们分别怎样控制误差</h2>
+<h3>5.1 RTN 与 LLM.int8()</h3>
+<p><strong>RTN</strong> 就是确定范围与尺度后直接就近舍入。它制作成本低、容易复现，是有价值的基线；是否够用，要看位宽、分组、模型分布和预处理。不能因为它简单，就认定它在所有模型上都不可用。</p>
+<p><strong>LLM.int8()，2022 年</strong>，把大多数特征交给 INT8 路径，把少量显著异常值对应的特征维度交给 FP16 路径，最后组合结果。它用混合精度分解解决大模型异常激活的问题，代价是额外的分路和高精度计算，不能理解成“整个网络全 INT8”。<a href="https://arxiv.org/abs/2208.07339" target="_blank" rel="noopener noreferrer">论文</a></p>
+<h3>5.2 GPTQ：量化一个部分，同时补偿其余部分</h3>
+<p><strong>GPTQ，2022 年预印本、ICLR 2023</strong>，利用校准输入构建层输出重构目标，借助近似二阶信息逐步量化权重，并调整尚未量化的部分来补偿误差。它没有计算整个大模型训练损失的完整 Hessian。</p>
+<p>典型用途是 W4A16 等权重量化。其价值在于考虑输入相关性和误差传播，而不是仅逐元素舍入。质量受到校准分布、分组和实现细节影响；导出文件能否高效运行，还取决于匹配的矩阵内核。<a href="https://arxiv.org/abs/2210.17323" target="_blank" rel="noopener noreferrer">论文</a></p>
+<h3>5.3 AWQ：依据激活，保护重要权重通道</h3>
+<p><strong>AWQ，2023 年</strong>，利用激活识别更重要的权重通道，并搜索缩放方式，减少这些通道的量化误差。Activation-aware 意味着“量化权重时参考激活”，典型部署仍是 W4A16，并不意味着激活本身也量化。</p>
+<p>AWQ 的“保护重要权重”也不应解释为最后固定保留 1% 权重为 FP16。其重要设计恰恰是通过缩放实现保护，避免不规则混合精度存储带来的低效。<a href="https://arxiv.org/abs/2306.00978" target="_blank" rel="noopener noreferrer">论文</a></p>
+<h3>5.4 SmoothQuant：把激活的量化难度分担给权重</h3>
+<p><strong>SmoothQuant，2022 年预印本、ICML 2023</strong>，使用可逆对角尺度矩阵 \(S\)：</p>
+<div class="math-block">\[
+XW=(XS^{-1})(SW).
+\]</div>
+<p>在量化之前，这个变换保持线性层输出不变。适当缩小激活中幅度特别大的通道，同时放大对应权重，可以把两边的量化难度调整到更容易处理的范围。</p>
+<p>SmoothQuant 的代表目标是 W8A8。AWQ 也会使用等价缩放，但两者的优化重点不同：AWQ 主要降低低位权重带来的输出误差；SmoothQuant 要让激活和权重都更适合 INT8。它们不能仅因为都包含 scale 就被视为同一个算法。<a href="https://arxiv.org/abs/2211.10438" target="_blank" rel="noopener noreferrer">论文</a></p>
+<figure class="q-figure" id="figure-5" id="figure-smoothquant"><div class="q-figure-scroll" tabindex="0" aria-label="图 5，可横向滚动"><svg viewBox="0 0 840 642" role="img" aria-labelledby="smoothquant-title">
+<title id="smoothquant-title">等价缩放的四通道示例：激活和权重的最大绝对值经尺度平衡后趋于一致，第三通道激活从二十降为二，权重从零点二增至二</title>
+<text x="32" y="34" class="q-title q-ink">等价缩放，把异常幅度分担给权重</text>
+<text x="32" y="63" class="q-small q-muted">四个输入通道的最大绝对值 · 前后采用相同的 0–20 纵轴</text>
+<rect x="32" y="84" width="12" height="12" rx="0" class="q-fill-blue"/>
+<text x="53" y="96" class="q-small q-ink">激活 aᵢ = max |Xᵢ|</text>
+<rect x="278" y="84" width="12" height="12" rx="0" class="q-fill-orange"/>
+<text x="299" y="96" class="q-small q-ink">权重 wᵢ = max |Wᵢ|</text>
+<text x="32" y="134" class="q-text q-ink">(a) 变换前</text>
+<line x1="70" y1="390" x2="370" y2="390" class="q-line"/>
+<text x="58" y="395" class="q-small q-muted" text-anchor="end">0</text>
+<line x1="70" y1="335" x2="370" y2="335" class="q-dash"/>
+<text x="58" y="340" class="q-small q-muted" text-anchor="end">5</text>
+<line x1="70" y1="280" x2="370" y2="280" class="q-dash"/>
+<text x="58" y="285" class="q-small q-muted" text-anchor="end">10</text>
+<line x1="70" y1="225" x2="370" y2="225" class="q-dash"/>
+<text x="58" y="230" class="q-small q-muted" text-anchor="end">15</text>
+<line x1="70" y1="170" x2="370" y2="170" class="q-dash"/>
+<text x="58" y="175" class="q-small q-muted" text-anchor="end">20</text>
+<line x1="70" y1="165" x2="70" y2="390" class="q-line"/>
+<rect x="90" y="379" width="15" height="11" rx="0" class="q-fill-blue"/>
+<rect x="111" y="384.5" width="15" height="5.5" rx="0" class="q-fill-orange"/>
+<text x="108" y="416" class="q-small q-muted" text-anchor="middle">1</text>
+<rect x="167" y="368" width="15" height="22" rx="0" class="q-fill-blue"/>
+<rect x="188" y="379" width="15" height="11" rx="0" class="q-fill-orange"/>
+<text x="185" y="416" class="q-small q-muted" text-anchor="middle">2</text>
+<rect x="244" y="170" width="15" height="220" rx="0" class="q-fill-blue"/>
+<rect x="265" y="387.8" width="15" height="2.2" rx="0" class="q-fill-orange"/>
+<text x="262" y="416" class="q-small q-muted" text-anchor="middle">3</text>
+<rect x="321" y="379" width="15" height="11" rx="0" class="q-fill-blue"/>
+<rect x="342" y="381.2" width="15" height="8.8" rx="0" class="q-fill-orange"/>
+<text x="339" y="416" class="q-small q-muted" text-anchor="middle">4</text>
+<text x="220" y="440" class="q-small q-muted" text-anchor="middle">输入通道</text>
+<text x="251.5" y="158" class="q-mono q-accent-blue" text-anchor="middle">20</text>
+<text x="438" y="134" class="q-text q-ink">(b) 变换后</text>
+<line x1="476" y1="390" x2="776" y2="390" class="q-line"/>
+<text x="464" y="395" class="q-small q-muted" text-anchor="end">0</text>
+<line x1="476" y1="335" x2="776" y2="335" class="q-dash"/>
+<text x="464" y="340" class="q-small q-muted" text-anchor="end">5</text>
+<line x1="476" y1="280" x2="776" y2="280" class="q-dash"/>
+<text x="464" y="285" class="q-small q-muted" text-anchor="end">10</text>
+<line x1="476" y1="225" x2="776" y2="225" class="q-dash"/>
+<text x="464" y="230" class="q-small q-muted" text-anchor="end">15</text>
+<line x1="476" y1="170" x2="776" y2="170" class="q-dash"/>
+<text x="464" y="175" class="q-small q-muted" text-anchor="end">20</text>
+<line x1="476" y1="165" x2="476" y2="390" class="q-line"/>
+<rect x="496" y="382.22182540694797" width="15" height="7.778174593052023" rx="0" class="q-fill-blue"/>
+<rect x="517" y="382.22182540694797" width="15" height="7.778174593052023" rx="0" class="q-fill-orange"/>
+<text x="514" y="416" class="q-small q-muted" text-anchor="middle">1</text>
+<rect x="573" y="374.44365081389594" width="15" height="15.556349186104047" rx="0" class="q-fill-blue"/>
+<rect x="594" y="374.44365081389594" width="15" height="15.556349186104047" rx="0" class="q-fill-orange"/>
+<text x="591" y="416" class="q-small q-muted" text-anchor="middle">2</text>
+<rect x="650" y="368.0" width="15" height="22.0" rx="0" class="q-fill-blue"/>
+<rect x="671" y="368.0" width="15" height="22.0" rx="0" class="q-fill-orange"/>
+<text x="668" y="416" class="q-small q-muted" text-anchor="middle">3</text>
+<rect x="727" y="380.16130089900093" width="15" height="9.838699100999074" rx="0" class="q-fill-blue"/>
+<rect x="748" y="380.16130089900093" width="15" height="9.838699100999074" rx="0" class="q-fill-orange"/>
+<text x="745" y="416" class="q-small q-muted" text-anchor="middle">4</text>
+<text x="626" y="440" class="q-small q-muted" text-anchor="middle">输入通道</text>
+<text x="515" y="218" class="q-text q-ink">通道 3：s₃ = 10</text>
+<text x="515" y="250" class="q-small q-accent-blue">激活 20 ÷ 10 = 2</text>
+<text x="515" y="277" class="q-small q-accent-orange">权重 0.2 × 10 = 2</text>
+<path d="M 638 290 L 668 328 L 668 360" class="q-dash"/>
+<rect x="32" y="461" width="776" height="44" rx="3" class="q-purple"/>
+<text x="420" y="489" class="q-text q-accent-purple" text-anchor="middle">XW = (XS⁻¹)(SW)     sᵢ = √(aᵢ / wᵢ)</text>
+<text x="32" y="541" class="q-small q-muted">输入通道</text>
+<text x="352" y="541" class="q-small q-muted" text-anchor="middle">1</text>
+<text x="482" y="541" class="q-small q-muted" text-anchor="middle">2</text>
+<text x="612" y="541" class="q-small q-muted" text-anchor="middle">3</text>
+<text x="742" y="541" class="q-small q-muted" text-anchor="middle">4</text>
+<line x1="32" y1="551" x2="808" y2="551" class="q-line"/>
+<text x="32" y="581" class="q-small q-ink">使用的尺度 sᵢ</text>
+<text x="352" y="581" class="q-mono q-ink" text-anchor="middle">1.414</text>
+<text x="482" y="581" class="q-mono q-ink" text-anchor="middle">1.414</text>
+<text x="612" y="581" class="q-mono q-ink" text-anchor="middle">10</text>
+<text x="742" y="581" class="q-mono q-ink" text-anchor="middle">1.118</text>
+<line x1="32" y1="593" x2="808" y2="593" class="q-line"/>
+<text x="32" y="625" class="q-small q-ink">变换后 aᵢ′ = wᵢ′</text>
+<text x="352" y="625" class="q-mono q-ink" text-anchor="middle">0.707</text>
+<text x="482" y="625" class="q-mono q-ink" text-anchor="middle">1.414</text>
+<text x="612" y="625" class="q-mono q-ink" text-anchor="middle">2</text>
+<text x="742" y="625" class="q-mono q-ink" text-anchor="middle">0.894</text>
+</svg></div><span class="q-scroll-hint">横向滑动查看完整图</span><figcaption><span>图 5.</span> 示意输入的 a = [1, 2, 20, 1]、w = [0.5, 1, 0.2, 0.8]，按 sᵢ = √(aᵢ / wᵢ) 计算；变换后两侧均为 √(aᵢwᵢ)。表中非整数值保留三位小数。该例说明尺度迁移，并非完整 SmoothQuant 校准流程或模型实测；量化前函数等价，量化后仍可能有误差。</figcaption></figure>
+<h3>5.5 OmniQuant 与 HQQ：两种优化切入点</h3>
+<p><strong>OmniQuant，2023 年</strong>，学习权重裁剪和等价变换参数，在块级别优化重构误差，研究对象同时包括权重单独量化、权重与激活联合量化。它增加离线优化成本，换取更灵活的误差控制。<a href="https://arxiv.org/abs/2308.13137" target="_blank" rel="noopener noreferrer">论文</a></p>
+<p><strong>HQQ，2023 年发布的方法</strong>，使用半二次分裂求解权重量化中的优化问题。基础方法无需外部校准数据，也无需反向传播，适合希望快速制作权重量化模型的情形。这里的“制作快”不能自动推导为“推理快”，后者依赖实际内核。<a href="https://dropbox.github.io/hqq_blog/" target="_blank" rel="noopener noreferrer">官方方法说明</a></p>
+<h3>5.6 QuaRot 与 SpinQuant：把异常幅度分散开</h3>
+<p><strong>QuaRot，2024 年</strong>，利用正交变换把集中在少数维度上的幅度分散到更多维度。对线性运算，若 \(R R^T=I\)，则：</p>
+<div class="math-block">\[
+XW=(XR)(R^TW).
+\]</div>
+<p>在整个 Transformer 中使用旋转，还需要处理归一化、残差与非线性结构，不能随意在任意两层之间插入旋转。QuaRot 使用适当的旋转与计算不变性，研究权重、激活和 KV Cache 的低位宽表示；部分变换可以融合，部分仍有在线计算开销。<a href="https://arxiv.org/abs/2404.00456" target="_blank" rel="noopener noreferrer">QuaRot</a></p>
+<p><strong>SpinQuant，2024 年</strong>，进一步学习旋转矩阵，降低不同随机旋转之间的性能差异。它增加优化成本，以寻找更适合量化的坐标系。<a href="https://arxiv.org/abs/2405.16406" target="_blank" rel="noopener noreferrer">SpinQuant</a></p>
+<p>旋转前后的高精度函数可以等价，但加入舍入后通常仍有误差。“等价变换”不等于“量化无损”。</p>
+<h3>5.7 AQLM 与 QuIP#：极低位宽下的码本路线</h3>
+<p>位宽降到 2～3 bit 时，逐元素均匀刻度的表达能力很有限。<strong>AQLM，2024 年</strong>，用多个码本向量之和表示一组权重；<strong>QuIP#，2024 年</strong>，结合 Hadamard 变换、格点码本与微调改善极低位宽质量。<a href="https://arxiv.org/abs/2401.06118" target="_blank" rel="noopener noreferrer">AQLM</a>、<a href="https://arxiv.org/abs/2402.04396" target="_blank" rel="noopener noreferrer">QuIP#</a></p>
+<p>这类方法保存的可能是码本索引，而非普通 INT2 张量。比较压缩率时要计算索引、尺度、码本等总开销；部署时也需要高效的解码与计算内核。</p>
+<h3>5.8 一张方法对比表</h3>
+<div class="tf-table-wrap"><table class="decision-table">
+<thead>
+<tr>
+<th>方法</th>
+<th>代表对象或配置</th>
+<th>控制误差的核心</th>
+<th>数据或执行要求</th>
+<th>需要重点关注</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>RTN</td>
+<td>权重，位宽可变</td>
+<td>就近舍入</td>
+<td>权重统计</td>
+<td>分组与异常值敏感性</td>
+</tr>
+<tr>
+<td>LLM.int8()</td>
+<td>INT8 与 FP16 混合路径</td>
+<td>分离异常特征</td>
+<td>运行时识别与分路</td>
+<td>高精度分支开销</td>
+</tr>
+<tr>
+<td>GPTQ</td>
+<td>常见 W4A16</td>
+<td>近似二阶重构、误差补偿</td>
+<td>校准输入</td>
+<td>校准分布、格式和内核</td>
+</tr>
+<tr>
+<td>AWQ</td>
+<td>常见 W4A16</td>
+<td>激活感知通道缩放</td>
+<td>校准输入与缩放搜索</td>
+<td>激活感知不等于激活量化</td>
+</tr>
+<tr>
+<td>SmoothQuant</td>
+<td>代表 W8A8</td>
+<td>平滑激活、等价迁移</td>
+<td>离线激活统计</td>
+<td>缩放强度、INT8 内核</td>
+</tr>
+<tr>
+<td>OmniQuant</td>
+<td>W4A16、W4A4 等</td>
+<td>学习裁剪与等价变换</td>
+<td>校准与梯度优化</td>
+<td>离线优化成本</td>
+</tr>
+<tr>
+<td>HQQ</td>
+<td>权重量化</td>
+<td>半二次分裂优化</td>
+<td>基础方法无需外部样本</td>
+<td>制作速度与推理速度分开评估</td>
+</tr>
+<tr>
+<td>QuaRot / SpinQuant</td>
+<td>W、A、KV 低位宽</td>
+<td>固定或学习旋转</td>
+<td>具体量化器的校准；SpinQuant 另需优化</td>
+<td>结构适配、在线旋转开销</td>
+</tr>
+<tr>
+<td>AQLM / QuIP#</td>
+<td>极低位宽权重</td>
+<td>向量与码本表示</td>
+<td>校准、优化或微调</td>
+<td>有效位宽与专用内核</td>
+</tr>
+</tbody>
+</table></div>
+<p>这些方法也可以组合，例如旋转后再使用 GPTQ。比较时应先对齐量化对象和部署路径，不能把 W4A16 权重量化与 W4A4KV4 整体方案的结果直接排成同一张速度榜。</p>
+</section>
+<section class="tf-chapter" id="section-6"><h2>6 FP8、MXFP4 与 NVFP4：量化格式开始围绕硬件设计</h2>
+<p>整数不是低精度计算的唯一选择。低位浮点结合块级缩放，可以在较少位数下处理更宽的数值分布；当硬件具有原生支持时，还能减少格式转换与模拟计算的成本。</p>
+<p><strong>FP8</strong> 需要同时指定格式与缩放粒度。某个模型叫“FP8”，可能只量化部分线性层，也可能另外量化 KV Cache，二者不能从名字中互相推断。已有 FP8 权重也不保证在任意 GPU 上都走原生 FP8 矩阵乘法。<a href="https://docs.vllm.ai/en/latest/features/quantization/llm_compressor/fp8/" target="_blank" rel="noopener noreferrer">vLLM FP8 文档</a></p>
+<p><strong>MXFP4</strong> 使用 E2M1 的 4 bit 数值，典型为每 32 个元素共享一个 E8M0 尺度；<strong>NVFP4</strong> 采用更细的 16 元素块、E4M3 块尺度，并结合额外的高精度尺度。二者的尺度编码、分块方式与数值行为不同，不能作为同一个文件格式互换。<a href="https://developer.nvidia.com/blog/introducing-nvfp4-for-efficient-and-accurate-low-precision-inference/" target="_blank" rel="noopener noreferrer">NVIDIA NVFP4 格式说明</a></p>
+<p>NVFP4 的原生高效计算与 Blackwell 等支持该格式的硬件路径有关。旧设备能够解包某份 FP4 权重，与拥有原生 FP4 Tensor Core 吞吐，是不同层面的能力。做选型时，应核对设备型号、内核、模型结构和框架版本，而不是仅判断“是否 NVIDIA GPU”。</p>
+<p>NF4、MXFP4、NVFP4 都含有“4”，但分别涉及不同的码本或浮点缩放设计。仅按文件名中的 bit 数排序，无法判断质量或速度。</p>
+</section>
+<section class="tf-chapter" id="section-7"><h2>7 KV Cache 量化：长上下文的另一笔大账</h2>
+<h3>7.1 缓存大小怎样计算</h3>
+<p>对标准、每层配置相同的 MHA/GQA/MQA 注意力，假设 K、V 使用相同 head dimension，并且缓存所有历史 token：</p>
+<div class="math-block">\[
+M_{\mathrm{KV}}=2BLTH_{\mathrm{KV}}d_{\mathrm{head}}\frac{b_{\mathrm{KV}}}{8}.
+\]</div>
+<p>2 来自 K 和 V；\(B\) 为缓存中的序列数，\(L\) 为层数，\(T\) 为每条序列缓存长度，\(H_{\mathrm{KV}}\) 为 KV 头数，\(d_{\mathrm{head}}\) 为头维度。序列长度不同时，应对各序列长度求和，而非机械使用一个共同的 \(T\)。</p>
+<p>代入 \(B=1,L=32,T=32768,H_{\mathrm{KV}}=8,d_{\mathrm{head}}=128\)，BF16 缓存为：</p>
+<div class="math-block">\[
+2\times1\times32\times32768\times8\times128\times2=4{,}294{,}967{,}296\ \text{bytes}=4\ \text{GiB}.
+\]</div>
+<p>这个配置下，单请求 32K 上下文的 KV Cache 就达到 4 GiB。若只考虑数据载荷，KV8 为 2 GiB，KV4 为 1 GiB；实际还要加尺度、残留高精度缓存和内存分块等开销。</p>
+<p>GQA 应使用 KV 头数，不能误用 query 头数。MLA 的压缩潜变量缓存、滑动窗口注意力、混合架构和跨设备分片，需要按实际缓存结构重新计算。</p>
+<figure class="q-figure" id="figure-6"><div class="q-figure-scroll" tabindex="0" aria-label="图 6，可横向滚动"><svg viewBox="0 0 840 428" role="img" aria-labelledby="q-memory-title"><title id="q-memory-title">8B模型权重与KV缓存的理论载荷对比及KV随上下文增长</title><text x="32.00" y="34.00" class="q-title" text-anchor="start" >(a) 固定 32K 上下文的权重与缓存</text><text x="466.00" y="34.00" class="q-title" text-anchor="start" >(b) KV 载荷随上下文线性增长</text><rect x="32" y="60" width="12" height="12" class="q-fill-blue"/><text x="53.00" y="72.00" class="q-small" text-anchor="start" >权重</text><rect x="132" y="60" width="12" height="12" class="q-fill-orange"/><text x="153.00" y="72.00" class="q-small" text-anchor="start" >KV Cache</text><text x="32.00" y="117.00" class="q-small" text-anchor="start" >BF16 / KV16</text><text x="397.00" y="117.00" class="q-mono" text-anchor="end" >18.90 GiB</text><rect x="32" y="130" width="257.045" height="24" class="q-fill-blue"/><rect x="289.045" y="130" width="69.000" height="24" class="q-fill-orange"/><text x="32.00" y="201.00" class="q-small" text-anchor="start" >4 bit / KV16</text><text x="397.00" y="201.00" class="q-mono" text-anchor="end" >7.73 GiB</text><rect x="32" y="214" width="64.261" height="24" class="q-fill-blue"/><rect x="96.261" y="214" width="69.000" height="24" class="q-fill-orange"/><text x="32.00" y="285.00" class="q-small" text-anchor="start" >4 bit / KV4</text><text x="397.00" y="285.00" class="q-mono" text-anchor="end" >4.73 GiB</text><rect x="32" y="298" width="64.261" height="24" class="q-fill-blue"/><rect x="96.261" y="298" width="17.250" height="24" class="q-fill-orange"/><line x1="32.00" y1="341.00" x2="377.00" y2="341.00" class="q-axis" /><text x="32.00" y="366.00" class="q-small" text-anchor="middle" >0</text><text x="118.25" y="366.00" class="q-small" text-anchor="middle" >5</text><text x="204.50" y="366.00" class="q-small" text-anchor="middle" >10</text><text x="290.75" y="366.00" class="q-small" text-anchor="middle" >15</text><text x="377.00" y="366.00" class="q-small" text-anchor="middle" >20</text><text x="205.00" y="398.00" class="q-small" text-anchor="middle" >理论载荷（GiB）</text><line x1="510.00" y1="341.00" x2="796.00" y2="341.00" class="q-grid" /><text x="498.00" y="346.00" class="q-small" text-anchor="end" >0</text><line x1="510.00" y1="286.50" x2="796.00" y2="286.50" class="q-grid" /><text x="498.00" y="291.50" class="q-small" text-anchor="end" >4</text><line x1="510.00" y1="232.00" x2="796.00" y2="232.00" class="q-grid" /><text x="498.00" y="237.00" class="q-small" text-anchor="end" >8</text><line x1="510.00" y1="177.50" x2="796.00" y2="177.50" class="q-grid" /><text x="498.00" y="182.50" class="q-small" text-anchor="end" >12</text><line x1="510.00" y1="123.00" x2="796.00" y2="123.00" class="q-grid" /><text x="498.00" y="128.00" class="q-small" text-anchor="end" >16</text><line x1="510.00" y1="123.00" x2="510.00" y2="341.00" class="q-axis" /><line x1="510.00" y1="341.00" x2="796.00" y2="341.00" class="q-axis" /><text x="510.00" y="111.00" class="q-small" text-anchor="start" >KV Cache（GiB）</text><line x1="466.00" y1="66.00" x2="490.00" y2="66.00" class="q-series-orange" /><text x="497.00" y="71.00" class="q-small" text-anchor="start" >16 bit</text><line x1="510.00" y1="341.00" x2="796.00" y2="123.00" class="q-series-orange" /><circle cx="581.500" cy="286.500" r="3.5" class="q-fill-orange"/><line x1="577.00" y1="66.00" x2="601.00" y2="66.00" class="q-series-orange" stroke-dasharray="8 5"/><text x="608.00" y="71.00" class="q-small" text-anchor="start" >8 bit</text><line x1="510.00" y1="341.00" x2="796.00" y2="232.00" class="q-series-orange" stroke-dasharray="8 5"/><circle cx="581.500" cy="313.750" r="3.5" class="q-fill-orange"/><line x1="688.00" y1="66.00" x2="712.00" y2="66.00" class="q-series-orange" stroke-dasharray="2 5"/><text x="719.00" y="71.00" class="q-small" text-anchor="start" >4 bit</text><line x1="510.00" y1="341.00" x2="796.00" y2="286.50" class="q-series-orange" stroke-dasharray="2 5"/><circle cx="581.500" cy="327.375" r="3.5" class="q-fill-orange"/><text x="510.00" y="366.00" class="q-small" text-anchor="middle" >0</text><text x="581.50" y="366.00" class="q-small" text-anchor="middle" >32</text><text x="653.00" y="366.00" class="q-small" text-anchor="middle" >64</text><text x="724.50" y="366.00" class="q-small" text-anchor="middle" >96</text><text x="796.00" y="366.00" class="q-small" text-anchor="middle" >128</text><text x="653.00" y="398.00" class="q-small" text-anchor="middle" >缓存长度（K tokens；1K = 1024）</text></svg></div><span class="q-scroll-hint">横向滑动查看完整图</span><figcaption><span>图 6.</span> B = 1，L = 32，8 个 KV 头，头维度 128；左图假设 8B 参数。仅计算数据载荷，未计尺度、未量化层和工作区，不是实测显存。右图固定同一注意力结构，仅改变缓存长度和位宽。</figcaption></figure>
+<h3>7.2 K 与 V 不一定适合同一种粒度</h3>
+<p>KIVI 在其研究的模型中观察到：Key 更适合按通道量化，Value 更适合按 token 量化，并使用高精度残留区处理在线缓存。它说明 K/V 的数值分布和访问方式值得分别设计，而不是简单把两者统一转换成某个整数类型。<a href="https://arxiv.org/abs/2402.02750" target="_blank" rel="noopener noreferrer">KIVI，2024</a></p>
+<p>KV 量化还会影响注意力分数和后续生成，长序列中的收益与误差必须一起评估。高效内核需要把解包、反量化与注意力计算结合，否则节省的缓存带宽可能被额外处理开销抵消。<a href="https://docs.vllm.ai/en/latest/features/quantization/quantized_kvcache/" target="_blank" rel="noopener noreferrer">vLLM 量化 KV Cache</a></p>
+<h3>7.3 TurboQuant 代表的新进展</h3>
+<p>TurboQuant 的预印本发表于 2025 年，Google 在 2026 年作了官方介绍。其思路包括随机旋转和针对均方误差优化的标量量化；针对内积估计的版本还用 QJL 对残差进行低位编码，改善估计性质。它不应被直接等同于 PolarQuant 的极坐标表示。<a href="https://arxiv.org/abs/2504.19874" target="_blank" rel="noopener noreferrer">TurboQuant 论文</a></p>
+<p>这一方向值得关注，但“特定实验中质量持平”不意味着所有任务严格无损。官方介绍中的 attention logits 计算加速，也不等于整个服务端到端加速相同倍数。<a href="https://research.google/blog/turboquant-redefining-ai-efficiency-with-extreme-compression/" target="_blank" rel="noopener noreferrer">Google Research 官方介绍</a></p>
+</section>
+<section class="tf-chapter" id="section-8"><h2>8 性能原理：为什么低位宽模型有时更慢</h2>
+<h3>8.1 Prefill 与 Decode 的瓶颈不同</h3>
+<p>Prefill 一次处理较多输入 token，矩阵运算有较好的权重复用，常更容易接近计算瓶颈。小批量 Decode 每步生成少量 token，大量权重需要反复读取，常更受内存带宽限制。因此 W4A16 在一些小批量生成场景有明显价值，而原生 W8A8、FP8 等路径可能在较大矩阵运算中更有优势。</p>
+<p>这只是分析起点。长上下文会增加 KV 读取成本，大批量会提高权重复用，MoE 的路由和跨卡通信也会改变瓶颈。可以结合博客中的<a href="llm-inference-prefill-decode-bottleneck-analysis.html">Prefill 与 Decode 瓶颈分析</a>理解具体执行过程。</p>
+<figure class="q-figure" id="figure-7">
+  <div class="q-figure-scroll" tabindex="0" aria-label="图 7，可横向滚动">
+    <svg viewBox="0 0 840 650" role="img" aria-labelledby="q-execution-title">
+      <title id="q-execution-title">两种量化矩阵计算的示例路径。W4A16 在片上解包反量化后使用 BF16 乘法和 FP32 累加；原生 INT8 W8A8 使用 INT8 乘法和 INT32 累加。存储精度不等于计算精度。</title>
+      <defs><marker id="q-execution-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M1 1 L7 4 L1 7" class="q-line"/></marker></defs>
+      <text x="32" y="34" class="q-title q-ink">(a) W4A16 · 低位权重读取后，在片上恢复为计算类型</text>
+      <text x="32" y="77" class="q-small q-muted">显存中的表示</text>
+      <text x="302" y="77" class="q-small q-muted">片上处理与矩阵计算</text>
+      <path d="M270 89 V254" class="q-dash"/>
+
+      <rect x="32" y="105" width="190" height="62" rx="5" class="q-blue"/>
+      <text x="127" y="131" text-anchor="middle" class="q-text q-accent-blue">4 bit 权重</text>
+      <text x="127" y="154" text-anchor="middle" class="q-small q-muted">打包码值 + 尺度</text>
+      <path d="M222 136 H302" class="q-line" marker-end="url(#q-execution-arrow)"/>
+      <rect x="302" y="105" width="168" height="62" rx="5" class="q-node"/>
+      <text x="386" y="131" text-anchor="middle" class="q-text q-ink">解包 / 反量化</text>
+      <text x="386" y="154" text-anchor="middle" class="q-small q-muted">恢复到 BF16</text>
+      <path d="M470 136 H494 V169 H520" class="q-line" marker-end="url(#q-execution-arrow)"/>
+
+      <rect x="32" y="190" width="190" height="62" rx="5" class="q-orange"/>
+      <text x="127" y="216" text-anchor="middle" class="q-text q-accent-orange">16 bit 激活</text>
+      <text x="127" y="239" text-anchor="middle" class="q-small q-muted">示例采用 BF16</text>
+      <path d="M222 221 H494 V207 H520" class="q-line" marker-end="url(#q-execution-arrow)"/>
+      <rect x="520" y="148" width="186" height="80" rx="5" class="q-purple"/>
+      <text x="613" y="180" text-anchor="middle" class="q-text q-accent-purple">BF16 乘法</text>
+      <text x="613" y="207" text-anchor="middle" class="q-small q-muted">FP32 累加</text>
+      <path d="M706 188 H740" class="q-line" marker-end="url(#q-execution-arrow)"/>
+      <rect x="740" y="163" width="68" height="50" rx="5" class="q-node"/>
+      <text x="774" y="195" text-anchor="middle" class="q-text q-ink">输出</text>
+      <text x="32" y="286" class="q-small q-muted">收益来源：减少权重读取量。代价：解包、尺度处理与反量化。</text>
+      <path d="M32 313 H808" class="q-line"/>
+
+      <text x="32" y="352" class="q-title q-ink">(b) W8A8 · 原生 INT8 路径直接执行低精度矩阵乘法</text>
+      <text x="32" y="395" class="q-small q-muted">显存中的表示</text>
+      <text x="302" y="395" class="q-small q-muted">片上处理与矩阵计算</text>
+      <path d="M270 407 V572" class="q-dash"/>
+
+      <rect x="32" y="423" width="190" height="62" rx="5" class="q-blue"/>
+      <text x="127" y="449" text-anchor="middle" class="q-text q-accent-blue">INT8 权重</text>
+      <text x="127" y="472" text-anchor="middle" class="q-small q-muted">码值 + 尺度</text>
+      <path d="M222 454 H494 V487 H520" class="q-line" marker-end="url(#q-execution-arrow)"/>
+      <rect x="32" y="508" width="190" height="62" rx="5" class="q-orange"/>
+      <text x="127" y="534" text-anchor="middle" class="q-text q-accent-orange">INT8 激活</text>
+      <text x="127" y="557" text-anchor="middle" class="q-small q-muted">静态或动态量化后</text>
+      <path d="M222 539 H494 V525 H520" class="q-line" marker-end="url(#q-execution-arrow)"/>
+      <text x="302" y="496" class="q-small q-muted">原生 INT8 数据通路</text>
+      <rect x="520" y="466" width="186" height="80" rx="5" class="q-purple"/>
+      <text x="613" y="498" text-anchor="middle" class="q-text q-accent-purple">INT8 乘法</text>
+      <text x="613" y="525" text-anchor="middle" class="q-small q-muted">INT32 累加</text>
+      <path d="M706 506 H740" class="q-line" marker-end="url(#q-execution-arrow)"/>
+      <rect x="740" y="481" width="68" height="50" rx="5" class="q-node"/>
+      <text x="774" y="513" text-anchor="middle" class="q-text q-ink">输出</text>
+      <text x="32" y="604" class="q-small q-muted">收益来源：低精度输入与原生计算吞吐。输出仍需按尺度进行转换。</text>
+      <text x="32" y="632" class="q-small q-muted">上图列出两种具体示例；融合方式、累加精度和输出类型以实际内核为准。</text>
+    </svg>
+  </div>
+  <figcaption><span>图 7.</span> 位宽记号没有完整描述执行过程。W4A16 可以主要节省带宽，原生 W8A8 则能利用低精度矩阵单元；两者都需要检查最终采用的内核和格式转换成本。</figcaption>
+</figure>
+
+<h3>8.2 压缩率不是加速比</h3>
+<p>一个简化的性能下界模型是：</p>
+<div class="math-block">\[
+t\gtrsim\max\left(\frac{\text{数据搬运量}}{\text{有效带宽}},\frac{\text{运算量}}{\text{有效算力}}\right).
+\]</div>
+<p>实际还要计入调度、通信、解包、scale 读取、反量化以及未被隐藏的额外开销。好的内核会把解包和反量化融合到计算中；如果先把整层甚至整个模型展开成高精度副本，存储和带宽收益可能明显缩水。</p>
+<p>即使某段计算快了 4 倍，整体也未必快 4 倍。假设它原本占总时长 60%，其余 40% 完全不变，则按 Amdahl 定律：</p>
+<div class="math-block">\[
+\mathrm{Speedup}=\frac{1}{0.4+0.6/4}\approx1.82.
+\]</div>
+<p>这是说明原理的假设算例，不是量化模型的实测结果。在线服务研究也表明，量化的性能、能耗和质量取舍明显依赖工作负载、并行方式和 GPU 架构。<a href="https://arxiv.org/abs/2508.16712" target="_blank" rel="noopener noreferrer">量化系统评测研究</a></p>
+<h3>8.3 容量收益也可能转化为吞吐收益</h3>
+<p>某个量化方案即使没有明显降低单请求延迟，也可能因为节省显存，允许更多请求并发、保留更长上下文或减少跨卡拆分。反过来，盲目增大 batch 也可能恶化排队和首 token 延迟。比较方案时，需要同时观察延迟、吞吐与服务目标，而非只记录一个 tokens/s。</p>
+</section>
+<section class="tf-chapter" id="section-9"><h2>9 发展脉络：从 INT8 到全链路低精度</h2>
+<p>量化并非大模型时代才出现。传统神经网络中早已有 INT8、校准、QAT 与混合精度；大模型让异常激活、权重规模、长上下文缓存和硬件带宽变得更加突出。</p>
+<div class="tf-table-wrap"><table class="decision-table">
+<thead>
+<tr>
+<th>阶段</th>
+<th>代表工作</th>
+<th>主要推进的问题</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>大模型之前</td>
+<td>均匀量化、INT8、QAT</td>
+<td>端侧模型的存储与整数计算</td>
+</tr>
+<tr>
+<td>2022</td>
+<td>LLM.int8()、GPTQ、SmoothQuant</td>
+<td>大模型异常值、低位权重重构、W8A8 可用性</td>
+</tr>
+<tr>
+<td>2023</td>
+<td>AWQ、QLoRA、OmniQuant、HQQ</td>
+<td>4 bit 部署、低显存微调、更灵活的离线优化</td>
+</tr>
+<tr>
+<td>2024</td>
+<td>QuaRot、SpinQuant、AQLM、QuIP#、KIVI、BitNet b1.58</td>
+<td>旋转、码本、KV 缓存、极低比特训练</td>
+</tr>
+<tr>
+<td>2025 至本文核对时点</td>
+<td>硬件原生 FP4、更多 QAT 部署、TurboQuant 等</td>
+<td>格式与硬件协同、在线缓存压缩、端到端成本</td>
+</tr>
+</tbody>
+</table></div>
+<p>这条时间线不表示新方法完全替代旧方法。INT8 仍有广泛的工程价值，W4A16 仍适合许多容量受限场景，而原生 FP4 是否划算取决于硬件与模型支持。更明显的趋势是：优化对象从权重扩展到激活和缓存，算法开始越来越重视最终的打包格式、内核和服务负载。</p>
+</section>
+<section class="tf-chapter" id="section-10"><h2>10 工具地图：先分清算法、格式、工具和引擎</h2>
+<p>GPTQ、AWQ、SmoothQuant 属于方法；INT4、FP8、NF4 属于数值表示；GGUF 属于文件容器；bitsandbytes、GPTQModel、llm-compressor 等提供量化或低精度工具能力；vLLM、TensorRT-LLM、llama.cpp 提供推理执行。部分项目会跨越多层，但这些概念不能互相替代。</p>
+<p>GGUF 文件可以保存多种精度，扩展名本身不代表已经量化。Q4_K_M 等名称表示具体的量化配置或混合策略，也不意味着每一个张量恰好都是 4 bit。Safetensors 同样只是张量存储格式；量化语义还依赖配置、尺度、布局以及加载器。<a href="https://github.com/ggml-org/llama.cpp" target="_blank" rel="noopener noreferrer">llama.cpp 官方仓库</a></p>
+<h3>10.1 常见工具怎样选择</h3>
+<div class="tf-table-wrap"><table class="decision-table">
+<thead>
+<tr>
+<th>工具或组合</th>
+<th>主要角色</th>
+<th>适合的起点</th>
+<th>需要核对</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>bitsandbytes + Transformers / PEFT</td>
+<td>8 bit、4 bit 加载与低显存微调</td>
+<td>快速实验、QLoRA</td>
+<td>设备后端、计算类型、训练方式</td>
+</tr>
+<tr>
+<td>GPTQModel</td>
+<td>GPTQ 量化及加载生态</td>
+<td>制作或使用 GPTQ 权重</td>
+<td>模型架构、打包格式、内核</td>
+</tr>
+<tr>
+<td>llm-compressor + vLLM</td>
+<td>制作压缩模型并服务化运行</td>
+<td>服务器上的多种量化方案</td>
+<td>导出配置与 vLLM 内核支持</td>
+</tr>
+<tr>
+<td>llama.cpp + GGUF</td>
+<td>转换、量化和本地推理</td>
+<td>CPU、个人电脑、部分 GPU 卸载</td>
+<td>具体量化类型与设备后端</td>
+</tr>
+<tr>
+<td>NVIDIA Model Optimizer + TensorRT-LLM</td>
+<td>NVIDIA 量化优化与部署</td>
+<td>配套 GPU 的低精度服务</td>
+<td>设备代际、模型结构、引擎版本</td>
+</tr>
+<tr>
+<td>torchao</td>
+<td>PyTorch 原生低精度与 QAT 工具</td>
+<td>自定义 PyTorch 流程</td>
+<td>配置、导出路径与执行内核</td>
+</tr>
+<tr>
+<td>ONNX Runtime / OpenVINO + NNCF</td>
+<td>图优化、量化和设备运行时</td>
+<td>已使用 ONNX 或 Intel 部署栈</td>
+<td>算子、设备、量化方案支持</td>
+</tr>
+<tr>
+<td>msModelSlim + MindIE / vLLM-Ascend</td>
+<td>昇腾量化制作与部署</td>
+<td>Ascend 设备上的 LLM 服务</td>
+<td>芯片、CANN、模型与框架版本组合</td>
+</tr>
+</tbody>
+</table></div>
+<p>bitsandbytes 的强项是与模型加载、PEFT 工作流结合；llama.cpp 的优势是 GGUF 与本地推理工具链；vLLM 的价值还包括批处理、缓存管理和服务调度。选择应从现有硬件和部署目标出发，而非给所有工具排一个总榜。<a href="https://huggingface.co/docs/bitsandbytes/main/en/index" target="_blank" rel="noopener noreferrer">bitsandbytes</a>、<a href="https://docs.vllm.ai/en/latest/features/quantization/" target="_blank" rel="noopener noreferrer">vLLM 量化支持</a>、<a href="https://github.com/pytorch/ao" target="_blank" rel="noopener noreferrer">torchao</a></p>
+<p>NVIDIA 工具当前使用 <strong>Model Optimizer</strong> 名称，旧资料常写 TensorRT Model Optimizer；TensorRT-LLM 是与之配合的推理组件，两者职责不同。<a href="https://github.com/NVIDIA/Model-Optimizer" target="_blank" rel="noopener noreferrer">Model Optimizer</a>、<a href="https://github.com/NVIDIA/TensorRT-LLM" target="_blank" rel="noopener noreferrer">TensorRT-LLM</a></p>
+<p>昇腾侧的 msModelSlim 提供多种线性层和缓存量化能力，并可面向 MindIE、vLLM-Ascend 等部署路径。配置名中同样包含 W8A8，不代表 CUDA 侧产物能直接拿来使用；格式、算子和支持矩阵都需要匹配。<a href="https://mindstudio-docs-2610.readthedocs.io/zh-cn/latest/msmodelslim/" target="_blank" rel="noopener noreferrer">msModelSlim 官方文档</a></p>
+<h3>10.2 老教程中的两个维护陷阱</h3>
+<p>截至本文核对时，<strong>AutoGPTQ 官方仓库明确标注不再维护，并引导使用 GPTQModel；AutoAWQ 已归档，声明不再维护，并指向 llm-compressor 等后续工具。</strong> 新项目应优先检查维护中的实现，复现实验则可以固定旧环境。<a href="https://github.com/AutoGPTQ/AutoGPTQ" target="_blank" rel="noopener noreferrer">AutoGPTQ</a>、<a href="https://github.com/ModelCloud/GPTQModel" target="_blank" rel="noopener noreferrer">GPTQModel</a>、<a href="https://github.com/casper-hansen/AutoAWQ" target="_blank" rel="noopener noreferrer">AutoAWQ</a>、<a href="https://github.com/vllm-project/llm-compressor" target="_blank" rel="noopener noreferrer">llm-compressor</a></p>
+<p>工具停止维护，不代表对应算法失效。讨论“AWQ 是否适合”与讨论“是否安装 AutoAWQ”，需要分别回答。</p>
+<h3>10.3 其他值得了解的工具生态</h3>
+<ul>
+<li><strong>AutoRound</strong> 提供训练后量化能力，其代表算法通过有符号梯度优化权重舍入，也提供多种格式与推理框架的集成。<a href="https://github.com/intel/auto-round" target="_blank" rel="noopener noreferrer">官方仓库</a>、<a href="https://aclanthology.org/2024.findings-emnlp.662/" target="_blank" rel="noopener noreferrer">算法论文</a></li>
+<li><strong>MLX-LM</strong> 面向 Apple silicon，提供基于 MLX 的量化、文本生成与微调流程，是 Mac 本地部署的另一条路线。<a href="https://github.com/ml-explore/mlx-lm" target="_blank" rel="noopener noreferrer">官方仓库</a></li>
+<li><strong>AMD Quark</strong> 提供 PyTorch、ONNX 模型的量化、校准和导出，可服务于 AMD 部署生态；其工具设计也包含跨平台能力。<a href="https://quark.docs.amd.com/latest/" target="_blank" rel="noopener noreferrer">官方文档</a></li>
+<li><strong>SGLang</strong> 是支持量化模型服务的推理框架，提供多种离线量化产物的加载及部分在线量化路径，仍需匹配模型、设备与后端。<a href="https://docs.sglang.io/docs/advanced_features/quantization" target="_blank" rel="noopener noreferrer">官方文档</a></li>
+</ul>
+</section>
+<section class="tf-chapter" id="section-11"><h2>11 从需求出发选方案，而不是先决定最低位宽</h2>
+<h3>11.1 五种常见场景</h3>
+<p><strong>个人电脑显存不够。</strong> 可以先比较平台支持良好的 4～5 bit 权重量化模型与较高精度基线；GGUF/llama.cpp 是常见本地路径。若追求更低延迟，还要查看实际卸载比例、内存带宽和内核。把部分层放在 CPU 也许能装下模型，但速度可能受到传输或 CPU 计算限制。</p>
+<p><strong>GPU 服务主要追求吞吐。</strong> 优先基于现有引擎，比较其高效支持的 INT8、FP8、INT4 或 FP4 路径。矩阵尺寸、batch、上下文长度和并行设置必须贴近业务。具备较新低精度硬件时，FP8/FP4 值得加入候选，不能直接预设它们胜出。</p>
+<p><strong>长上下文或高并发导致显存不足。</strong> 先拆出 KV Cache 的占比，再比较 KV8、KV4 与缓存管理策略。只量化权重可能无法解决主要瓶颈；如果启用更低精度 KV，需要专门复测长距离检索和长输出。</p>
+<p><strong>目标是低显存微调。</strong> 从 QLoRA 等参数高效微调方案入手，另行确定部署格式。如果目标是让模型适应特定低精度执行路径，再考虑与该路径一致的 QAT。</p>
+<p><strong>目标设备是昇腾、Intel 或其他加速器。</strong> 先选该平台已有高效内核的量化方案，再选算法和工具。CUDA 环境中的论文结果不能直接推断另一种芯片的收益。</p>
+<p>这些是实验起点，而非性能保证。具体取舍仍应由同一模型、同一任务和同一运行环境的测量决定。<a href="https://huggingface.co/docs/transformers/quantization/selecting" target="_blank" rel="noopener noreferrer">Transformers 工具选择指南</a>、<a href="https://docs.openvino.ai/2026/openvino-workflow/model-optimization-guide/weight-compression.html" target="_blank" rel="noopener noreferrer">OpenVINO 权重压缩</a></p>
+<h3>11.2 一条可复现的实践流程</h3>
+<ol>
+<li><strong>建立基线。</strong> 固定模型版本、tokenizer、聊天模板与生成参数，保存高精度模型的任务质量、延迟和显存结果。</li>
+<li><strong>确定目标。</strong> 是要装进单卡、增加并发、缩短首 token 延迟，还是降低训练显存？目标不同，量化对象也不同。</li>
+<li><strong>先查执行支持。</strong> 确定目标设备、引擎、数据类型和内核，再选择可导出的量化方案。</li>
+<li><strong>准备校准与评测数据。</strong> 校准样本覆盖真实语言、领域、长度和提示词模板；评测集独立保留。样本数应通过效果收敛与资源预算决定，没有适用于所有模型的固定数字。</li>
+<li><strong>逐项做实验。</strong> 可以先只改权重，再改激活或缓存；记录 group size、对称性、scale 粒度、排除层和校准配置，便于定位误差来源。</li>
+<li><strong>导出后重新加载。</strong> 通过最终推理引擎验证质量与性能，确认实际内核和运行精度。只测量化工具里的 fake quant，无法证明部署后的结果。</li>
+<li><strong>按服务目标验收。</strong> 同时保留任务质量、峰值内存、延迟分位数与吞吐数据。必要时保留敏感层高精度，或退回更高位宽。</li>
+</ol>
+<p>对 MoE，尤其要注意：每个 token 激活参数少，不等于所有专家权重都不需要存储。校准数据还应覆盖足够多的专家路由，路由器与不同专家的敏感性也可能不同。多模态模型则要覆盖实际图像、音频或视频输入，只用文本校准无法充分观察跨模态路径。</p>
+</section>
+<section class="tf-chapter" id="section-12"><h2>12 怎样做一份可信的量化评测</h2>
+<h3>12.1 质量不能只看困惑度</h3>
+<p>困惑度 PPL 是有用的语言建模信号，但无法单独覆盖指令遵循、结构化输出、代码、数学、长上下文检索和业务任务。指令模型的综合评测已经观察到，不同任务、模型规模和量化方法之间的退化模式并不一致。<a href="https://arxiv.org/abs/2409.11055" target="_blank" rel="noopener noreferrer">量化质量综合评测</a></p>
+<p>因此，至少应有语言建模或分布差异指标，加上真实目标任务。对代码可以关注测试通过率，对工具调用关注参数正确率，对检索关注答案与证据一致性。长推理输出需要专门评估，不能把“短问答看起来正常”当作充分证据。</p>
+<p>生成结果逐字不同，也不自动等于质量下降。微小的 logits 变化可能改变一次 token 选择，再引起后续路径分叉；temperature 为零同样不能让两个不同数值实现天然输出完全一致。评测应关注任务判定，并控制随机种子、采样参数和重复次数。</p>
+<h3>12.2 性能指标必须说清口径</h3>
+<div class="tf-table-wrap"><table class="decision-table">
+<thead>
+<tr>
+<th>指标</th>
+<th>应说明的含义</th>
+<th>主要防止的误读</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>TTFT</td>
+<td>首个 token 延迟，说明是否包含排队</td>
+<td>把离线 prefill 与在线体验混为一谈</td>
+</tr>
+<tr>
+<td>TPOT / ITL</td>
+<td>首 token 后平均生成间隔，或逐 token 间隔分布</td>
+<td>把均值当成尾延迟</td>
+</tr>
+<tr>
+<td>吞吐</td>
+<td>输入、输出或总 token 吞吐</td>
+<td>把单请求速度与服务总吞吐混用</td>
+</tr>
+<tr>
+<td>Goodput</td>
+<td>在质量和延迟目标内完成的有效吞吐</td>
+<td>忽略超时与不合格响应</td>
+</tr>
+<tr>
+<td>显存</td>
+<td>区分模型载入、运行峰值、分配与预留</td>
+<td>把框架缓存池占用当成权重体积</td>
+</tr>
+<tr>
+<td>能耗或成本</td>
+<td>相同服务目标下每有效请求或 token 的成本</td>
+<td>把硬件峰值指标当成实际节省</td>
+</tr>
+</tbody>
+</table></div>
+<p>测量时应固定或报告硬件、驱动、框架和内核版本，以及输入输出长度、请求率、batch、并发、并行策略、缓存命中和预热。若输出长度由模型自由决定，还应另设固定生成预算的实验，避免“因为生成得少而显得更快”。<a href="https://arxiv.org/abs/2508.16712" target="_blank" rel="noopener noreferrer">在线服务量化研究</a></p>
+<h3>12.3 质量下降时如何定位</h3>
+<p>先排除模型版本、tokenizer 和聊天模板差异，再检查量化配置和导出加载是否一致。之后可以逐层比较重构误差、逐项回退权重／激活／KV 精度，识别敏感层或敏感算子。</p>
+<p>提高位宽、缩小分组、调整裁剪、优化校准分布或保留少量高精度层，都是可测试的措施。不要一发现问题就更换整套算法，也不要用已经参与调参的数据作为唯一验收集。</p>
+</section>
+<section class="tf-chapter" id="section-13"><h2>13 最容易被误解的八件事</h2>
+<ol>
+<li><strong>4 bit 不代表整个模型的所有计算都是 4 bit。</strong> 权重、激活、缓存、累加器和其他算子可能使用不同精度。</li>
+<li><strong>4 倍权重压缩不等于 4 倍端到端加速。</strong> 缓存、解包、通信与未加速路径都会影响收益。</li>
+<li><strong>PTQ 不等于完全不优化参数。</strong> 部分 PTQ 方法会使用校准、重构或梯度优化。</li>
+<li><strong>AWQ 中的激活感知不等于激活量化。</strong> 激活可以只用于决定权重的缩放。</li>
+<li><strong>QLoRA 不等于通用 4 bit 部署算法。</strong> 它主要降低适配训练的内存成本。</li>
+<li><strong>GGUF 不等于 INT4。</strong> 它是容器，里面可以装不同数值类型和混合配置。</li>
+<li><strong>低比特预训练不等于任意现有模型都能低比特无损转换。</strong> 训练前提会影响最终可压缩性。</li>
+<li><strong>某个 benchmark 持平不等于数学无损，也不等于所有任务持平。</strong> 应把结论限定到已验证的模型、数据与运行环境。</li>
+</ol>
+<p>实际部署中，最值得留下的通常是一组可复现的结果：同一模型在几种候选精度下，任务质量改变了多少，节省了多少运行内存，在哪种请求负载下变快，以及为了这些收益付出了怎样的制作和维护成本。选择能够满足质量要求、并在目标硬件上兑现收益的配置，比追求文件名中最低的位数更有意义。</p>
+</section>
+<section class="tf-chapter" id="section-14"><h2>14 面向面试：从一分钟概述到工程追问</h2>
+<p>面向大模型算法、推理优化和部署岗位，量化问题通常需要连起三个层次：数值表示怎样变化，算法怎样控制误差，以及最终部署有没有收益。下面按这三个层次准备答法，再用计算题和场景题检验理解。可以先口述答案，再展开核对；回答中的边界条件，往往比多报几个算法名更有价值。</p>
+<h3>14.1 一分钟介绍大模型量化</h3>
+<p>“大模型量化是把权重、激活或 KV Cache 用更低位宽的数值表示，以降低存储、带宽或计算成本。以均匀量化为例，先用 scale 和 zero point 映射到有限整数，再用对应参数还原近似值，主要误差来自舍入和裁剪。</p>
+<p>“方法上，可以对训练好的模型做 PTQ，也可以通过 QAT 让参数适应量化误差。GPTQ、AWQ 常用于低位宽权重，SmoothQuant 代表激活与权重一起量化的思路；长上下文还需要考虑 KV Cache。实际选择时，我会先看硬件和推理框架支持，再对齐业务数据，比较质量、峰值显存、首 token 延迟和吞吐。权重缩小四倍，不代表整个推理一定加速四倍。”</p>
+<p>这段答法先建立整体认识，随后可以按面试官关注的方向，展开数值推导、算法机制或工程证据。</p>
+<h3>14.2 基础问答：把配置解释完整</h3>
+<p><button type="button" class="theme-toggle" onclick="document.querySelectorAll('#section-14 details').forEach(function(d){d.open=true;})">展开全部答案</button> <button type="button" class="theme-toggle" onclick="document.querySelectorAll('#section-14 details').forEach(function(d){d.open=false;})">收起全部答案</button></p>
+
+<details>
+<summary>题 1：写出量化与反量化公式，并解释 scale 和 zero point。</summary>
+<p><strong>建议答法：</strong> 均匀仿射量化是 \(q=\operatorname{clip}(\operatorname{round}(x/s)+z,q_{\min},q_{\max})\)，反量化是 \(\hat x=s(q-z)\)。Scale 决定浮点空间中相邻刻度的距离，zero point 决定浮点零对应的整数编码。对称量化通常固定 \(z=0\)；非对称量化可以更充分地覆盖偏斜分布，但内核需要处理零点。</p>
+<p><strong>追问：为什么零要能精确表示？</strong> 为了让数学上的零在量化后仍能准确恢复，避免给零值引入偏移，例如张量填充中的零。当 \(q=z\) 时，反量化结果就是零；这不意味着其他浮点数也能精确恢复。</p>
+<p><strong>易错点：</strong> Scale 不是越小越好。缩小 scale 而不增加编码范围，会增加裁剪风险。<a href="https://onnxruntime.ai/docs/performance/model-optimizations/quantization.html" target="_blank" rel="noopener noreferrer">量化表示参考</a></p>
+</details>
+<details>
+<summary>题 2：Per-channel、per-group 和动态量化有什么关系？</summary>
+<p><strong>建议答法：</strong> 前两者描述量化参数的共享粒度，动态量化描述参数在什么时候确定。Per-channel 为不同通道使用不同 scale；per-group 把权重分成更小的组。动态激活量化在推理时根据当前数据计算 scale，可以与 per-token、per-block 等粒度组合。</p>
+<p><strong>追问：group size 越小，是否一定越好？</strong> 通常更容易控制表示误差，但需要更多元数据，也可能增加访问和计算成本，还受内核可支持的布局限制。最终应比较实际质量与吞吐，不能只比较组大小。</p>
+<p><strong>易错点：</strong> “动态量化”不等于“动态选择模型位宽”，更不等于每个请求重新训练一次模型。</p>
+</details>
+<details>
+<summary>题 3：W4A16 的矩阵乘法一定是 INT4 计算吗？</summary>
+<p><strong>建议答法：</strong> 不一定。这个记号主要描述权重和激活的表示位宽，还缺少数据类型、累加精度及内核信息。常见路径是读取打包的低位权重，在内核中解包、反量化，再与 FP16/BF16 激活计算。是否使用原生低精度指令，要看设备和具体内核。</p>
+<p><strong>追问：既然要反量化，为什么还可能更快？</strong> 因为反量化可以融合在片上计算中，不必把完整高精度权重写回显存。在权重带宽受限时，减少的显存读取成本可能超过新增的处理开销。</p>
+<p><strong>易错点：</strong> 权重的存储类型、乘法输入类型和累加类型是三个不同问题。</p>
+</details>
+<details>
+<summary>题 4：PTQ、QAT、QLoRA 能不能放在一起比较？</summary>
+<p><strong>建议答法：</strong> PTQ 和 QAT 主要区分量化误差如何被引入与适应。PTQ 从已有模型出发，可能使用校准与重构优化；QAT 在训练或微调中模拟目标量化误差，更新可训练参数。QLoRA 主要是低显存微调方案，冻结低比特基座、训练 LoRA，不能直接当成同层级的部署量化算法。</p>
+<p><strong>追问：用了梯度是不是就一定是 QAT？</strong> 不能只看有没有反向传播。部分 PTQ 方法会优化裁剪、尺度或等价变换；应该说明优化对象、数据和训练过程。</p>
+<p><strong>易错点：</strong> 使用 fake quant 不代表训练过程已经获得真正整数内核的内存与速度收益。<a href="https://docs.pytorch.org/ao/stable/workflows/qat.html" target="_blank" rel="noopener noreferrer">QAT 工作流</a>、<a href="https://arxiv.org/abs/2305.14314" target="_blank" rel="noopener noreferrer">QLoRA</a></p>
+</details>
+<h3>14.3 算法追问：说清为什么有效</h3>
+<details>
+<summary>题 5：GPTQ、AWQ、SmoothQuant 的核心区别是什么？</summary>
+<p><strong>建议答法：</strong> GPTQ 利用校准输入和近似二阶信息，量化部分权重时补偿剩余权重的误差；AWQ 根据激活识别重要通道，通过缩放降低权重量化对输出的影响；SmoothQuant 通过等价缩放，把难量化的激活幅度部分分担给权重，代表目标是 W8A8。</p>
+<p><strong>追问：应该选哪个？</strong> 先确认要量化哪些张量。如果目标是 W4A16 权重压缩，可以比较相应 GPTQ、AWQ 实现；如果希望使用 W8A8 计算，需要评估激活误差与对应内核。最终使用相同模型、校准条件和部署环境验证。</p>
+<p><strong>易错点：</strong> 不说“AWQ 不需要数据”“GPTQ 计算整个模型的完整 Hessian”，也不把 AWQ 的 activation-aware 解释成激活必然量化。<a href="https://arxiv.org/abs/2210.17323" target="_blank" rel="noopener noreferrer">GPTQ</a>、<a href="https://arxiv.org/abs/2306.00978" target="_blank" rel="noopener noreferrer">AWQ</a>、<a href="https://arxiv.org/abs/2211.10438" target="_blank" rel="noopener noreferrer">SmoothQuant</a></p>
+</details>
+<details>
+<summary>题 6：为什么最小化权重误差，不一定能最小化输出误差？</summary>
+<p><strong>建议答法：</strong> 输入不同方向的幅度和相关性不同，相同的权重误差会被输入放大成不同的输出误差。对某一个输出通道，设 \(\Delta w=w-\hat w\)，则：</p>
+<div class="math-block">\[
+E=\|X\Delta w\|_2^2=\Delta w^T X^T X\Delta w.
+\]</div>
+<p>这个目标里，\(X^TX\) 描述不同误差方向对输出的影响。它通常不是单位矩阵，所以简单优化 \(\|\Delta w\|_2^2\) 与优化层输出不是同一个问题。</p>
+<p><strong>追问：二阶信息从哪里来？</strong> 对这个二次重构目标，关于误差向量的 Hessian 为 \(2X^TX\)；若目标带有平均或 \(1/2\) 系数，常数因子会相应变化。GPTQ 使用的是层级重构相关信息，不能把这里说成整个语言模型训练损失的完整 Hessian。</p>
+<p><strong>易错点：</strong> 校准集上的输出误差小，不保证分布变化后的所有任务都表现相同。</p>
+</details>
+<details>
+<summary>题 7：等价缩放前后函数不变，为什么量化效果会变化？</summary>
+<p><strong>建议答法：</strong> 在高精度下，\(XW=(XS^{-1})(SW)\) 成立；但量化包含舍入和裁剪，不是线性运算。改变张量分布后，量化器使用的尺度和落到的刻度都会变化，因此误差也会改变。缩放可以让难以表示的激活变得更容易表示，同时把一部分范围压力转移给权重。</p>
+<p><strong>追问：把激活缩得越小越好吗？</strong> 不是。对应权重会放大，权重侧可能变得更难量化。需要同时考虑两侧的范围、粒度和误差，而不是单独追求某一边幅度最小。</p>
+<p><strong>易错点：</strong> “量化前等价”与“量化后严格无损”不能画等号。</p>
+</details>
+<details>
+<summary>题 8：正交旋转为什么能帮助量化？为什么不能随便插入？</summary>
+<p><strong>建议答法：</strong> 合适的旋转可以把少数维度上的大幅度分散开，改善逐坐标或分块量化的误差。在线性层中，利用 \(RR^T=I\)，可以把 \(XW\) 改写成 \((XR)(R^TW)\)。但整个网络还包含非线性、残差和归一化，必须保证变换能正确传递或补偿。</p>
+<p><strong>追问：旋转有什么成本？</strong> 某些变换可以提前融合进权重，另一些需要在线计算；学习旋转还增加离线优化成本。质量收益与执行收益要分别评估。</p>
+<p><strong>易错点：</strong> 正交变换保持向量范数，不意味着它保持每个坐标的值，也不意味着旋转后的量化误差为零。<a href="https://arxiv.org/abs/2404.00456" target="_blank" rel="noopener noreferrer">QuaRot</a>、<a href="https://arxiv.org/abs/2405.16406" target="_blank" rel="noopener noreferrer">SpinQuant</a></p>
+</details>
+<details>
+<summary>题 9：同样是 4 bit，为什么 NF4、INT4 和 NVFP4 不能直接互换？</summary>
+<p><strong>建议答法：</strong> 它们的数值编码与缩放设计不同。INT4 通常通过线性缩放形成均匀刻度；NF4 使用面向特定分布设计的非均匀码本；NVFP4 使用低位浮点和分层尺度。相同的位数，并不意味着相同的可表示值、元数据开销、打包格式或硬件计算路径。</p>
+<p><strong>追问：只换数据类型声明能完成转换吗？</strong> 不能。需要按目标格式重新编码数值和尺度，还要确保推理引擎理解布局。即使两种文件都能加载，实际执行精度也可能不同。</p>
+<p><strong>易错点：</strong> “支持读取 FP4 模型”不等于“使用原生 FP4 指令获得加速”。</p>
+</details>
+<h3>14.4 白板计算：把假设、单位与开销写出来</h3>
+<details>
+<summary>题 10：手算一组 INT4 量化，并说明误差界。</summary>
+<p><strong>题设：</strong> 使用对称编码 -7 到 7，\(s=0.2,z=0\)，量化 \([-1.4,-0.44,0.33,1.19]\)。</p>
+<p><strong>解答：</strong> 除以 scale 后是 \([-7,-2.2,1.65,5.95]\)，就近舍入得 \([-7,-2,2,6]\)，反量化得 \([-1.4,-0.4,0.4,1.2]\)。按“恢复值减原值”计算，误差为 \([0,0.04,0.07,0.01]\)，最大绝对误差 0.07，小于半步长 0.1。</p>
+<p><strong>追问：输入 1.8 怎么办？</strong> 它对应的整数 9 超出范围，会被截到 7，恢复为 1.4，绝对误差为 0.4。半步长界只适用于未触发裁剪的就近舍入，不能套到越界输入。</p>
+</details>
+<details>
+<summary>题 11：8B 模型采用 INT4、group size 128，实际权重至少多大？</summary>
+<p><strong>题设：</strong> 恰好 80 亿参数全部使用 INT4，每组额外保存一个 16 bit scale，无零点、无填充，也暂不考虑其他张量。</p>
+<p><strong>解答：</strong> 纯权重为 4 GB；组数为 \(8\times10^9/128=62{,}500{,}000\)，scale 占 125,000,000 字节，因此合计 4.125 GB，约 3.842 GiB。有效位宽是 4.125 bit/weight。</p>
+<p><strong>追问：能否因此说 4 GB 显卡可以运行？</strong> 不能。题目里的 GB 是十进制体积，而且这里还没有 KV Cache、未量化层和运行时缓冲。应核对设备实际可用字节数，再计算总占用。</p>
+<p><strong>易错点：</strong> 参数量中的 8B、数据大小中的 GB，以及设备工具显示的 GiB，是不同概念。</p>
+</details>
+<details>
+<summary>题 12：给定 16 GiB 可用预算，这个模型最多容纳几条 32K 请求？</summary>
+<p><strong>题设：</strong> 沿用上一题的约 3.842 GiB 权重；预留其他开销 2 GiB。每条请求有 32 层、8 个 KV 头、头维度 128，缓存长度 32768，K/V 均为 BF16；各请求不共享缓存。</p>
+<p><strong>解答：</strong> 单请求缓存是 \(2\times32\times32768\times8\times128\times2=4\) GiB。因此按这些假设，序列数的理论上界为：</p>
+<div class="math-block">\[
+B_{\max}=\left\lfloor\frac{16-3.842-2}{4}\right\rfloor=2.
+\]</div>
+<p><strong>追问：KV 改成 8 bit 后，并发是否恰好翻倍？</strong> 仅按载荷计算，每条变成 2 GiB，此式得到 5 条，不是 4 条，因为还存在固定开销与整数取整。实际要重新计入尺度、分块浪费和工作区，并确认延迟要求，不能把容量上界当成已测吞吐。</p>
+<p><strong>易错点：</strong> GQA 应填 KV 头数；32768 是当前缓存长度。若还要生成更多 token，必须继续为增长预留空间。</p>
+</details>
+<h3>14.5 场景题：回答中要有排查顺序与验收指标</h3>
+<details>
+<summary>题 13：模型文件缩小四倍，线上 tokens/s 却下降，怎么排查？</summary>
+<p><strong>建议答法：</strong> 首先对齐模型版本、输入输出长度、请求率、batch、缓存命中与预热，确认比较口径一致；其次检查实际使用的量化内核，有没有高精度回退、单独反量化或额外转换；然后用性能分析拆分线性层、注意力、通信与调度成本。</p>
+<p>如果是小批量 Decode，重点观察权重读取与解包成本；如果是长上下文，检查 KV 读取和注意力；如果是多卡 MoE，还要看路由和通信。如果量化允许增大 batch，应另外报告并发下的有效吞吐与延迟，而不是用它掩盖单请求变慢。</p>
+<p><strong>追问：4 倍局部加速为何没有 4 倍整体加速？</strong> 用 Amdahl 定律解释：若被加速部分原来只占 60%，其余不变，整体只有约 1.82 倍。</p>
+<p><strong>易错点：</strong> 不把“显存占用变少”当作“执行内核一定变快”的证据。</p>
+</details>
+<details>
+<summary>题 14：量化后 PPL 基本不变，但代码或长文本任务退化，怎么办？</summary>
+<p><strong>建议答法：</strong> 先核对 tokenizer、聊天模板、生成参数和导出加载是否一致；然后使用独立的目标任务集复现，分别观察代码正确率、长距离信息提取、结构化输出或业务成功率。PPL 只是一个代理指标，不能替代这些任务。</p>
+<p>接着分别回退权重、激活和 KV 精度，确定退化来源；再通过逐层或逐模块对比定位敏感部分。根据结果尝试更有代表性的校准数据、不同分组和裁剪、敏感层保留高精度，或提高整体位宽。每次只改少数因素，才能解释收益来自哪里。</p>
+<p><strong>追问：只用英文短文本校准中文长文模型够吗？</strong> 不能默认足够，应检查语言、长度和领域覆盖，并在独立数据上验证。</p>
+<p><strong>易错点：</strong> 不把“输出不一样”直接当作质量退化，也不把调参集成绩当作最终泛化效果。</p>
+</details>
+<details>
+<summary>题 15：给定一张卡，要部署长上下文模型，你先量化权重还是 KV？</summary>
+<p><strong>建议答法：</strong> 先按目标并发和上下文长度拆出权重、KV 与运行时开销。若权重本身装不下，优先解决权重容量；若长上下文或并发使缓存占主要部分，就需要评估 KV 量化，也可能与权重量化组合。随后检查设备与引擎是否有高效的相应内核。</p>
+<p><strong>追问：K、V 可以直接采用相同量化策略吗？</strong> 可以把它作为基线，但不能预设最优。二者的分布和误差影响不同，KIVI 就分别设计了 Key 与 Value 的粒度；实际还要考虑在线缓存更新和残留高精度区。<a href="https://arxiv.org/abs/2402.02750" target="_blank" rel="noopener noreferrer">KIVI</a></p>
+<p><strong>易错点：</strong> 不只测试短问答，还要覆盖目标上下文长度、后续生成长度与并发，并验证质量和延迟。</p>
+</details>
+<details>
+<summary>题 16：面试中如何讲清自己做过的量化项目？</summary>
+<p><strong>建议答法：</strong> 用真实的实验链条回答：原始瓶颈是什么、为什么选择某种精度与工具、校准数据如何准备、关键配置是什么、如何验证量化产物、最终在什么条件下获得什么收益。结果同时报告质量、容量和性能，说明没有改善的指标及其原因。</p>
+<p>可以按这个顺序准备证据：<strong>模型与版本 → 硬件与引擎 → 权重／激活／KV 配置 → 数据与对照组 → 质量变化 → 峰值显存 → 同负载下的 TTFT、TPOT 和吞吐。</strong> 如果用的是现成量化模型，应把自己的工作准确表述为部署、评测或优化，并说明做过哪些配置对比。</p>
+<p><strong>追问：为什么换了框架或卡型，原结论不一定成立？</strong> 算子布局、内核、缓存管理和硬件指令都可能变化。能够解释这些边界，比只给一个没有测试条件的加速倍数更有说服力。</p>
+</details>
+</section>
+<section class="references-section tf-chapter" id="section-15"><h2>参考与延伸阅读</h2>
+<p>正文链接分别对应相关论断。若希望沿一条路径深入，可以先读基础表示，再读权重量化、激活量化与缓存量化，最后阅读目标部署栈的文档。</p>
+<ul>
+<li>基础：<a href="https://pytorch.org/blog/quantization-in-practice/" target="_blank" rel="noopener noreferrer">PyTorch 量化实践</a>、<a href="https://huggingface.co/docs/transformers/main/quantization/concept_guide" target="_blank" rel="noopener noreferrer">Hugging Face 概念指南</a>。</li>
+<li>权重与激活：<a href="https://arxiv.org/abs/2210.17323" target="_blank" rel="noopener noreferrer">GPTQ</a>、<a href="https://arxiv.org/abs/2306.00978" target="_blank" rel="noopener noreferrer">AWQ</a>、<a href="https://arxiv.org/abs/2211.10438" target="_blank" rel="noopener noreferrer">SmoothQuant</a>、<a href="https://arxiv.org/abs/2308.13137" target="_blank" rel="noopener noreferrer">OmniQuant</a>。</li>
+<li>旋转与极低位宽：<a href="https://arxiv.org/abs/2404.00456" target="_blank" rel="noopener noreferrer">QuaRot</a>、<a href="https://arxiv.org/abs/2405.16406" target="_blank" rel="noopener noreferrer">SpinQuant</a>、<a href="https://arxiv.org/abs/2401.06118" target="_blank" rel="noopener noreferrer">AQLM</a>、<a href="https://arxiv.org/abs/2402.04396" target="_blank" rel="noopener noreferrer">QuIP#</a>。</li>
+<li>微调与训练：<a href="https://arxiv.org/abs/2305.14314" target="_blank" rel="noopener noreferrer">QLoRA</a>、<a href="https://arxiv.org/abs/2402.17764" target="_blank" rel="noopener noreferrer">BitNet b1.58</a>、<a href="https://docs.pytorch.org/ao/stable/workflows/qat.html" target="_blank" rel="noopener noreferrer">torchao QAT</a>。</li>
+<li>缓存：<a href="https://arxiv.org/abs/2402.02750" target="_blank" rel="noopener noreferrer">KIVI</a>、<a href="https://arxiv.org/abs/2504.19874" target="_blank" rel="noopener noreferrer">TurboQuant</a>。</li>
+<li>部署：<a href="https://docs.vllm.ai/en/latest/features/quantization/" target="_blank" rel="noopener noreferrer">vLLM</a>、<a href="https://github.com/ggml-org/llama.cpp" target="_blank" rel="noopener noreferrer">llama.cpp</a>、<a href="https://github.com/NVIDIA/Model-Optimizer" target="_blank" rel="noopener noreferrer">NVIDIA Model Optimizer</a>、<a href="https://mindstudio-docs-2610.readthedocs.io/zh-cn/latest/msmodelslim/" target="_blank" rel="noopener noreferrer">msModelSlim</a>。</li>
+</ul></section></section>
+<section class="comments-section" id="comments" aria-label="讨论"><div class="comments-header"><h2>讨论</h2></div><div id="utterances-container" class="utterances-container"></div><noscript>请启用 JavaScript 后查看评论区。</noscript></section>
+</article></div></main>
+<footer class="site-footer"><span class="footer-credit">© 2026 MOFANG</span></footer>
+<script>if(window.matchMedia('(max-width: 960px)').matches){document.querySelector('.tf-rail details').open=false;}</script>
+<script src="../../app.js?v=49"></script>
+<script>
+(function(){
+  var links=[].slice.call(document.querySelectorAll('.tf-rail a'));
+  var observer=new IntersectionObserver(function(entries){
+    entries.forEach(function(entry){if(entry.isIntersecting){links.forEach(function(a){if(a.hash==='#'+entry.target.id){a.setAttribute('aria-current','location');}else{a.removeAttribute('aria-current');}});}});
+  },{rootMargin:'-8% 0px -72% 0px',threshold:0});
+  document.querySelectorAll('.tf-chapter').forEach(function(section){observer.observe(section);});
+})();
+</script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" crossorigin="anonymous"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js" crossorigin="anonymous" onload="renderMathInElement(document.body,{delimiters:[{left:'\\[',right:'\\]',display:true},{left:'\\(',right:'\\)',display:false}],throwOnError:false});"></script>
+</body></html>

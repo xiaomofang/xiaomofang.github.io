@@ -6,6 +6,7 @@
   let searchQuery = "";
 
   const KEYWORD_LABELS = {
+    quantization: "模型量化",
     transformer: "Transformer",
     "vllm-ascend": "vLLM × Ascend",
     parallelism: "并行与通信",
