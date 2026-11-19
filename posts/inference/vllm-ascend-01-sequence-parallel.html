@@ -1,11 +1,11 @@
 <!DOCTYPE html>
-<html lang="zh-CN" data-theme="night">
+<html lang="zh-CN" data-theme="night" class="engine-reader">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <script>(function(){try{var s=localStorage.getItem("yichuan-theme");document.documentElement.setAttribute("data-theme",s||(matchMedia("(prefers-color-scheme: dark)").matches?"night":"day"));}catch(e){}})();</script>
   <link rel="stylesheet" href="../../styles.css?v=70">
-  <link rel="stylesheet" href="../../assets/vllm-ascend/reader.css?v=2">
+  <link rel="stylesheet" href="../../assets/vllm-ascend/reader.css?v=3">
   <link rel="stylesheet" href="../../assets/vllm-ascend/sp-pcp-map.css?v=1">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous">
   <title>SP 到底切了什么：从 Transformer Block 到 PCP、DCP 与 DSA-CP · 推理引擎解剖室 01</title>
@@ -31,35 +31,34 @@
 </header>
   <main class="site-main">
 <div class="ve-layout">
-    <aside class="ve-rail">
-<details open>
-<summary>推理引擎解剖室</summary>
-<ol>
-<li>
-<a href="vllm-ascend-00-series.html">专栏目录</a>
-</li>
-<li>
-<a href="vllm-ascend-01-sequence-parallel.html" aria-current="page">01 · SP 与上下文并行</a>
-</li>
-<li>
-<a href="#layouts">先认数据布局</a>
-</li>
-<li>
-<a href="#block-lab">逐步执行一个 block</a>
-</li>
-<li>
-<a href="#performance">收益与计算量</a>
-</li>
-<li>
-<a href="#compatibility">组合与版本边界</a>
-</li>
-<li>
-<a href="#verification">复算与实验方法</a>
-</li>
-</ol>
-<small>双卡示例：4 个 token，H=8，TP=2。</small>
-</details>
-</aside>
+    <aside class="ve-rail ve-reader-rail">
+      <nav class="ve-series-nav" aria-label="专栏导航">
+        <a href="vllm-ascend-00-series.html">推理引擎解剖室 · 专栏目录</a>
+      </nav>
+      <details class="ve-toc" data-ve-toc open>
+        <summary>文章目录<span class="ve-current-section" data-ve-current aria-hidden="true">文章开头</span></summary>
+        <nav class="ve-chapter-nav" aria-label="文章章节">
+          <ol>
+            <li><a href="#block-lab">逐步执行一个 block</a></li>
+            <li><a href="#layouts">四个 token 在两张卡上</a></li>
+            <li><a href="#collectives">拼接 token 与合并贡献</a></li>
+            <li><a href="#tp-block">输出投影为何跨卡求和</a></li>
+            <li><a href="#rmsnorm">RMSNorm 如何计算</a></li>
+            <li><a href="#dense-sp">Dense SP 的层间布局</a></li>
+            <li class="ve-toc-sub"><a href="#block-walkthrough">两张卡的数据变化</a></li>
+            <li><a href="#performance">计算量、显存与通信量</a></li>
+            <li><a href="#moe">把 FFN 换成专家之后</a></li>
+            <li><a href="#context-parallel">PCP、DCP 与 KV</a></li>
+            <li class="ve-toc-sub"><a href="#dsa-cp-v030">v0.30 的 DSA-CP 路径</a></li>
+            <li><a href="#compatibility">哪些并行方式能叠加</a></li>
+            <li class="ve-toc-sub"><a href="#dsa-cp-version-boundary">DSA-CP 的版本边界</a></li>
+            <li><a href="#request">从 Prefill 走到 Decode</a></li>
+            <li><a href="#verification">复算示例与实现位置</a></li>
+            <li class="ve-toc-sub"><a href="#source-versions">源码版本对照</a></li>
+          </ol>
+        </nav>
+      </details>
+    </aside>
     <article class="post-page">
       <header class="post-page-header">
         <p class="post-page-category">Inference · 推理引擎解剖室 01</p>
@@ -112,44 +111,6 @@
           <p class="ve-detail" data-sp-detail aria-live="polite">每个本地 token 的完整隐藏维度都在本卡。</p>
           <noscript>交互图需要 JavaScript；正文中的静态流程也给出了完整计算顺序。</noscript>
         </div>
-      <details class="ve-toc">
-<summary>文章目录</summary>
-<ol>
-<li>
-<a href="#layouts">四个 token 在两张卡上</a>
-</li>
-<li>
-<a href="#collectives">拼接 token 与合并贡献是两件事</a>
-</li>
-<li>
-<a href="#tp-block">两次输出投影，为什么都要跨卡求和</a>
-</li>
-<li>
-<a href="#rmsnorm">RMSNorm 只需要当前 token 的完整向量</a>
-</li>
-<li>
-<a href="#dense-sp">把 Norm 放到两段通信之间</a>
-</li>
-<li>
-<a href="#performance">算一遍 SP 的计算量、显存和通信量</a>
-</li>
-<li>
-<a href="#moe">把 FFN 换成专家之后</a>
-</li>
-<li>
-<a href="#context-parallel">PCP 分 query，DCP 分历史 KV</a>
-</li>
-<li>
-<a href="#compatibility">哪些并行方式能叠加</a>
-</li>
-<li>
-<a href="#request">从 prefill 走到逐 token decode</a>
-</li>
-<li>
-<a href="#verification">复算示例与实现位置</a>
-</li>
-</ol>
-</details>
       <section class="post-page-content">
         <h2 id="layouts">四个 token 在两张卡上</h2>
         <h3>一行是一个 token，一列是一个特征</h3>
@@ -800,6 +761,7 @@ python assets/vllm-ascend/verify-layouts.py</code>
 </main>
   <script src="../../app.js?v=47">
 </script>
+  <script defer src="../../assets/vllm-ascend/reader.js?v=1"></script>
   <script defer src="../../assets/vllm-ascend/sp-lab.js?v=1">
 </script>
   <script defer src="../../assets/vllm-ascend/sp-pcp-map.js?v=1">
