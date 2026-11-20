@@ -1,0 +1,1130 @@
+<!doctype html><html lang="zh-CN" data-theme="night"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><script>(function(){try{var saved=localStorage.getItem('yichuan-theme');document.documentElement.setAttribute('data-theme',saved||(matchMedia('(prefers-color-scheme: dark)').matches?'night':'day'));}catch(e){}})();</script><link rel="stylesheet" href="../../styles.css?v=72" /><title>DeepSeek 技术演进：从 V3、R1、V3.1、V3.2 到 V4 · MOFANG</title><meta name="description" content="从 V3 的混合专家骨干出发，看 R1 如何训练推理，V3.1 怎样切换思考模式，V3.2 如何筛选历史，再沿 V4 的源码追踪一个 token 读写缓存的全过程。"><link rel="canonical" href="https://xiaomofang.github.io/posts/basic/deepseek-family.html"><style>
+.family-layout{display:grid;grid-template-columns:minmax(145px,210px) minmax(0,1fr);gap:clamp(20px,3vw,52px);max-width:1360px;margin:auto;padding:0 16px}
+.family-layout .post-page{width:100%;min-width:0;max-width:1000px;margin-inline:auto}
+.family-nav{align-self:start;position:sticky;top:4rem;max-height:81vh;overflow:auto;font-size:14px;line-height:1.55;color:var(--text-soft);padding-block:14px}
+.family-nav a{display:block;text-decoration:none;color:var(--text-soft);margin:10px 0}.family-nav summary{cursor:pointer;color:var(--text);font-weight:600}
+.family-nav a.active,.family-nav a:hover{color:var(--accent)}.family-nav details details{margin:4px 0 12px 10px;font-size:12px}
+.family-article h2,.family-article h3,.family-article h4{scroll-margin-top:4rem}
+.family-article figure{margin:30px 0}.family-article figure svg,.family-article figure img,.figure-canvas svg,.family-article .widget svg{display:block;width:100%;height:auto}
+.family-article figure>svg{cursor:zoom-in}.family-article figcaption,.family-article .src,.family-article .tags,.family-article .end{color:var(--text-soft);font-size:.83em}
+.family-article .fnum{font-weight:bold;margin-right:.4em}.figure-hint{display:block;color:var(--accent);font-size:.85em}
+.family-article .eq,.family-article .scope,.family-article .note,.family-article .widget{padding:16px;margin:20px 0;background:var(--surface-muted);border:1px solid var(--border);border-radius:5px}
+.family-article .eq{text-align:center;overflow-x:auto;font-family:'Cambria Math',serif;line-height:1.8}
+.family-article .inline-table{max-width:100%;overflow-x:auto}.family-article .inline-table table{border-collapse:collapse;width:100%}
+.family-article .inline-table td,.family-article .inline-table th{border-bottom:1px solid var(--border);padding:.55em .65em;text-align:left}
+.family-article pre{max-width:100%;overflow-x:auto}.family-article :not(pre)>code{overflow-wrap:anywhere}
+.family-article .controls{display:flex;gap:.7em;flex-wrap:wrap;margin:.7em 0;align-items:center}
+.family-article .controls button,.family-article .controls select,.figure-tools button{font:inherit;font-size:14px;padding:6px 12px;border:1px solid var(--border);color:var(--text);background:var(--bg);border-radius:5px;cursor:pointer}
+.family-article .controls button[aria-pressed=true]{border-color:var(--accent);color:var(--accent)}
+.family-article .widget svg{background:white;border-radius:4px;font-family:'Microsoft YaHei',sans-serif}
+.family-article .readout{font-size:.85em}.figure-dialog{width:min(96vw,1700px);max-height:94vh;padding:0;color:var(--text);border:1px solid var(--border);background:var(--bg)}
+.figure-dialog::backdrop{background:rgb(0 0 0/.72)}.figure-tools{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;font-size:14px}
+.figure-canvas{overflow:auto;max-height:79vh}.figure-canvas.actual svg{width:1600px;max-width:none}
+@media(max-width:800px){.family-layout{display:block;padding:0 6px}.family-nav{position:static;max-height:230px}.family-nav a{margin:6px 0}}
+@media print{.family-nav,.figure-hint,.family-article .controls,.figure-dialog,.site-header,.comments-section{display:none}.family-layout{display:block}}
+</style></head><body class="family-post"><div class="ambient" aria-hidden="true"></div><canvas id="star-canvas"></canvas><header class="site-header">
+<div class="header-inner">
+<a href="../../index.html" class="logo">
+<span class="logo-dot">
+</span>
+<span class="logo-text">MOFANG</span>
+</a>
+<div class="header-actions">
+<nav class="site-nav">
+<a href="../../index.html">首页</a>
+<a href="../../interview/index.html">八股</a>
+</nav>
+<button id="theme-toggle" class="theme-toggle" type="button" aria-label="切换日夜主题">切换日夜</button>
+</div>
+</div>
+</header><main class="site-main"><div class="family-layout"><aside class="family-nav" aria-label="文章目录"><details open><summary>文章目录</summary><nav id="toc-links"></nav></details></aside><article class="post-page family-article"><header class="post-page-header"><p class="post-page-category">Basic Knowledge · 模型架构</p><h1 class="post-page-title">DeepSeek 技术演进：从 V3、R1、V3.1、V3.2 到 V4</h1><p class="post-lead">从 V3 的混合专家骨干出发，看 R1 如何训练推理，V3.1 怎样切换思考模式，V3.2 如何筛选历史，再沿 V4 的源码追踪一个 token 读写缓存的全过程。</p><div class="post-page-keywords"><a class="post-keyword-chip" href="../../index.html?keyword=transformer">Transformer</a><a class="post-keyword-chip" href="../../index.html?keyword=attention">Attention 加速</a><a class="post-keyword-chip" href="../../index.html?keyword=training">训练</a><a class="post-keyword-chip" href="../../index.html?keyword=speculative">投机推理</a></div><p class="post-page-meta" data-author="MOFANG" data-date="2026-11-20">2026年11月20日 · MOFANG</p><p class="src">版本资料核对至 2026-11-20 · 后代源码快照 2026-11-19 · 原创图解 · <a href="glm-family.html">同系列 · GLM 技术演进</a></p></header><section class="post-page-content"><p>2025 年 1 月，DeepSeek 用 V3-Base 做了一个实验。同一道数学题让模型答几次，按答案对错给奖励，模型会逐渐学会怎样推理吗？到了 9 月，团队面对的是另一种开销。模型每多想一步，就要再读一遍越来越长的历史。前一个问题催生了 R1 系列，后一个问题推动 V3.2 改写注意力读取历史的方式。<a href="https://arxiv.org/html/2501.12948v1#S2">R1 报告 §2</a> · <a href="https://huggingface.co/deepseek-ai/DeepSeek-V3.2-Exp">V3.2-Exp 模型卡</a></p>
+<p>沿着基础权重往下看，V3.1 在一个模型中提供思考和直接作答两种模式。沿着注意力代码往下看，V3.2 逐位置筛选历史，到 V4 又多了一步，把远处的若干位置合成一个缓存条目。两条线在同一个生成循环里相遇。模型决定接下来写什么，而每多写一个 token，都要付一次前向计算的成本。</p>
+<figure><svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1720" viewBox="0 0 1600 1720" role="img"><title>DeepSeek家族：技术继承与权重训练不是同一张链</title><desc></desc>
+<rect width="1600" height="1720" fill="#FFFFFF"/>
+<text x="60" y="52" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="20" font-weight="400" fill="#607285" text-anchor="start">谱系图 / DEEPSEEK</text>
+<text x="60" y="112" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="40" font-weight="700" fill="#172D43" text-anchor="start">DeepSeek：技术继承、继续训练与蒸馏分开读</text>
+<text x="60" y="153" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="23" font-weight="400" fill="#607285" text-anchor="start">筛选与本文机制有关的节点，非全量发布清单；横向位置不按时间比例。核查：2026-11-20。</text>
+<line x1="60" y1="182" x2="1540" y2="182" stroke="#C7D3DE" stroke-width="2"/>
+<text x="60" y="241" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="26" font-weight="700" fill="#245E94" text-anchor="start">技术主线：蓝色连线说明机制沿革，不意味着直接续训前一版成品权重</text>
+<rect x="60" y="275" width="240" height="168" rx="8" fill="#EAF2F8" stroke="none" stroke-width="2"/>
+<text x="80" y="315" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="26" font-weight="700" fill="#245E94" text-anchor="start">V2</text>
+<text x="80" y="354" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#172D43" text-anchor="start">2024.05</text>
+<text x="80" y="385" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#172D43" text-anchor="start">MLA + MoE</text>
+<line x1="300" y1="359" x2="370" y2="359" stroke="#245E94" stroke-width="3" stroke-dasharray="9 7"/>
+<polygon points="370,359 359.1946347717679,364.21958640933474 359.1946347717679,353.78041359066526" fill="#245E94"/>
+<rect x="370" y="275" width="240" height="168" rx="8" fill="#EAF2F8" stroke="none" stroke-width="2"/>
+<text x="390" y="315" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="26" font-weight="700" fill="#245E94" text-anchor="start">V3</text>
+<text x="390" y="354" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#172D43" text-anchor="start">2024.12</text>
+<text x="390" y="385" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#172D43" text-anchor="start">沿用 MLA / MoE</text>
+<text x="390" y="416" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#172D43" text-anchor="start">MTP、负载平衡、FP8</text>
+<line x1="610" y1="359" x2="680" y2="359" stroke="#245E94" stroke-width="3" stroke-dasharray="9 7"/>
+<polygon points="680,359 669.1946347717678,364.21958640933474 669.1946347717678,353.78041359066526" fill="#245E94"/>
+<rect x="680" y="275" width="240" height="168" rx="8" fill="#EAF2F8" stroke="none" stroke-width="2"/>
+<text x="700" y="315" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="26" font-weight="700" fill="#245E94" text-anchor="start">V3.1</text>
+<text x="700" y="354" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#172D43" text-anchor="start">2025.08</text>
+<text x="700" y="385" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#172D43" text-anchor="start">保留主干设计</text>
+<text x="700" y="416" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#172D43" text-anchor="start">长上下文 + 混合思考</text>
+<line x1="920" y1="359" x2="990" y2="359" stroke="#245E94" stroke-width="3" stroke-dasharray="9 7"/>
+<polygon points="990,359 979.1946347717678,364.21958640933474 979.1946347717678,353.78041359066526" fill="#245E94"/>
+<rect x="990" y="275" width="240" height="168" rx="8" fill="#EAF2F8" stroke="none" stroke-width="2"/>
+<text x="1010" y="315" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="26" font-weight="700" fill="#245E94" text-anchor="start">V3.2</text>
+<text x="1010" y="354" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#172D43" text-anchor="start">2025.12</text>
+<text x="1010" y="385" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#172D43" text-anchor="start">MLA 上增加 DSA</text>
+<text x="1010" y="416" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#172D43" text-anchor="start">扩大后训练</text>
+<line x1="1230" y1="359" x2="1300" y2="359" stroke="#245E94" stroke-width="3" stroke-dasharray="9 7"/>
+<polygon points="1300,359 1289.1946347717678,364.21958640933474 1289.1946347717678,353.78041359066526" fill="#245E94"/>
+<rect x="1300" y="275" width="240" height="168" rx="8" fill="#EAF2F8" stroke="none" stroke-width="2"/>
+<text x="1320" y="315" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="26" font-weight="700" fill="#245E94" text-anchor="start">V4</text>
+<text x="1320" y="354" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#172D43" text-anchor="start">2026.04 预览</text>
+<text x="1320" y="385" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#172D43" text-anchor="start">CSA / HCA + mHC</text>
+<text x="1320" y="416" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#172D43" text-anchor="start">沿用 MoE / MTP</text>
+<text x="60" y="492" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="22" font-weight="400" fill="#607285" text-anchor="start">V4 另有新的注意力与残差设计；图中不把 V3.2 权重当作已证实的 V4 初始化。</text>
+<line x1="60" y1="522" x2="1540" y2="522" stroke="#C7D3DE" stroke-width="2"/>
+<text x="60" y="578" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="28" font-weight="700" fill="#147D79" text-anchor="start">V3 基座的公开训练分支</text>
+<text x="875" y="578" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="28" font-weight="700" fill="#147D79" text-anchor="start">V3.2：先改注意力，再做后训练</text>
+<rect x="60" y="625" width="350" height="115" rx="8" fill="#E6F3F0" stroke="none" stroke-width="2"/>
+<text x="80" y="665" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="26" font-weight="700" fill="#147D79" text-anchor="start">V3-Base</text>
+<text x="80" y="704" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#172D43" text-anchor="start">预训练基座；MLA + MoE</text>
+<rect x="485" y="625" width="315" height="135" rx="8" fill="#E6F3F0" stroke="none" stroke-width="2"/>
+<text x="505" y="664" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="700" fill="#147D79" text-anchor="start">V3.1-Base</text>
+<text x="505" y="704" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#172D43" text-anchor="start">由原 V3 base 继续训练</text>
+<text x="505" y="735" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#172D43" text-anchor="start">扩展长文档训练</text>
+<line x1="410" y1="683" x2="485" y2="683" stroke="#147D79" stroke-width="3"/>
+<polygon points="485,683 474.1946347717679,688.2195864093347 474.1946347717679,677.7804135906653" fill="#147D79"/>
+<text x="430" y="629" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="18" font-weight="400" fill="#147D79" text-anchor="start">续训</text>
+<rect x="60" y="890" width="350" height="135" rx="8" fill="#E6F3F0" stroke="none" stroke-width="2"/>
+<text x="80" y="930" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="26" font-weight="700" fill="#147D79" text-anchor="start">R1-Zero</text>
+<text x="80" y="969" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#172D43" text-anchor="start">从 V3-Base 直接做 RL</text>
+<text x="80" y="1000" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#172D43" text-anchor="start">没有前置 SFT</text>
+<rect x="485" y="890" width="315" height="135" rx="8" fill="#E6F3F0" stroke="none" stroke-width="2"/>
+<text x="505" y="930" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="26" font-weight="700" fill="#147D79" text-anchor="start">R1</text>
+<text x="505" y="969" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#172D43" text-anchor="start">V3-Base + 冷启动数据</text>
+<text x="505" y="1000" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#172D43" text-anchor="start">SFT / RL 多阶段</text>
+<line x1="235" y1="740" x2="235" y2="890" stroke="#147D79" stroke-width="3"/>
+<polygon points="235,890 229.78041359066523,879.1946347717678 240.21958640933477,879.1946347717678" fill="#147D79"/>
+<text x="253" y="824" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="22" font-weight="400" fill="#147D79" text-anchor="start">RL</text>
+<line x1="350" y1="740" x2="350" y2="825" stroke="#147D79" stroke-width="3"/>
+<line x1="350" y1="825" x2="642" y2="825" stroke="#147D79" stroke-width="3"/>
+<line x1="642" y1="825" x2="642" y2="890" stroke="#147D79" stroke-width="3"/>
+<polygon points="642,890 636.7804135906653,879.1946347717678 647.2195864093347,879.1946347717678" fill="#147D79"/>
+<text x="427" y="808" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="20" font-weight="400" fill="#147D79" text-anchor="start">冷启动 + 后训练</text>
+<rect x="485" y="1165" width="315" height="135" rx="8" fill="#FBF0E5" stroke="none" stroke-width="2"/>
+<text x="505" y="1204" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="700" fill="#B96C29" text-anchor="start">R1-Distill 系列</text>
+<text x="505" y="1244" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#172D43" text-anchor="start">Qwen / Llama 学生</text>
+<text x="505" y="1275" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#172D43" text-anchor="start">保持学生的稠密架构</text>
+<line x1="642" y1="1025" x2="642" y2="1165" stroke="#B96C29" stroke-width="3" stroke-dasharray="9 7"/>
+<polygon points="642,1165 636.7804135906653,1154.1946347717678 647.2195864093347,1154.1946347717678" fill="#B96C29"/>
+<text x="662" y="1104" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="20" font-weight="400" fill="#B96C29" text-anchor="start">教师生成数据</text>
+<text x="60" y="1107" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#607285" text-anchor="start">R1-Zero 和 R1 是不同训练路线。</text>
+<text x="60" y="1144" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#607285" text-anchor="start">图中未画 Zero 权重直接变成 R1。</text>
+<text x="60" y="1377" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="23" font-weight="400" fill="#B96C29" text-anchor="start">蒸馏迁移的是行为与训练信号，</text>
+<text x="60" y="1418" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="23" font-weight="400" fill="#B96C29" text-anchor="start">不是把 MLA / MoE 结构复制到学生。</text>
+<rect x="875" y="625" width="665" height="115" rx="8" fill="#E6F3F0" stroke="none" stroke-width="2"/>
+<text x="895" y="665" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="26" font-weight="700" fill="#147D79" text-anchor="start">V3.1-Terminus 的 base checkpoint</text>
+<text x="895" y="704" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#172D43" text-anchor="start">V3.2 报告明确指出的继续预训练起点</text>
+<rect x="875" y="870" width="665" height="150" rx="8" fill="#E6F3F0" stroke="none" stroke-width="2"/>
+<text x="895" y="910" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="26" font-weight="700" fill="#147D79" text-anchor="start">V3.2 的 DSA 基座与后训练路线</text>
+<text x="895" y="949" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#172D43" text-anchor="start">索引器 warm-up → 稀疏继续预训练 → 后训练</text>
+<text x="895" y="980" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#172D43" text-anchor="start">本文不假定它等于已发布的 Exp 成品检查点</text>
+<line x1="1207" y1="740" x2="1207" y2="870" stroke="#147D79" stroke-width="3"/>
+<polygon points="1207,870 1201.7804135906651,859.1946347717678 1212.2195864093349,859.1946347717678" fill="#147D79"/>
+<text x="1230" y="812" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#147D79" text-anchor="start">继续预训练</text>
+<rect x="875" y="1165" width="315" height="135" rx="8" fill="#E6F3F0" stroke="none" stroke-width="2"/>
+<text x="895" y="1204" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="700" fill="#147D79" text-anchor="start">V3.2 正式版</text>
+<text x="895" y="1244" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#172D43" text-anchor="start">推理 + 工具 + 对齐</text>
+<text x="895" y="1275" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#172D43" text-anchor="start">扩大混合 RL</text>
+<rect x="1225" y="1165" width="315" height="135" rx="8" fill="#E6F3F0" stroke="none" stroke-width="2"/>
+<text x="1245" y="1204" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="700" fill="#147D79" text-anchor="start">V3.2-Speciale</text>
+<text x="1245" y="1244" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#172D43" text-anchor="start">推理数据专门训练</text>
+<text x="1245" y="1275" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#172D43" text-anchor="start">降低长度惩罚</text>
+<line x1="1207" y1="1020" x2="1207" y2="1085" stroke="#147D79" stroke-width="3"/>
+<line x1="1207" y1="1085" x2="1032" y2="1085" stroke="#147D79" stroke-width="3"/>
+<line x1="1032" y1="1085" x2="1032" y2="1165" stroke="#147D79" stroke-width="3"/>
+<polygon points="1032,1165 1026.7804135906651,1154.1946347717678 1037.2195864093349,1154.1946347717678" fill="#147D79"/>
+<line x1="1207" y1="1085" x2="1382" y2="1085" stroke="#147D79" stroke-width="3"/>
+<line x1="1382" y1="1085" x2="1382" y2="1165" stroke="#147D79" stroke-width="3"/>
+<polygon points="1382,1165 1376.7804135906651,1154.1946347717678 1387.2195864093349,1154.1946347717678" fill="#147D79"/>
+<text x="1060" y="1124" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="20" font-weight="400" fill="#147D79" text-anchor="start">同系列的不同后训练变体</text>
+<rect x="875" y="1353" width="315" height="105" rx="8" fill="#EAF2F8" stroke="none" stroke-width="2"/>
+<text x="895" y="1392" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="700" fill="#245E94" text-anchor="start">V3.2-Exp</text>
+<text x="895" y="1432" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#172D43" text-anchor="start">2025.09：先行验证 DSA</text>
+<line x1="1032" y1="1353" x2="1032" y2="1300" stroke="#245E94" stroke-width="3" stroke-dasharray="9 7"/>
+<polygon points="1032,1300 1037.2195864093349,1310.8053652282322 1026.7804135906651,1310.8053652282322" fill="#245E94"/>
+<text x="1225" y="1382" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="22" font-weight="400" fill="#607285" text-anchor="start">Exp 与正式版同架构；</text>
+<text x="1225" y="1420" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="22" font-weight="400" fill="#607285" text-anchor="start">不据此断言权重续接。</text>
+<line x1="835" y1="550" x2="835" y2="1447" stroke="#C7D3DE" stroke-width="2"/>
+<line x1="60" y1="1490" x2="1540" y2="1490" stroke="#C7D3DE" stroke-width="2"/>
+<line x1="60" y1="1527" x2="140" y2="1527" stroke="#147D79" stroke-width="3"/>
+<polygon points="140,1527 129.19463477176788,1532.2195864093349 129.19463477176788,1521.7804135906651" fill="#147D79"/>
+<text x="158" y="1532" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#607285" text-anchor="start">实线：已披露的训练 / 基座关系</text>
+<line x1="840" y1="1527" x2="920" y2="1527" stroke="#245E94" stroke-width="3" stroke-dasharray="9 7"/>
+<polygon points="920,1527 909.1946347717678,1532.2195864093349 909.1946347717678,1521.7804135906651" fill="#245E94"/>
+<text x="938" y="1532" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#607285" text-anchor="start">蓝虚线：架构 / 技术联系，非权重</text>
+<line x1="60" y1="1573" x2="140" y2="1573" stroke="#607285" stroke-width="3" stroke-dasharray="9 7"/>
+<polygon points="140,1573 129.19463477176788,1578.2195864093349 129.19463477176788,1567.7804135906651" fill="#607285"/>
+<text x="158" y="1578" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#607285" text-anchor="start">灰虚线：版本先后，不证明初始化</text>
+<line x1="840" y1="1573" x2="920" y2="1573" stroke="#B96C29" stroke-width="3" stroke-dasharray="9 7"/>
+<polygon points="920,1573 909.1946347717678,1578.2195864093349 909.1946347717678,1567.7804135906651" fill="#B96C29"/>
+<text x="938" y="1578" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#607285" text-anchor="start">橙虚线：教师数据蒸馏，保留学生架构</text>
+<a href="https://arxiv.org/html/2412.19437v2" target="_blank">
+<text x="60" y="1649" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="19" font-weight="400" fill="#245E94" text-anchor="start">来源：V3 技术报告</text>
+</a>
+<a href="https://github.com/deepseek-ai/DeepSeek-R1" target="_blank">
+<text x="340" y="1649" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="19" font-weight="400" fill="#245E94" text-anchor="start">R1 官方仓库</text>
+</a>
+<a href="https://huggingface.co/deepseek-ai/DeepSeek-V3.1-Base" target="_blank">
+<text x="600" y="1649" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="19" font-weight="400" fill="#245E94" text-anchor="start">V3.1-Base 模型卡</text>
+</a>
+<a href="https://arxiv.org/html/2512.02556v1" target="_blank">
+<text x="930" y="1649" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="19" font-weight="400" fill="#245E94" text-anchor="start">V3.2 报告 §2–3</text>
+</a>
+<a href="https://huggingface.co/deepseek-ai/DeepSeek-V4-Pro" target="_blank">
+<text x="1230" y="1649" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="19" font-weight="400" fill="#245E94" text-anchor="start">V4 官方模型卡</text>
+</a>
+<text x="60" y="1689" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="19" font-weight="400" fill="#607285" text-anchor="start">原创关系图。V3.1 → Terminus 未画成权重实线；Speciale 分支描述后训练路线，不声称其由正式版成品继续训练。</text>
+</svg><figcaption><span class="fnum">图 1</span>阅读这张谱系图时，先从 V3-Base 找到 R1 的训练分支，再跟随 V3.1 和 V3.2 的主线。箭头的含义见图例，横向排列的检查点只在有来源支持时标记权重继承。<span class="figure-hint">点按图解可放大查看</span></figcaption></figure>
+<p>在进入 V3 之前，先把几条来源分开。早期 <a href="https://github.com/deepseek-ai/DeepSeek-LLM">DeepSeek LLM</a> 的 7B、67B 是稠密模型；2024 年的 <a href="https://github.com/deepseek-ai/DeepSeek-MoE">DeepSeekMoE</a> 研究把大专家细分、并设置始终参与计算的共享专家。前者增加可组合的专业分工，后者承接通用知识，减少不同专家重复学习相同内容。它们解决的是前馈计算的容量分配问题。</p>
+<p><a href="https://github.com/deepseek-ai/DeepSeek-Math">DeepSeekMath</a> 则是另一条训练分支：从代码基础模型继续训练数学数据，并提出组相对策略优化 GRPO；这不是后来大型 MoE 权重的直接前身。2024 年 5 月 6 日发布的 <a href="https://github.com/deepseek-ai/DeepSeek-V2">V2</a> 将 DeepSeekMoE 与多头潜在注意力 MLA 结合，达到总参数 236B、每 token 激活 21B。这里 B 表示十亿参数。到这一步，家族已经形成两条可组合的思路：把容量分给专家，把历史表示压进潜在空间。</p>
+
+<h2 id="deepseek-v3-history">V3：让专家、潜在缓存与训练系统协同扩展</h2>
+<div class="tags">网络结构 · 训练目标 · 训练系统</div>
+<p>模型从数百亿扩到数千亿参数，困难不只是矩阵更大：专家可能忙闲不均，历史缓存持续增长，通信又可能抵消条件计算省下的时间。2024 年 12 月 26 日发布的 V3，正是同时处理这些约束。官方规模口径为总参数 671B、每 token 激活 37B；V3-Base 是预训练基础模型，V3 是经过监督微调与强化学习的对话检查点。两者不能因为结构相同就被当成同一组权重。<a href="https://api-docs.deepseek.com/news/news1226/">发布记录</a>与<a href="https://github.com/deepseek-ai/DeepSeek-V3">官方说明</a>给出了这些边界。</p>
+<p>固定参考配置中的主干是 61 层、隐藏宽度 7,168、128 个查询头。前三层使用稠密前馈网络，此后每层从 256 个路由专家中选择 8 个，并始终运行 1 个共享专家。每个路由专家的中间宽度为 2,048。总容量增加，不意味着一次前向计算全部专家；但未被选中的权重仍要存储，选中专家若在远端设备上，输入与结果仍要传输。<a href="https://github.com/deepseek-ai/DeepSeek-V3/blob/9b4e9788e4a3a731f7567338ed15d3ec549ce03b/inference/configs/config_671B.json">固定配置</a>把“有多少参数”和“这次计算哪些参数”明确分开。</p>
+<h3>MLA 压缩的是表示，不是历史位置</h3>
+<p>常规多头注意力为各头保存键和值。V3 的 MLA 先把当前隐藏状态压成一个共享的 512 维潜在向量，再由它生成各头的内容键与值；另保留 64 维的旋转位置键。因此在吸收投影的解码路径中，每层每个历史位置保存的是 512+64 个元素，仍然是<strong>每个位置一条记录</strong>。这些维度不是 V4 后来那种直接共享的 512 维 K=V。</p>
+<p>为什么不必把所有历史键重新展开？设 c<sub>s</sub> 是位置 s 的潜在向量，U<sub>h</sub> 把它展开为第 h 头的内容键，q<sub>t,h</sub> 是当前位置的内容查询，则：</p>
+<div class="eq">q<sub>t,h</sub><sup>T</sup>(U<sub>h</sub>c<sub>s</sub>) = (U<sub>h</sub><sup>T</sup>q<sub>t,h</sub>)<sup>T</sup>c<sub>s</sub></div>
+<p>左边先展开每个历史键；右边只变换这次的新查询，再与缓存中的 c<sub>s</sub> 相乘。值的上投影同样可移到加权求和之后。位置旋转依赖 token 位置，不能无条件吸收到固定权重里，因而单独保存位置键。代码的 <code>naive</code> 分支直接展开各头，<code>absorb</code> 分支保存 <code>kv_cache:[B,N,512]</code> 与 <code>pe_cache:[B,N,64]</code>；B 是批量，N 是缓存位置数。两条路径表达同一参数化，实际运算与缓存布局不同。<a href="https://github.com/deepseek-ai/DeepSeek-V3/blob/9b4e9788e4a3a731f7567338ed15d3ec549ce03b/inference/model.py#L396">MLA 类</a>中 L471–495 展示了这次代数重排。</p>
+<h3>“无辅助损失”为什么仍可能看到辅助损失？</h3>
+<p>路由器若只追随当前偏好，少数专家可能过载；若用很强的均衡损失，又会迫使主任务迁就均匀分配。V3 的主要做法是为每个专家维护选择偏置：过载时降低，下次减少入选机会；欠载时提高。偏置参与 Top-k 选择，真正混合专家输出时仍使用原始 sigmoid 亲和分数。这把批量级负载调节与主任务梯度解耦，却没有消除通信与动态负载问题。</p>
+<p>名称必须读完整：V3 仍保留一个很小的逐序列均衡辅助项，防止单条序列极端失衡。官方 <code>Gate.forward()</code> 的 <code>original_scores</code>、加偏置、分组筛选、最后取回原分数，正好对应“选谁”和“给多少权重”两件事。<a href="https://github.com/deepseek-ai/DeepSeek-V3/blob/9b4e9788e4a3a731f7567338ed15d3ec549ce03b/inference/model.py#L535">固定 Gate 实现</a>验证推理路径；偏置如何更新与辅助项如何训练，则须回到<a href="https://arxiv.org/html/2412.19437v2#S2">报告 §2.1.2</a>，不能从推理代码补写不存在的训练循环。</p>
+<p>另一个改变是多 token 预测 MTP：附加模块将前级表示与后一个位置的真实 token embedding 结合，预测更远的 token，为主干提供额外训练信号。它保持因果预测链，不能理解为从同一个隐藏向量独立猜出整段未来。报告 §4.5.1 在其他条件对齐、推理时移除附加模块的实验中验证了训练收益；把它用于推测解码则是另一项推理用途，收益还取决于草稿接受率。FP8 混合精度、DualPipe 的计算通信重叠则属于训练系统。它们支撑训练规模，不能用来推断“所有张量都是八位”或任何硬件都会获得同样加速。<a href="https://arxiv.org/html/2412.19437v2#S3">报告 §3</a>与<a href="https://arxiv.org/html/2412.19437v2#S4">§4.5</a>分别提供系统设计和消融证据。</p>
+<p>后来的 V3-0324 是该路线的能力更新，官方 API 公告日期为 2025 年 3 月 25 日。其配置仍保留上述 61 层、MLA 与专家安排，不能仅根据更新日期画出一套新主干。<a href="https://api-docs.deepseek.com/news/news250325/">公告</a>、<a href="https://huggingface.co/deepseek-ai/DeepSeek-V3-0324/blob/main/config.json">公开配置</a>应分别用于核验发布时间与结构。</p>
+
+<h2 id="deepseek-r1-history">R1：推理能力的变化发生在训练流程，而非新增“思考层”</h2>
+<div class="tags">后训练 · 强化学习 · 数据蒸馏</div>
+<p>同一个基础网络，能否通过结果反馈学会更长、更有效的推理？2025 年 1 月 20 日发布的 R1-Zero 与 R1 主要回答这个问题。它们以 V3-Base 为基础，保留 671B 总参数、37B 激活参数这一 MoE 主干口径；不是把已经发布的 V3 对话模型换个提示词。固定的<a href="https://huggingface.co/deepseek-ai/DeepSeek-R1/blob/56d4cbbb4d29f4355bab4b9a39ccb717a14ad5ad/config.json">R1 配置</a>仍可看到 61 层、512 维 KV 潜在空间与 top-8 专家。<a href="https://api-docs.deepseek.com/news/news250120/">发布日</a>与 1 月 22 日的论文提交日也应区分。</p>
+<p>R1-Zero 先不做冷启动监督微调，直接在基础模型上进行大规模强化学习。对可验证任务，答案或程序是否正确可以形成奖励，输出格式也可单独约束。模型不是获得一层外置“逻辑引擎”，而是其原有生成策略被更新：哪些输出轨迹更容易得到奖励，就更可能被保留下来。公开报告同时记录了可读性差与语言混杂等问题；结果奖励提升可验证任务表现，并不自动解决所有交互质量。<a href="https://github.com/deepseek-ai/DeepSeek-R1">官方 R1 说明</a>明确区分了 Zero 与正式 R1 的目的。</p>
+<p>GRPO 的关键是把同一问题的一组回答作为比较对象。设 G 个回答的结果奖励为 r<sub>1</sub>…r<sub>G</sub>，R1 版本的组内优势可写为：</p>
+<div class="eq">Â<sub>i</sub> = [r<sub>i</sub> − mean(r)] / std(r)</div>
+<p>mean 与 std 分别是组内均值和标准差。例如 r=(0,1,1,0)，若用总体标准差 0.5 计算，优势是 (−1,+1,+1,−1)：不是告诉模型唯一的标准推导，而是比较哪些完整回答表现更好。正式目标还包含新旧策略概率比的裁剪和相对参考策略的 KL 约束；GRPO 省去同规模价值模型，不代表奖励、采样、验证和优化没有成本。这个算法来自 DeepSeekMath，不能归为 R1 首次提出。<a href="https://arxiv.org/html/2501.12948v1#S2">R1 报告 §2.2.1</a>给出完整目标。</p>
+<h3>正式 R1 的权重流与数据流不是一条直线</h3>
+<p>正式 R1 先以少量高质量长推理样本做冷启动，再进行面向推理的强化学习。接下来用这一阶段的模型生成并筛选约 60 万条推理样本，补上约 20 万条非推理样本。关键细节是：论文 §2.3.3 明确写的是拿这约 80 万条数据，<strong>回到 V3-Base 做两轮监督微调</strong>，再进行覆盖推理与通用交互的强化学习。若把它画成同一份权重一路继续训练，就会漏掉一次“利用中间模型生产训练数据，再重建统一模型”的转换。</p>
+<figure><svg xmlns="http://www.w3.org/2000/svg" width="1600" height="970" viewBox="0 0 1600 970" role="img"><title>R1 的训练数据如何在不同模型间流动</title><desc>实线表示权重更新，虚线表示样本流动。</desc>
+<rect width="1600" height="970" fill="#FFFFFF"/>
+<text x="60" y="52" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="20" font-weight="400" fill="#607285" text-anchor="start">后训练 / 2025.01</text>
+<text x="60" y="112" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="40" font-weight="700" fill="#172D43" text-anchor="start">R1 的推理样本从哪里来，接着用来训练谁？</text>
+<text x="60" y="153" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="23" font-weight="400" fill="#607285" text-anchor="start">原论文 §2.2–2.4。蓝色实线跟踪接受更新的模型，橙色虚线跟踪生成或消费的样本。</text>
+<line x1="60" y1="182" x2="1540" y2="182" stroke="#C7D3DE" stroke-width="2"/>
+<text x="60" y="235" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="23" font-weight="700" fill="#607285" text-anchor="start">实验分支</text>
+<rect x="60" y="262" width="300" height="94" rx="7" fill="#EAF2F8" stroke="none" stroke-width="2"/>
+<text x="210.0" y="299" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="700" fill="#245E94" text-anchor="middle">DeepSeek-V3-Base</text>
+<text x="210.0" y="341" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#607285" text-anchor="middle">基础模型</text>
+<rect x="590" y="262" width="375" height="94" rx="7" fill="#EAF2F8" stroke="none" stroke-width="2"/>
+<text x="777.5" y="299" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="700" fill="#245E94" text-anchor="middle">按结果与格式给奖励</text>
+<text x="777.5" y="341" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#607285" text-anchor="middle">直接进行强化学习</text>
+<rect x="1190" y="262" width="350" height="94" rx="7" fill="#EAF2F8" stroke="none" stroke-width="2"/>
+<text x="1365.0" y="299" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="700" fill="#245E94" text-anchor="middle">DeepSeek-R1-Zero</text>
+<text x="1365.0" y="341" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#607285" text-anchor="middle">比较纯强化学习的效果</text>
+<line x1="360" y1="309" x2="590" y2="309" stroke="#245E94" stroke-width="3"/>
+<polygon points="590,309 579.1946347717678,314.21958640933474 579.1946347717678,303.78041359066526" fill="#245E94"/>
+<line x1="965" y1="309" x2="1190" y2="309" stroke="#245E94" stroke-width="3"/>
+<polygon points="1190,309 1179.1946347717678,314.21958640933474 1179.1946347717678,303.78041359066526" fill="#245E94"/>
+<line x1="60" y1="400" x2="1540" y2="400" stroke="#C7D3DE" stroke-width="2"/>
+<text x="60" y="437" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="23" font-weight="700" fill="#607285" text-anchor="start">R1 的数据生成与训练</text>
+<rect x="60" y="478" width="300" height="98" rx="7" fill="#EAF2F8" stroke="none" stroke-width="2"/>
+<text x="210.0" y="515" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="700" fill="#245E94" text-anchor="middle">DeepSeek-V3-Base</text>
+<text x="210.0" y="561" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#607285" text-anchor="middle">用于训练推理策略</text>
+<rect x="470" y="478" width="385" height="98" rx="7" fill="#EAF2F8" stroke="none" stroke-width="2"/>
+<text x="662.5" y="514" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="24" font-weight="700" fill="#245E94" text-anchor="middle">冷启动微调 → 推理强化学习</text>
+<text x="662.5" y="561" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#607285" text-anchor="middle">从学会推理的策略采样</text>
+<rect x="1060" y="478" width="480" height="98" rx="7" fill="#FBF0E5" stroke="none" stroke-width="2"/>
+<text x="1300.0" y="514" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="24" font-weight="700" fill="#B96C29" text-anchor="middle">筛选样本并合入通用任务数据</text>
+<text x="1300.0" y="561" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#607285" text-anchor="middle">约 60 万条推理样本 + 20 万条其他样本</text>
+<line x1="360" y1="527" x2="470" y2="527" stroke="#245E94" stroke-width="3"/>
+<polygon points="470,527 459.1946347717679,532.2195864093347 459.1946347717679,521.7804135906653" fill="#245E94"/>
+<line x1="855" y1="527" x2="1060" y2="527" stroke="#B96C29" stroke-width="3" stroke-dasharray="9 7"/>
+<polygon points="1060,527 1049.1946347717678,532.2195864093347 1049.1946347717678,521.7804135906653" fill="#B96C29"/>
+<rect x="60" y="662" width="300" height="98" rx="7" fill="#EAF2F8" stroke="none" stroke-width="2"/>
+<text x="210.0" y="698" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="24" font-weight="700" fill="#245E94" text-anchor="middle">DeepSeek-V3-Base</text>
+<text x="210.0" y="745" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#607285" text-anchor="middle">监督微调的初始化权重</text>
+<rect x="470" y="662" width="385" height="98" rx="7" fill="#EAF2F8" stroke="none" stroke-width="2"/>
+<text x="662.5" y="698" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="24" font-weight="700" fill="#245E94" text-anchor="middle">在整理后数据上微调两轮</text>
+<text x="662.5" y="745" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#607285" text-anchor="middle">再进行覆盖多类任务的强化学习</text>
+<rect x="1060" y="662" width="480" height="98" rx="7" fill="#EAF2F8" stroke="none" stroke-width="2"/>
+<text x="1300.0" y="699" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="700" fill="#245E94" text-anchor="middle">DeepSeek-R1</text>
+<text x="1300.0" y="745" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#607285" text-anchor="middle">部署时沿 V3 家族骨干执行</text>
+<line x1="360" y1="711" x2="470" y2="711" stroke="#245E94" stroke-width="3"/>
+<polygon points="470,711 459.1946347717679,716.2195864093347 459.1946347717679,705.7804135906653" fill="#245E94"/>
+<line x1="855" y1="711" x2="1060" y2="711" stroke="#245E94" stroke-width="3"/>
+<polygon points="1060,711 1049.1946347717678,716.2195864093347 1049.1946347717678,705.7804135906653" fill="#245E94"/>
+<line x1="1300" y1="576" x2="1300" y2="617" stroke="#B96C29" stroke-width="3" stroke-dasharray="9 7"/>
+<line x1="1300" y1="617" x2="659" y2="617" stroke="#B96C29" stroke-width="3" stroke-dasharray="9 7"/>
+<line x1="659" y1="617" x2="659" y2="662" stroke="#B96C29" stroke-width="3" stroke-dasharray="9 7"/>
+<polygon points="659,662 653.7804135906653,651.1946347717678 664.2195864093347,651.1946347717678" fill="#B96C29"/>
+<text x="60" y="824" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="24" font-weight="400" fill="#172D43" text-anchor="start">蒸馏学生从各自的 Qwen 或 Llama 权重开始，在整理后的约 80 万条样本上做监督微调。</text>
+<line x1="60" y1="868" x2="1540" y2="868" stroke="#C7D3DE" stroke-width="2"/>
+<text x="60" y="902" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="20" font-weight="400" fill="#607285" text-anchor="start">图中间一行产生样本，下一行的监督微调使用这批样本，并从基础模型权重开始。</text>
+<text x="60" y="935" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="18" font-weight="400" fill="#607285" text-anchor="start">依据 DeepSeek-R1 初版报告。左侧三个 V3-Base 方框均指同一个基础检查点。</text>
+</svg><figcaption><span class="fnum">图 2</span>R1 的权重继承与数据生成关系。Zero 是独立实验路径；正式 R1 的拒绝采样数据回流到 V3-Base 的监督微调阶段，蒸馏分支则把数据送给不同底座。依据<a href="https://arxiv.org/html/2501.12948v1#S2">R1 报告 §2.3–2.4</a>原创重绘。<span class="figure-hint">点按图解可放大查看</span></figcaption></figure>
+<p>发布的六个 R1-Distill 模型使用 Qwen 或 Llama 底座，规模从 1.5B 到 70B。它们主要学习 R1 整理的回答数据，保留的是各自底座的网络；不是从 671B MoE 中删去专家，也不自动拥有 MLA。官方研究中，这批蒸馏模型采用监督微调，没有再接同样的 RL 流程。因而“大教师的推理行为可迁移”与“小模型复制了教师内部计算”是两种不同主张。<a href="https://github.com/deepseek-ai/DeepSeek-R1#2-model-summary">模型清单</a>和报告 §2.4 支持前者。</p>
+<p>2025 年 5 月 28 日的 R1-0528 进一步强化后训练，而不是公开宣布替换 MLA/MoE 主干。官方模型卡报告 AIME 2025 的 pass@1 从 70.0 提升到 87.5，同时平均思考长度从约 12K 增至 23K token；其评测规定最大生成长度 64K、温度 0.6、top-p 0.95，对需采样项目以每题 16 次生成估计 pass@1。这是能力与推理预算一起变化的观察，不能归因于某个未公开的单独算法。同期的 R1-0528-Qwen3-8B 又是基于 Qwen3-8B 的蒸馏分支。<a href="https://huggingface.co/deepseek-ai/DeepSeek-R1-0528/blob/4236a6af538feda4548eca9ab308586007567f52/README.md">固定模型卡</a>提供评测条件与分支说明，完整后训练配方仍有公开缺口。</p>
+
+<h2 id="deepseek-v31-history">V3.1 与 Terminus：统一思考模式，不等于合并两套网络</h2>
+<div class="tags">继续预训练 · 后训练 · 提示协议</div>
+<p>V3 侧重直接回答，R1 侧重展开推理。若产品需要在两种行为之间切换，是否必须加载两套大模型？2025 年 8 月 21 日发布的 V3.1 把两种模式放进同一个检查点。这里“混合”指行为模式：提示模板以 <code>&lt;think&gt;</code> 或 <code>&lt;/think&gt;</code> 开始助手输出，引导进入思考或直接回答。它不是把 V3 与 R1 两套网络拼接，也不是后来 GLM-Flash 意义上的混合注意力。</p>
+<p>其真实权重来源是 V3.1-Base，而后者从原始 V3 基础检查点继续做长上下文扩展：32K 阶段的训练量扩至 630B token，128K 阶段扩至 209B token，再进行后训练。V3.1 保持 671B 总参数、37B 激活参数与 128K 上下文的官方口径。不能因为思考表现被拿来与 R1-0528 比较，就画出“R1-0528 → V3.1”的权重继承箭头。<a href="https://huggingface.co/deepseek-ai/DeepSeek-V3.1/blob/c0781d039fb7a1ba2abc4add0bdc293e92d2b8db/README.md">固定模型卡</a>直接说明了训练起点、数据阶段与模板。</p>
+<p>另一个公开变化是权重与激活采用 UE8M0 格式表达 FP8 的缩放因子，以适配微缩放数据格式；这属于数值与部署接口，不是模型从此多出一层。工具调用也依赖具体模板与后训练：模型卡的一般 ToolCall 示例在非思考模式下工作，搜索智能体则另有思考模式轨迹格式。不能把“支持两种模式”自动扩写成所有工具在两种模式下都使用同一协议。</p>
+<p>9 月 22 日发布的 V3.1-Terminus 继续改善中英混杂、异常字符，以及代码和搜索智能体表现。固定模型卡与配置没有给出又一次主干换代的证据，因此应将其作为 V3.1 系列更新描述；具体训练数据与每项改进的因果贡献没有完整公开。<a href="https://deepseek.com/en/news/v3-1-terminus/">官方发布日期</a>与<a href="https://huggingface.co/deepseek-ai/DeepSeek-V3.1-Terminus/blob/19510d6dc61f79dbd925bd51ee8a9081c509a4b6/README.md">固定模型卡</a>支持这些有限结论。</p>
+
+<h3>同一条请求怎样切换思考模式？</h3>
+<p>取同一个分词器、同一份消息，分别渲染两次提示模板。在下面这个最小对照中，只有 <code>thinking</code> 的取值改变。送入模型的提示末尾因此不同，权重与逐 token 生成循环共用。可以用同样的办法检查历史对话如何被编入下一轮输入。<a href="https://huggingface.co/deepseek-ai/DeepSeek-V3.1/blob/c0781d039fb7a1ba2abc4add0bdc293e92d2b8db/README.md">V3.1 模型卡的模板示例</a></p>
+<pre><code># 按公开模型卡精简，只展示输入格式。tok 为 V3.1 分词器。
+messages = [{"role": "user", "content": "这个等式对所有整数都成立吗？"}]
+for thinking in (True, False):
+    prompt = tok.apply_chat_template(messages, thinking=thinking,
+                                     tokenize=False, add_generation_prompt=True)
+    # True 时以 &lt;think&gt; 结束，False 时以 &lt;/think&gt; 结束。</code></pre>
+<p>模型卡给出了一个同权重、同任务的对照。在 AIME 2025 上，V3.1 直接作答与思考模式的 pass@1 分别为 49.8% 和 88.4%。这张表能说明启用思考时的任务表现，却没有给出将两种模式约束在相同输出长度下的消融。工具任务还要核对评测框架。例如 SWE-bench Verified 的 66.0% 是非思考模式在团队内部代码智能体框架下的结果，表中该项没有填思考模式分数。<a href="https://huggingface.co/deepseek-ai/DeepSeek-V3.1/blob/c0781d039fb7a1ba2abc4add0bdc293e92d2b8db/README.md#evaluation">V3.1 官方评测表及表注</a></p>
+
+<h2 id="deepseek-v32-history">V3.2 如何筛选历史，并在稀疏模型上训练多步行动</h2>
+<div class="tags">网络结构 · 继续预训练 · 强化学习系统</div>
+<p>MLA 已经减少每个历史位置的存储宽度，但每一步仍要访问大量历史。2025 年 9 月 29 日发布的 V3.2-Exp 从 V3.1-Terminus 的基础检查点出发，引入 DeepSeek Sparse Attention，简称 DSA。2025 年 12 月 1 日的正式 V3.2 与 Speciale 继续这套结构；12 月 2 日的报告明确说，正式版与 Exp 的网络架构相同。这里的跃迁包括“增加索引器”和“继续扩大后训练”两件事，不能全部归功于稀疏注意力。<a href="https://api-docs.deepseek.com/news/news250929/">Exp 发布记录</a>、<a href="https://api-docs.deepseek.com/news/news251201/">正式版发布记录</a>、<a href="https://arxiv.org/html/2512.02556v1#S2">报告 §2</a>可交叉核查。</p>
+<h3>索引器筛位置，主注意力重新算权重</h3>
+<p>DSA 保留 MLA 历史记录，另用轻量索引器挑选当前值得读取的位置。固定 Exp 配置使用 64 个 128 维索引查询头，每个历史位置保存一条 128 维索引键，最多选 2,048 个位置。它们不是主注意力的 128 个头，也不是把主 KV 直接截取 128 维。忽略量化和缩放后：</p>
+<div class="eq">I<sub>t,s</sub> = Σ<sub>h=1</sub><sup>64</sup> w<sub>t,h</sub> ReLU((q<sup>I</sup><sub>t,h</sub>)<sup>T</sup>k<sup>I</sup><sub>s</sub>)<br>S<sub>t</sub> = TopK<sub>s≤t</sub>(I<sub>t,s</sub>, 2048)</div>
+<p>t 是查询位置，s 是历史位置，q<sup>I</sup>、k<sup>I</sup> 是 128 维索引向量，w 是头权重，S<sub>t</sub> 是被选位置集合。索引器只交出位置；主注意力再读取对应的 MLA 潜在缓存，计算自己的权重与输出。所有历史记录仍被保存，未来查询可选择别的位置。固定代码的 <code>Indexer.forward()</code> 依次执行独立投影、位置处理、FP8 索引打分、因果掩码与 Top-k，<code>MLA.forward()</code> 再使用选择结果。<a href="https://huggingface.co/deepseek-ai/DeepSeek-V3.2-Exp/blob/194c67e12b1b0d6df0ef373ddcf215bc84027409/inference/model.py#L435">Indexer 源码</a>与<a href="https://huggingface.co/deepseek-ai/DeepSeek-V3.2-Exp/blob/194c67e12b1b0d6df0ef373ddcf215bc84027409/config.json">固定配置</a>给出这些维度。</p>
+<p>这里有一个工程边界：这份公开参考 <code>model.py</code> 在预填充和解码分支都能看到“先构造全位置 scores，再按选择结果添加掩码”的写法。它适合核对数值语义，却不是生产稀疏内核的性能证明。若一次预填充 L 个位置，每个查询保留至多 k 个候选，专用稀疏内核的主注意力工作量可从 O(L²) 降到 O(Lk)，轻量索引的全序列扫描仍是 O(L²)。单步解码只有一个新查询，扫描约 L 个索引键，再精读至多 k 条主记录。<a href="https://huggingface.co/deepseek-ai/DeepSeek-V3.2-Exp/blob/194c67e12b1b0d6df0ef373ddcf215bc84027409/inference/model.py#L574">参考执行路径 L574–605</a>尤其值得和论文复杂度分开阅读。</p>
+<h3>Top-k 不可微，索引器如何获得训练信号？</h3>
+<p>先让原模型继续做稠密注意力，只训练索引器去拟合主注意力跨头汇总、归一化后的历史分布 p。目标是 KL(p‖softmax(I))，即减少“主注意力认为重要的位置”与“索引器偏好的位置”之间的差异。随后启用稀疏选择，在被选集合内继续对齐；索引器输入从主干计算图分离，索引器由这项对齐损失更新，主干由语言建模损失更新。它不是依靠 Top-k 排序自动传回完整梯度，也不是从零随机删除历史再期待模型自行适应。</p>
+<p>报告给出约 2.1B token 的稠密预热与约 943.7B token 的稀疏继续训练；Exp 的比较重点是相对于 Terminus 保持能力并降低长上下文成本。这个结果验证的是“继续训练后的稀疏模型”，不是把原权重直接套一个稀疏掩码的零成本转换。<a href="https://arxiv.org/html/2512.02556v1#S2">报告 §2.1.1，公式 3–4</a>说明训练信号，§2.3 同时披露索引器仍为二次复杂度。</p>
+<h3>正式版与 Speciale 的分界主要在后训练</h3>
+<p>正式 V3.2 将领域专长模型提供的数据汇入统一模型，再进行混合强化学习，将推理、智能体与通用对齐纳入同一阶段。报告描述了超过 1,800 种环境与 85,000 条复杂提示的任务合成，但环境数量本身不是泛化能力的证明；能否正确调用工具、利用返回结果与遵守任务约束，需要任务评测分别验证。</p>
+<p>长轨迹强化学习还有一个不显眼的问题：采样策略与更新后的策略已经不同，推理框架和训练框架也可能算出不同专家路由。V3.2 的稳定化方案包括修正 KL 估计、屏蔽偏离当前策略过大的负优势序列、保留采样时的专家路由和采样截断集合。特别是 Keep Routing，报告明确说从 V3-0324 起就已采用；不能算作 V3.2 首次加入网络的模块。V3.2 的优势公式也写为奖励减组均值，不能把 R1 的除标准差公式不加说明地套到所有后续版本。<a href="https://arxiv.org/html/2512.02556v1#S3">报告 §3.1</a>给出了这些算法边界。</p>
+<p>Speciale 则主要训练推理数据，降低长度惩罚，并引入 DeepSeekMath-V2 的证明相关数据与奖励方法，以更大推理预算探索能力上限。其模型卡明确不支持工具调用。因此它不是普通 V3.2 的全面替代版，更不能把数学竞赛表现当成智能体工作流的等价证据。<a href="https://huggingface.co/deepseek-ai/DeepSeek-V3.2-Speciale/blob/c562883eda916fd699a44bbf1f4987a53b96008b/README.md">固定 Speciale 模型卡</a>区分了用途。走到这里，V3 系列仍以“每个历史位置一条 MLA 记录”为底座；后来的 V4 才进一步改变长期历史条目形成的单位。</p>
+
+
+<h2 id="map">DeepSeek-V4 把稀疏检索推进到压缩后的历史上</h2>
+<p>V3.2 的索引器已经能挑出值得细读的位置，主缓存仍为每个历史 token 保留记录。V4 继续追问，远处的四个位置能否只留下一条共同表示？下面用 V4-Pro 与 V4-Flash 的公开预览权重逐层检查这个选择。Pro 推理代码固定在 <a href="https://huggingface.co/deepseek-ai/DeepSeek-V4-Pro/tree/b5968e9190ef611bbf34a7229255be88a0e937c1/inference">b5968e9</a>，Flash 固定在 <a href="https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash/tree/60d8d70770c6776ff598c94bb586a859a38244f1/inference">60d8d70</a>。</p>
+<p>V4 的基本任务仍然是下一 token 预测。token 是分词器使用的文本单位，可能是一个字、词的一部分或特殊控制符号。tokenizer 将文本转换为整数编号；embedding 查表产生隐藏向量；网络更新这些向量；输出头给出词表中各 token 的分数，再由生成策略选择下一个 token。新的部分在 embedding 与输出头之间。</p>
+<p>最外层的改变是四路残差，来自流形约束超连接（Manifold-Constrained Hyper-Connections，mHC）。设批量为 <em>B</em>、当前输入长度为 <em>S</em>、隐藏宽度为 <em>d</em>。embedding 的输出是 <code>[B,S,d]</code>，随后扩展为 <code>[B,S,4,d]</code>，初始四流是同一向量的四份拷贝。这个额外的 4 是四条残差流，既不是四个 token，也不是四个注意力头。每个注意力子层和 MoE 子层都先把四流混合成一条 <code>[B,S,d]</code> 的输入，完成自身计算，再把结果写回四流。</p>
+<p>注意力主干组合三种层型：压缩稀疏注意力（Compressed Sparse Attention，CSA）、重压缩注意力（Heavily Compressed Attention，HCA）和滑动窗口注意力（Sliding Window Attention，SWA）。附加的多 token 预测（Multi-Token Prediction，MTP）模块提供额外预测路径。报告给出的 Pro 规模为总参数约 1.6 万亿、每 token 激活约 490 亿；Flash 为总参数约 2,840 亿、激活约 130 亿。下面的结构表解释这些权重如何被组织，而非将激活参数量当成完整存储需求。</p>
+<figure><svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1620" viewBox="0 0 1600 1620" role="img"><title>DeepSeek-V4 Pro与Flash整体结构</title><desc></desc>
+<rect width="1600" height="1620" fill="#FFFFFF"/>
+<text x="60" y="52" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="20" font-weight="400" fill="#607285" text-anchor="start">结构图 / DEEPSEEK-V4</text>
+<text x="60" y="112" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="40" font-weight="700" fill="#172D43" text-anchor="start">DeepSeek-V4：共享骨架，采用不同的宽度与注意力排布</text>
+<text x="60" y="153" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="23" font-weight="400" fill="#607285" text-anchor="start">本图对应公开 V4 Preview 架构；主层计数不包含 1 层辅助多 token 预测模块。层号从 1 开始。</text>
+<line x1="60" y1="182" x2="1540" y2="182" stroke="#C7D3DE" stroke-width="2"/>
+<rect x="60" y="238" width="240" height="94" rx="7" fill="#EAF2F8" stroke="none" stroke-width="2"/>
+<text x="180.0" y="275" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="700" fill="#245E94" text-anchor="middle">Token IDs</text>
+<text x="180.0" y="317" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#607285" text-anchor="middle">[B,S]</text>
+<rect x="370" y="238" width="300" height="94" rx="7" fill="#EAF2F8" stroke="none" stroke-width="2"/>
+<text x="520.0" y="275" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="700" fill="#245E94" text-anchor="middle">Embedding</text>
+<text x="520.0" y="317" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#607285" text-anchor="middle">[B,S,D]</text>
+<rect x="740" y="238" width="360" height="94" rx="7" fill="#F0ECF6" stroke="none" stroke-width="2"/>
+<text x="920.0" y="275" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="700" fill="#74609A" text-anchor="middle">扩展为 4 条残差流</text>
+<text x="920.0" y="317" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#607285" text-anchor="middle">[B,S,4,D]</text>
+<rect x="1170" y="238" width="370" height="94" rx="7" fill="#F0ECF6" stroke="none" stroke-width="2"/>
+<text x="1355.0" y="275" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="700" fill="#74609A" text-anchor="middle">进入主干层堆叠</text>
+<text x="1355.0" y="317" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#607285" text-anchor="middle">每层 Attention + MoE</text>
+<line x1="300" y1="285" x2="370" y2="285" stroke="#245E94" stroke-width="3"/>
+<polygon points="370,285 359.1946347717679,290.21958640933474 359.1946347717679,279.78041359066526" fill="#245E94"/>
+<line x1="670" y1="285" x2="740" y2="285" stroke="#74609A" stroke-width="3"/>
+<polygon points="740,285 729.1946347717678,290.21958640933474 729.1946347717678,279.78041359066526" fill="#74609A"/>
+<line x1="1100" y1="285" x2="1170" y2="285" stroke="#74609A" stroke-width="3"/>
+<polygon points="1170,285 1159.1946347717678,290.21958640933474 1159.1946347717678,279.78041359066526" fill="#74609A"/>
+<text x="60" y="418" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="28" font-weight="700" fill="#172D43" text-anchor="start">每个主干层的实际顺序</text>
+<rect x="60" y="452" width="650" height="112" rx="7" fill="#EAF2F8" stroke="none" stroke-width="2"/>
+<text x="385.0" y="491" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="27" font-weight="700" fill="#245E94" text-anchor="middle">mHC 包裹的 Attention</text>
+<text x="385.0" y="549" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#607285" text-anchor="middle">4 流 → Hpre → Norm / Attention → Hpost + Hres → 4 流</text>
+<rect x="890" y="452" width="650" height="112" rx="7" fill="#FBF0E5" stroke="none" stroke-width="2"/>
+<text x="1215.0" y="491" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="27" font-weight="700" fill="#B96C29" text-anchor="middle">mHC 包裹的 MoE</text>
+<text x="1215.0" y="549" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#607285" text-anchor="middle">4 流 → Hpre → Norm / 专家 FFN → Hpost + Hres → 4 流</text>
+<line x1="710" y1="508" x2="890" y2="508" stroke="#74609A" stroke-width="3"/>
+<polygon points="890,508 879.1946347717678,513.2195864093347 879.1946347717678,502.78041359066526" fill="#74609A"/>
+<text x="800" y="493" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="22" font-weight="400" fill="#74609A" text-anchor="middle">[B,S,4,D]</text>
+<text x="60" y="666" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="31" font-weight="700" fill="#245E94" text-anchor="start">DeepSeek-V4-Pro</text>
+<text x="60" y="711" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="26" font-weight="400" fill="#172D43" text-anchor="start">D = 7168    主干层数 = 61</text>
+<text x="60" y="763" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="24" font-weight="700" fill="#245E94" text-anchor="start">31 × HCA128 + 30 × CSA4</text>
+<text x="60" y="809" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#607285" text-anchor="start">第 1–2 层：HCA；第 3–61 层：CSA / HCA 交替</text>
+<rect x="60" y="845" width="102" height="62" rx="7" fill="#E6F3F0" stroke="none" stroke-width="2"/>
+<text x="111" y="882" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="700" fill="#147D79" text-anchor="middle">HCA128</text>
+<text x="111" y="934" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="20" font-weight="400" fill="#607285" text-anchor="middle">1</text>
+<rect x="173" y="845" width="102" height="62" rx="7" fill="#E6F3F0" stroke="none" stroke-width="2"/>
+<text x="224" y="882" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="700" fill="#147D79" text-anchor="middle">HCA128</text>
+<text x="224" y="934" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="20" font-weight="400" fill="#607285" text-anchor="middle">2</text>
+<rect x="286" y="845" width="102" height="62" rx="7" fill="#EAF2F8" stroke="none" stroke-width="2"/>
+<text x="337" y="882" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="700" fill="#245E94" text-anchor="middle">CSA4</text>
+<text x="337" y="934" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="20" font-weight="400" fill="#607285" text-anchor="middle">3</text>
+<rect x="399" y="845" width="102" height="62" rx="7" fill="#E6F3F0" stroke="none" stroke-width="2"/>
+<text x="450" y="882" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="700" fill="#147D79" text-anchor="middle">HCA128</text>
+<text x="450" y="934" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="20" font-weight="400" fill="#607285" text-anchor="middle">4</text>
+<rect x="512" y="845" width="102" height="62" rx="7" fill="#EAF2F8" stroke="none" stroke-width="2"/>
+<text x="563" y="882" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="700" fill="#245E94" text-anchor="middle">…</text>
+<text x="563" y="934" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="20" font-weight="400" fill="#607285" text-anchor="middle">…</text>
+<rect x="625" y="845" width="102" height="62" rx="7" fill="#EAF2F8" stroke="none" stroke-width="2"/>
+<text x="676" y="882" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="700" fill="#245E94" text-anchor="middle">CSA4</text>
+<text x="676" y="934" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="20" font-weight="400" fill="#607285" text-anchor="middle">61</text>
+<text x="60" y="994" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="23" font-weight="400" fill="#B96C29" text-anchor="start">384 个路由专家；每 token Top-6 + 1 个共享专家</text>
+<text x="60" y="1036" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="22" font-weight="400" fill="#B96C29" text-anchor="start">第 1–3 层：Hash-MoE；其余层：学习式路由 MoE</text>
+<text x="860" y="666" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="31" font-weight="700" fill="#245E94" text-anchor="start">DeepSeek-V4-Flash</text>
+<text x="860" y="711" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="26" font-weight="400" fill="#172D43" text-anchor="start">D = 4096    主干层数 = 43</text>
+<text x="860" y="763" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="24" font-weight="700" fill="#245E94" text-anchor="start">2 × SWA + 21 × CSA4 + 20 × HCA128</text>
+<text x="860" y="809" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#607285" text-anchor="start">第 1–2 层：SWA；第 3–43 层：CSA / HCA 交替</text>
+<rect x="860" y="845" width="102" height="62" rx="7" fill="#EAF2F8" stroke="none" stroke-width="2"/>
+<text x="911" y="882" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="700" fill="#245E94" text-anchor="middle">SWA</text>
+<text x="911" y="934" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="20" font-weight="400" fill="#607285" text-anchor="middle">1</text>
+<rect x="973" y="845" width="102" height="62" rx="7" fill="#EAF2F8" stroke="none" stroke-width="2"/>
+<text x="1024" y="882" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="700" fill="#245E94" text-anchor="middle">SWA</text>
+<text x="1024" y="934" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="20" font-weight="400" fill="#607285" text-anchor="middle">2</text>
+<rect x="1086" y="845" width="102" height="62" rx="7" fill="#EAF2F8" stroke="none" stroke-width="2"/>
+<text x="1137" y="882" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="700" fill="#245E94" text-anchor="middle">CSA4</text>
+<text x="1137" y="934" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="20" font-weight="400" fill="#607285" text-anchor="middle">3</text>
+<rect x="1199" y="845" width="102" height="62" rx="7" fill="#E6F3F0" stroke="none" stroke-width="2"/>
+<text x="1250" y="882" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="700" fill="#147D79" text-anchor="middle">HCA128</text>
+<text x="1250" y="934" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="20" font-weight="400" fill="#607285" text-anchor="middle">4</text>
+<rect x="1312" y="845" width="102" height="62" rx="7" fill="#EAF2F8" stroke="none" stroke-width="2"/>
+<text x="1363" y="882" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="700" fill="#245E94" text-anchor="middle">…</text>
+<text x="1363" y="934" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="20" font-weight="400" fill="#607285" text-anchor="middle">…</text>
+<rect x="1425" y="845" width="102" height="62" rx="7" fill="#EAF2F8" stroke="none" stroke-width="2"/>
+<text x="1476" y="882" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="700" fill="#245E94" text-anchor="middle">CSA4</text>
+<text x="1476" y="934" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="20" font-weight="400" fill="#607285" text-anchor="middle">43</text>
+<text x="860" y="994" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="23" font-weight="400" fill="#B96C29" text-anchor="start">256 个路由专家；每 token Top-6 + 1 个共享专家</text>
+<text x="860" y="1036" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="22" font-weight="400" fill="#B96C29" text-anchor="start">第 1–3 层：Hash-MoE；其余层：学习式路由 MoE</text>
+<line x1="800" y1="635" x2="800" y2="1060" stroke="#C7D3DE" stroke-width="2"/>
+<text x="60" y="1108" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="700" fill="#172D43" text-anchor="start">注意两个边界：前 2 层的注意力类型与前 3 层的 Hash 路由并非同一个分界。所有主层都有 MoE。</text>
+<rect x="60" y="1190" width="410" height="105" rx="7" fill="#F0ECF6" stroke="none" stroke-width="2"/>
+<text x="265.0" y="1227" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="700" fill="#74609A" text-anchor="middle">主干输出</text>
+<text x="265.0" y="1280" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#607285" text-anchor="middle">[B,S,4,D]</text>
+<rect x="550" y="1190" width="450" height="105" rx="7" fill="#F0ECF6" stroke="none" stroke-width="2"/>
+<text x="775.0" y="1227" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="700" fill="#74609A" text-anchor="middle">最终 4 流混合 + Norm</text>
+<text x="775.0" y="1280" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#607285" text-anchor="middle">[B,S,D]</text>
+<rect x="1080" y="1190" width="460" height="105" rx="7" fill="#EAF2F8" stroke="none" stroke-width="2"/>
+<text x="1310.0" y="1227" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="700" fill="#245E94" text-anchor="middle">只取末位置 → 词表投影</text>
+<text x="1310.0" y="1280" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#607285" text-anchor="middle">[B,V]，V = 129280</text>
+<line x1="470" y1="1242" x2="550" y2="1242" stroke="#74609A" stroke-width="3"/>
+<polygon points="550,1242 539.1946347717678,1247.2195864093349 539.1946347717678,1236.7804135906651" fill="#74609A"/>
+<line x1="1000" y1="1242" x2="1080" y2="1242" stroke="#245E94" stroke-width="3"/>
+<polygon points="1080,1242 1069.1946347717678,1247.2195864093349 1069.1946347717678,1236.7804135906651" fill="#245E94"/>
+<rect x="550" y="1380" width="990" height="102" rx="7" fill="#FBF0E5" stroke="none" stroke-width="2"/>
+<text x="1045.0" y="1419" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="27" font-weight="700" fill="#B96C29" text-anchor="middle">辅助 MTP：1 层，多 token 预测</text>
+<text x="1045.0" y="1467" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#607285" text-anchor="middle">读取主干表示与移位 token；与主干层计数分开</text>
+<line x1="265" y1="1295" x2="265" y2="1431" stroke="#B96C29" stroke-width="3" stroke-dasharray="9 7"/>
+<line x1="265" y1="1431" x2="550" y2="1431" stroke="#B96C29" stroke-width="3" stroke-dasharray="9 7"/>
+<polygon points="550,1431 539.1946347717678,1436.2195864093349 539.1946347717678,1425.7804135906651" fill="#B96C29"/>
+<line x1="60" y1="1518" x2="1540" y2="1518" stroke="#C7D3DE" stroke-width="2"/>
+<text x="60" y="1552" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="20" font-weight="400" fill="#607285" text-anchor="start">SWA：滑动窗口注意力；CSA4：4 倍压缩 + 稀疏选择；HCA128：128 倍压缩。MTP 虚线表示辅助路径。</text>
+<text x="60" y="1585" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="18" font-weight="400" fill="#607285" text-anchor="start">依据 DeepSeek-V4 技术报告 §2、官方 Pro / Flash 配置与 inference/model.py；未将 API 模式名视为另一套网络。</text>
+</svg><figcaption><span class="fnum">图 3</span>V4 两个规模的完整主干。注意力类型与专家路由类型是两套独立的分层安排：Flash 前两层只有滑动窗口，但两者前三层都使用哈希专家路由。MTP 是附加预测模块，不计入主干层数。依据固定配置与官方 <code>Transformer/Block</code> 原创绘制。<span class="figure-hint">点按图解可放大查看</span></figcaption></figure>
+<div class="inline-table"><table><thead><tr><th>结构字段</th><th>V4-Pro</th><th>V4-Flash</th><th>它控制什么</th></tr></thead><tbody><tr><td>主干层数 / 隐藏宽度</td><td>61 / 7,168</td><td>43 / 4,096</td><td>深度与每条残差流的宽度</td></tr><tr><td>注意力组合</td><td>30 CSA + 31 HCA</td><td>21 CSA + 20 HCA + 2 SWA</td><td>每层保存、读取哪种历史</td></tr><tr><td>查询头数 × 每头维度</td><td>128 × 512</td><td>64 × 512</td><td>不同查询视角；不是 KV 副本数量</td></tr><tr><td>查询低秩宽度</td><td>1,536</td><td>1,024</td><td>查询投影的中间瓶颈</td></tr><tr><td>路由专家 / 每 token 选取</td><td>384 / 6</td><td>256 / 6</td><td>每个 MoE 分支的条件计算</td></tr><tr><td>共享专家 / 专家中间宽度</td><td>1 / 3,072</td><td>1 / 2,048</td><td>公共 FFN 路径及专家容量</td></tr><tr><td>局部窗口 / 残差流</td><td>128 / 4</td><td>128 / 4</td><td>局部精细信息与跨层信息通路</td></tr></tbody></table></div>
+<p>Pro 的前两层是 HCA，此后从 CSA 开始交替；Flash 的前两层是纯滑动窗口，此后同样从 CSA 开始交替。两者的前馈网络（Feed-Forward Network，FFN）都已经换成 MoE，不能沿用 V3“前三层是稠密 FFN”的描述。配置中的压缩率列表还包含附加 MTP 层，直接把列表长度当作主干层数会多算一层。</p>
+<p class="src">一手依据：<a href="https://huggingface.co/deepseek-ai/DeepSeek-V4-Pro/blob/b5968e9190ef611bbf34a7229255be88a0e937c1/inference/config.json">Pro 参考配置</a>；<a href="https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash/blob/60d8d70770c6776ff598c94bb586a859a38244f1/inference/config.json">Flash 参考配置</a>；<a href="https://arxiv.org/html/2606.19348v1#S2">V4 报告 §2</a>。本文给出的维度以配置与实际执行路径为准。</p>
+
+<h3 id="attention">一层注意力内部：为什么 128 个查询头只读一份 KV？</h3>
+<div class="tags">网络结构 · 注意力投影与缓存表示</div>
+<p>进入注意力本体之前，四路残差已经被混合并归一化为 <code>x:[B,S,7168]</code>。以下先按 Pro 的全局逻辑维度展开；张量并行运行时，每张卡只持有其中的本地头和投影分片。</p>
+<p>查询走两次投影：先用 <code>wq_a</code> 从 7,168 降到 1,536，经 RMSNorm（Root Mean Square Layer Normalization，均方根层归一化）调整特征尺度后，再用 <code>wq_b</code> 展开到 128×512。最后一个维度被拆成“头数”和“头宽”，得到 <code>Q:[B,S,128,512]</code>；每个 512 维头还会独立按均方根归一化，这一步没有可学习的逐通道增益，随后施加部分旋转位置编码（Rotary Position Embedding，RoPE）。这个低秩瓶颈作用于查询参数化，不等于把整层的隐藏状态永久压缩为 1,536 维。低秩中间表示还会分给 CSA 索引器，但索引器与主注意力使用不同的后续查询投影。</p>
+<p>键值路径只有一个 512 维向量。对局部 token，<code>wkv(x)</code> 得到 <code>[B,S,512]</code>；对远处历史，压缩器产生同宽度的条目。所有查询头共享这些条目，而且每个条目<strong>同时充当 Key 和 Value</strong>：Key 用于与查询打分，Value 用于按权重汇总信息，二者合称 KV。缓存这些历史表示，是为了生成下一 token 时不必重新计算全部历史。与 V3 的联合潜在缓存有技术联系，但不能把 V3 的“512 维 latent 加独立 64 维位置键”原封不动画在 V4 上。</p>
+<figure><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1440" width="1600" height="1440" role="img"><title>V4-Pro 单层注意力：从查询到分组输出</title><desc>原创结构重绘；全局逻辑形状，不表示每张卡分片。</desc>
+<rect width="1600" height="1440" fill="#ffffff"/>
+<text x="60" y="77" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="39" font-weight="700" fill="#172d43" text-anchor="start">V4-Pro 单层注意力：从查询到分组输出</text>
+<text x="60" y="126" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="400" fill="#607285" text-anchor="start">输入已由 mHC 四流合成并经过 RMSNorm；以下形状采用全局逻辑维度。</text>
+<rect x="550" y="155" width="500" height="90" rx="8" fill="#E7F0F8" stroke="#dce3e9" stroke-width="2"/>
+<text x="800.0" y="196" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="27" font-weight="700" fill="#245e94" text-anchor="middle">输入 x</text>
+<text x="800.0" y="232" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="23" font-weight="400" fill="#172d43" text-anchor="middle">[B, S, 7,168]</text>
+<line x1="800" y1="245" x2="800" y2="275" stroke="#607285" stroke-width="3"/>
+<line x1="800" y1="275" x2="285" y2="275" stroke="#607285" stroke-width="3"/>
+<line x1="285" y1="275" x2="285" y2="310" stroke="#607285" stroke-width="3"/>
+<polygon points="285,310 279.78041359066526,299.1946347717679 290.21958640933474,299.1946347717679" fill="#607285"/>
+<line x1="800" y1="245" x2="800" y2="310" stroke="#607285" stroke-width="3"/>
+<polygon points="800,310 794.7804135906653,299.1946347717679 805.2195864093347,299.1946347717679" fill="#607285"/>
+<line x1="800" y1="245" x2="800" y2="275" stroke="#607285" stroke-width="3"/>
+<line x1="800" y1="275" x2="1315" y2="275" stroke="#607285" stroke-width="3"/>
+<line x1="1315" y1="275" x2="1315" y2="310" stroke="#607285" stroke-width="3"/>
+<polygon points="1315,310 1309.7804135906651,299.1946347717679 1320.2195864093349,299.1946347717679" fill="#607285"/>
+<rect x="60" y="310" width="450" height="95" rx="8" fill="#E7F0F8" stroke="#dce3e9" stroke-width="2"/>
+<text x="285.0" y="351" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="27" font-weight="700" fill="#245e94" text-anchor="middle">wq_a → RMSNorm</text>
+<text x="285.0" y="387" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="23" font-weight="400" fill="#172d43" text-anchor="middle">[B, S, 1,536]</text>
+<line x1="285" y1="405" x2="285" y2="435" stroke="#607285" stroke-width="3"/>
+<polygon points="285,435 279.78041359066526,424.1946347717679 290.21958640933474,424.1946347717679" fill="#607285"/>
+<rect x="60" y="435" width="450" height="95" rx="8" fill="#E7F0F8" stroke="#dce3e9" stroke-width="2"/>
+<text x="285.0" y="476" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="27" font-weight="700" fill="#245e94" text-anchor="middle">wq_b → 拆分为 128 个头</text>
+<text x="285.0" y="512" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="23" font-weight="400" fill="#172d43" text-anchor="middle">[B, S, 128, 512]</text>
+<line x1="285" y1="530" x2="285" y2="560" stroke="#607285" stroke-width="3"/>
+<polygon points="285,560 279.78041359066526,549.1946347717678 290.21958640933474,549.1946347717678" fill="#607285"/>
+<rect x="60" y="560" width="450" height="95" rx="8" fill="#E7F0F8" stroke="#dce3e9" stroke-width="2"/>
+<text x="285.0" y="599" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="700" fill="#245e94" text-anchor="middle">逐头归一化 + 部分 RoPE</text>
+<text x="285.0" y="637" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="23" font-weight="400" fill="#172d43" text-anchor="middle">最后 64 维旋转，前 448 维不旋转</text>
+<rect x="575" y="310" width="450" height="95" rx="8" fill="#E3F3EF" stroke="#dce3e9" stroke-width="2"/>
+<text x="800.0" y="351" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="27" font-weight="700" fill="#147d79" text-anchor="middle">局部窗口：独立 wkv</text>
+<text x="800.0" y="387" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="23" font-weight="400" fill="#172d43" text-anchor="middle">[B, S, 512]</text>
+<line x1="800" y1="405" x2="800" y2="435" stroke="#607285" stroke-width="3"/>
+<polygon points="800,435 794.7804135906653,424.1946347717679 805.2195864093347,424.1946347717679" fill="#607285"/>
+<rect x="575" y="435" width="450" height="95" rx="8" fill="#E3F3EF" stroke="#dce3e9" stroke-width="2"/>
+<text x="800.0" y="474" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="700" fill="#147d79" text-anchor="middle">RMSNorm + 部分 RoPE</text>
+<text x="800.0" y="512" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="23" font-weight="400" fill="#172d43" text-anchor="middle">最后 64 维携带原 token 位置</text>
+<line x1="800" y1="530" x2="800" y2="560" stroke="#607285" stroke-width="3"/>
+<polygon points="800,560 794.7804135906653,549.1946347717678 805.2195864093347,549.1946347717678" fill="#607285"/>
+<rect x="575" y="560" width="450" height="95" rx="8" fill="#E3F3EF" stroke="#dce3e9" stroke-width="2"/>
+<text x="800.0" y="601" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="27" font-weight="700" fill="#147d79" text-anchor="middle">近期原始条目</text>
+<text x="800.0" y="637" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="23" font-weight="400" fill="#172d43" text-anchor="middle">每个 query 最多读取 128 个</text>
+<rect x="1090" y="310" width="450" height="95" rx="8" fill="#E3F3EF" stroke="#dce3e9" stroke-width="2"/>
+<text x="1315.0" y="351" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="27" font-weight="700" fill="#147d79" text-anchor="middle">全局路径：独立压缩器</text>
+<text x="1315.0" y="387" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="23" font-weight="400" fill="#172d43" text-anchor="middle">每条压缩记忆为 512 维</text>
+<line x1="1315" y1="405" x2="1315" y2="435" stroke="#607285" stroke-width="3"/>
+<polygon points="1315,435 1309.7804135906651,424.1946347717679 1320.2195864093349,424.1946347717679" fill="#607285"/>
+<rect x="1090" y="435" width="450" height="95" rx="8" fill="#E3F3EF" stroke="#dce3e9" stroke-width="2"/>
+<text x="1315.0" y="474" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="700" fill="#147d79" text-anchor="middle">归一化 + 块位置 RoPE</text>
+<text x="1315.0" y="512" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="23" font-weight="400" fill="#172d43" text-anchor="middle">CSA：4 → 1；HCA：128 → 1</text>
+<line x1="1315" y1="530" x2="1315" y2="560" stroke="#607285" stroke-width="3"/>
+<polygon points="1315,560 1309.7804135906651,549.1946347717678 1320.2195864093349,549.1946347717678" fill="#607285"/>
+<rect x="1090" y="560" width="450" height="95" rx="8" fill="#E3F3EF" stroke="#dce3e9" stroke-width="2"/>
+<text x="1315.0" y="598" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="24" font-weight="700" fill="#147d79" text-anchor="middle">允许读取的压缩条目</text>
+<text x="1315.0" y="637" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="23" font-weight="400" fill="#172d43" text-anchor="middle">CSA 选 Top-1,024；HCA 读全体</text>
+<line x1="285" y1="655" x2="285" y2="740" stroke="#245e94" stroke-width="3"/>
+<line x1="285" y1="740" x2="430" y2="740" stroke="#245e94" stroke-width="3"/>
+<polygon points="430,740 419.1946347717679,745.2195864093347 419.1946347717679,734.7804135906653" fill="#245e94"/>
+<line x1="800" y1="655" x2="800" y2="700" stroke="#147d79" stroke-width="3"/>
+<polygon points="800,700 794.7804135906653,689.1946347717678 805.2195864093347,689.1946347717678" fill="#147d79"/>
+<line x1="1315" y1="655" x2="1315" y2="740" stroke="#147d79" stroke-width="3"/>
+<line x1="1315" y1="740" x2="1170" y2="740" stroke="#147d79" stroke-width="3"/>
+<polygon points="1170,740 1180.8053652282322,734.7804135906653 1180.8053652282322,745.2195864093347" fill="#147d79"/>
+<text x="292" y="704" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="24" font-weight="700" fill="#245e94" text-anchor="start">Q</text>
+<text x="1195" y="704" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="24" font-weight="700" fill="#147d79" text-anchor="start">K = V</text>
+<rect x="430" y="700" width="740" height="125" rx="8" fill="#E7F0F8" stroke="#dce3e9" stroke-width="2"/>
+<text x="800.0" y="742" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="28" font-weight="700" fill="#245e94" text-anchor="middle">同一份条目同时作为 Key 与 Value</text>
+<text x="800.0" y="777" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="23" font-weight="400" fill="#172d43" text-anchor="middle">各头独立打分；局部 + 全局共用一次 softmax</text>
+<text x="800" y="807" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="22" font-weight="400" fill="#172d43" text-anchor="middle">包含每头 sink 分母项 · 输出 [B, S, 128, 512]</text>
+<line x1="800" y1="825" x2="800" y2="860" stroke="#607285" stroke-width="3"/>
+<polygon points="800,860 794.7804135906653,849.1946347717678 805.2195864093347,849.1946347717678" fill="#607285"/>
+<rect x="430" y="860" width="740" height="100" rx="8" fill="#E7F0F8" stroke="#dce3e9" stroke-width="2"/>
+<text x="800.0" y="901" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="27" font-weight="700" fill="#245e94" text-anchor="middle">对输出最后 64 维施加逆 RoPE</text>
+<text x="800.0" y="937" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="23" font-weight="400" fill="#172d43" text-anchor="middle">R(−t) · Σ a[j] R(p[j])c[j] = Σ a[j] R(p[j]−t)c[j]</text>
+<line x1="800" y1="960" x2="800" y2="995" stroke="#245e94" stroke-width="3"/>
+<line x1="800" y1="995" x2="285" y2="995" stroke="#245e94" stroke-width="3"/>
+<line x1="285" y1="995" x2="285" y2="1030" stroke="#245e94" stroke-width="3"/>
+<polygon points="285,1030 279.78041359066526,1019.1946347717678 290.21958640933474,1019.1946347717678" fill="#245e94"/>
+<rect x="60" y="1030" width="450" height="105" rx="8" fill="#E7F0F8" stroke="#dce3e9" stroke-width="2"/>
+<text x="285.0" y="1070" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="26" font-weight="700" fill="#245e94" text-anchor="middle">重排为 16 组 × 每组 8 个头</text>
+<text x="285.0" y="1107" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="23" font-weight="400" fill="#172d43" text-anchor="middle">[B, S, 16, 4,096]</text>
+<line x1="510" y1="1082" x2="570" y2="1082" stroke="#607285" stroke-width="3"/>
+<polygon points="570,1082 559.1946347717678,1087.2195864093349 559.1946347717678,1076.7804135906651" fill="#607285"/>
+<rect x="575" y="1030" width="450" height="105" rx="8" fill="#E7F0F8" stroke="#dce3e9" stroke-width="2"/>
+<text x="800.0" y="1069" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="700" fill="#245e94" text-anchor="middle">组内 wo_a：4,096 → 1,024</text>
+<text x="800.0" y="1107" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="23" font-weight="400" fill="#172d43" text-anchor="middle">[B, S, 16, 1,024]</text>
+<line x1="1025" y1="1082" x2="1085" y2="1082" stroke="#607285" stroke-width="3"/>
+<polygon points="1085,1082 1074.1946347717678,1087.2195864093349 1074.1946347717678,1076.7804135906651" fill="#607285"/>
+<rect x="1090" y="1030" width="450" height="105" rx="8" fill="#E7F0F8" stroke="#dce3e9" stroke-width="2"/>
+<text x="1315.0" y="1071" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="27" font-weight="700" fill="#245e94" text-anchor="middle">拼接各组</text>
+<text x="1315.0" y="1107" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="23" font-weight="400" fill="#172d43" text-anchor="middle">[B, S, 16,384]</text>
+<line x1="1315" y1="1135" x2="1315" y2="1195" stroke="#245e94" stroke-width="3"/>
+<line x1="1315" y1="1195" x2="1070" y2="1195" stroke="#245e94" stroke-width="3"/>
+<polygon points="1070,1195 1080.8053652282322,1189.7804135906651 1080.8053652282322,1200.2195864093349" fill="#245e94"/>
+<rect x="530" y="1155" width="540" height="105" rx="8" fill="#E7F0F8" stroke="#dce3e9" stroke-width="2"/>
+<text x="800.0" y="1195" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="26" font-weight="700" fill="#245e94" text-anchor="middle">wo_b：16,384 → 7,168</text>
+<text x="800.0" y="1232" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="23" font-weight="400" fill="#172d43" text-anchor="middle">返回 [B, S, 7,168]，交给 mHC 写回</text>
+<text x="60" y="1314" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="24" font-weight="400" fill="#607285" text-anchor="start">Flash 差异：64 个查询头，Q 低秩宽 1,024；8 组输出，拼接宽 8,192。</text>
+<text x="60" y="1354" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="24" font-weight="400" fill="#172d43" text-anchor="start">共享 KV 省去逐头缓存；逆 RoPE 与分组输出是实际计算，不能从结构图中省掉。</text>
+<line x1="60" y1="1375" x2="1540" y2="1375" stroke="#dce3e9" stroke-width="2"/>
+<text x="60" y="1411" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#607285" text-anchor="start">依据：V4 报告 §2.3；固定 Pro inference/model.py L436–543。原创重绘，不按面积表示参数或显存。</text>
+</svg><figcaption><span class="fnum">图 4</span>Pro 单层注意力的完整张量路径。压缩器决定历史条目如何形成，索引器决定其中哪些可读；本图展开被选条目进入注意力之后的计算。末端的逆 RoPE 和分组输出投影都属于实际结构。<span class="figure-hint">点按图解可放大查看</span></figcaption></figure>
+<p>令 <em>t</em> 为当前 token 的位置，第 <em>h</em> 个查询头为 <em>q</em><sub>t,h</sub>∈ℝ<sup>512</sup>，被允许读取的局部与压缩条目集合为 <em>J</em><sub>t</sub>，条目为 <em>c</em><sub>j</sub>∈ℝ<sup>512</sup>。用 <em>a</em> 表示注意力权重、<em>o</em> 表示每头的 512 维输出，则注意力核心可以概括为：</p>
+<div class="eq">a<sub>t,h,j</sub> = exp(q<sub>t,h</sub><sup>T</sup>c<sub>j</sub> / √512) / [exp(s<sub>h</sub>) + Σ<sub>u∈Jₜ</sub> exp(q<sub>t,h</sub><sup>T</sup>c<sub>u</sub> / √512)]<br>o<sub>t,h</sub> = Σ<sub>j∈Jₜ</sub> a<sub>t,h,j</sub>c<sub>j</sub></div>
+<p>公式中的查询与条目已经包含归一化和部分位置旋转，暂不展开量化误差；固定实现的主注意力缩放为 512<sup>−1/2</sup>。<em>s</em><sub>h</sub> 是每头的 attention sink 分数。它进入 softmax 分母，但不对应一个必须从历史中读取的普通 value。其作用可以理解为允许一部分权重流向零贡献选项，让模型不必把全部概率质量硬分给当前可见内容。它也不是一个必须保留的真实开头 token。</p>
+<p>共享 KV 不会迫使各头给出相同答案，因为各头的查询不同，得到的权重也不同。但它限制了各头独立的值表示。这是一种以表示自由度换取存储和访问效率的设计选择，不能仅根据节省的字节数判断表达能力是否足够。</p>
+<h4>只旋转最后 64 维，为什么输出还要旋转回来？</h4>
+<p>512 维中，前 448 维不施加 RoPE，最后 64 维携带旋转位置编码。普通注意力通常只对 Q、K 旋转，而 V 不旋转；V4 的 K 与 V 是同一个条目，因此值的加权和也带入了各历史位置的旋转。</p>
+<p>设 R(t) 是位置 t 的旋转，c<sub>j</sub> 暂指条目旋转前的末 64 维，p<sub>j</sub> 是该条目使用的位置。注意力输出中的位置部分包含 Σ<sub>j</sub>a<sub>j</sub>R(p<sub>j</sub>)c<sub>j</sub>。V4 在输出端再乘 R(−t)，于是变成 Σ<sub>j</sub>a<sub>j</sub>R(p<sub>j</sub>−t)c<sub>j</sub>。这里消去的是依赖查询绝对位置的共同旋转，保留下来的仍是相对位置信息，并不是“删除位置编码”。局部条目的 p<sub>j</sub> 是原 token 位置；压缩条目则使用其当前完整块的起点，例如 CSA 的 0、4、8……，不能把压缩条目的序号直接当成原始位置。</p>
+<pre><code># 官方 Attention.forward 中的关键操作
+apply_rotary_emb(o[..., -rd:], freqs_cis, True)</code></pre>
+<p>最后一个参数启用逆旋转。若只画“注意力输出 → 输出线性层”，就会漏掉 K=V 设计引出的这个必要环节。</p>
+<h4>65,536 维怎样回到 7,168 维？</h4>
+<p>128 个头各产生 512 维，共 65,536 维。直接使用一个稠密输出矩阵需要 65,536×7,168≈4.70 亿参数。V4-Pro 把 128 个头分成 16 组，每组 8 个头，先将 4,096 维映射到 1,024 维；拼接 16 组之后，再将 16,384 维映射回 7,168 维。</p>
+<div class="eq">16 × (4,096 × 1,024) + 16,384 × 7,168 = 184,549,376</div>
+<p>这是依据配置进行的参数计算，不是性能实测。第一阶段各组独立，第二阶段再融合组间信息；分组低秩约束减少参数和乘法，同时约束了单组信息通过输出端的方式。它不意味着整个输出映射的总秩只有 1,024。</p>
+<p class="src">代码对应：<a href="https://huggingface.co/deepseek-ai/DeepSeek-V4-Pro/blob/b5968e9190ef611bbf34a7229255be88a0e937c1/inference/model.py#L436">Attention 类</a>，尤其 L484–543 的 <code>wq_a/wq_b/wkv</code>、逆 RoPE 和 <code>wo_a/wo_b</code>；<a href="https://huggingface.co/deepseek-ai/DeepSeek-V4-Pro/blob/b5968e9190ef611bbf34a7229255be88a0e937c1/inference/kernel.py#L277">稀疏注意力内核</a>中的同一 KV 两次参与矩阵乘法及 L345–348 的 sink 分母更新；机制依据报告 §2.3.1–2.3.3。</p>
+
+<h3 id="compressor">压缩器：把“每个位置一条缓存”改成“每组位置一条缓存”</h3>
+<div class="tags">网络结构 · 沿序列轴压缩</div>
+<p>现在回到那些 512 维历史条目从哪里来。V3 的 MLA 主要压缩特征维度：每个历史位置仍然留下一条记录。V4 的压缩器还沿序列维度压缩，使多个 token 共用一个长期条目。</p>
+<p>这并不是把相邻向量直接取平均。对于一个含 <em>m</em> 个时间槽的窗口，压缩器分别生成候选值 <em>v</em><sub>i,c</sub> 和门控分数 <em>z</em><sub>i,c</sub>；<em>i</em>、<em>j</em> 遍历这 <em>m</em> 个槽，<em>c</em> 表示输出通道。加入可学习的位置偏置 <em>b</em><sub>i,c</sub> 后，沿时间槽归一化；α 是归一化权重，<em>C</em> 是压缩得到的向量：</p>
+<div class="eq">α<sub>i,c</sub> = exp(z<sub>i,c</sub> + b<sub>i,c</sub>) / Σ<sub>j</sub> exp(z<sub>j,c</sub> + b<sub>j,c</sub>)<br>C<sub>c</sub> = Σ<sub>i</sub> α<sub>i,c</sub>v<sub>i,c</sub></div>
+<p>每一个输出通道都有自己的一组时间权重，因此第一个通道可能偏向窗口开头，第二个通道可能偏向窗口末尾。这里的 softmax 不是在 512 个特征之间竞争，而是在若干时间位置之间竞争。</p>
+<figure><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1410" width="1600" height="1410" role="img"><title>V4 压缩器：步长、池化范围与因果边界</title><desc>CSA每4个新token生成1条512维记忆，使用相邻块重叠；HCA每128个生成1条，不重叠。</desc>
+<rect width="1600" height="1410" fill="#ffffff"/>
+<text x="60" y="77" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="39" font-weight="700" fill="#172d43" text-anchor="start">V4 压缩器：步长、池化范围与因果边界</text>
+<text x="60" y="126" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="400" fill="#607285" text-anchor="start">同一层输入分别产生候选值和门控分数；每个输出通道沿时间槽做 softmax。</text>
+<rect x="60" y="165" width="1480" height="445" rx="10" fill="#FFFFFF" stroke="#dce3e9" stroke-width="2"/>
+<text x="85" y="216" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="31" font-weight="700" fill="#147d79" text-anchor="start">CSA · 压缩率 4，通常池化 8 个时间槽</text>
+<text x="360" y="269" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="24" font-weight="400" fill="#607285" text-anchor="start">前一块分支</text>
+<text x="718" y="269" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="24" font-weight="400" fill="#147d79" text-anchor="start">当前块分支</text>
+<text x="1140" y="269" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="24" font-weight="400" fill="#147d79" text-anchor="start">完成后追加一条</text>
+<text x="92" y="330" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="30" font-weight="700" fill="#172d43" text-anchor="start">C0</text>
+<text x="165" y="326" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="22" font-weight="400" fill="#607285" text-anchor="start">token 位置</text>
+<rect x="350" y="292" width="74" height="56" rx="5" fill="#e8edf2" stroke="#dce3e9" stroke-width="2"/>
+<text x="387" y="326" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="400" fill="#607285" text-anchor="middle">—</text>
+<rect x="437" y="292" width="74" height="56" rx="5" fill="#e8edf2" stroke="#dce3e9" stroke-width="2"/>
+<text x="474" y="326" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="400" fill="#607285" text-anchor="middle">—</text>
+<rect x="524" y="292" width="74" height="56" rx="5" fill="#e8edf2" stroke="#dce3e9" stroke-width="2"/>
+<text x="561" y="326" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="400" fill="#607285" text-anchor="middle">—</text>
+<rect x="611" y="292" width="74" height="56" rx="5" fill="#e8edf2" stroke="#dce3e9" stroke-width="2"/>
+<text x="648" y="326" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="400" fill="#607285" text-anchor="middle">—</text>
+<rect x="698" y="292" width="74" height="56" rx="5" fill="#E3F3EF" stroke="#dce3e9" stroke-width="2"/>
+<text x="735" y="326" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="400" fill="#147d79" text-anchor="middle">0</text>
+<rect x="785" y="292" width="74" height="56" rx="5" fill="#E3F3EF" stroke="#dce3e9" stroke-width="2"/>
+<text x="822" y="326" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="400" fill="#147d79" text-anchor="middle">1</text>
+<rect x="872" y="292" width="74" height="56" rx="5" fill="#E3F3EF" stroke="#dce3e9" stroke-width="2"/>
+<text x="909" y="326" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="400" fill="#147d79" text-anchor="middle">2</text>
+<rect x="959" y="292" width="74" height="56" rx="5" fill="#E3F3EF" stroke="#dce3e9" stroke-width="2"/>
+<text x="996" y="326" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="400" fill="#147d79" text-anchor="middle">3</text>
+<line x1="1055" y1="320" x2="1130" y2="320" stroke="#147d79" stroke-width="3"/>
+<polygon points="1130,320 1119.1946347717678,325.21958640933474 1119.1946347717678,314.78041359066526" fill="#147d79"/>
+<rect x="1140" y="289" width="360" height="64" rx="8" fill="#E3F3EF" stroke="#dce3e9" stroke-width="2"/>
+<text x="1320.0" y="328" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="700" fill="#147d79" text-anchor="middle">C0  [512]</text>
+<text x="92" y="414" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="30" font-weight="700" fill="#172d43" text-anchor="start">C1</text>
+<text x="165" y="410" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="22" font-weight="400" fill="#607285" text-anchor="start">token 位置</text>
+<rect x="350" y="376" width="74" height="56" rx="5" fill="#f4f7f9" stroke="#dce3e9" stroke-width="2"/>
+<text x="387" y="410" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="400" fill="#147d79" text-anchor="middle">0</text>
+<rect x="437" y="376" width="74" height="56" rx="5" fill="#f4f7f9" stroke="#dce3e9" stroke-width="2"/>
+<text x="474" y="410" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="400" fill="#147d79" text-anchor="middle">1</text>
+<rect x="524" y="376" width="74" height="56" rx="5" fill="#f4f7f9" stroke="#dce3e9" stroke-width="2"/>
+<text x="561" y="410" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="400" fill="#147d79" text-anchor="middle">2</text>
+<rect x="611" y="376" width="74" height="56" rx="5" fill="#f4f7f9" stroke="#dce3e9" stroke-width="2"/>
+<text x="648" y="410" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="400" fill="#147d79" text-anchor="middle">3</text>
+<rect x="698" y="376" width="74" height="56" rx="5" fill="#E3F3EF" stroke="#dce3e9" stroke-width="2"/>
+<text x="735" y="410" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="400" fill="#147d79" text-anchor="middle">4</text>
+<rect x="785" y="376" width="74" height="56" rx="5" fill="#E3F3EF" stroke="#dce3e9" stroke-width="2"/>
+<text x="822" y="410" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="400" fill="#147d79" text-anchor="middle">5</text>
+<rect x="872" y="376" width="74" height="56" rx="5" fill="#E3F3EF" stroke="#dce3e9" stroke-width="2"/>
+<text x="909" y="410" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="400" fill="#147d79" text-anchor="middle">6</text>
+<rect x="959" y="376" width="74" height="56" rx="5" fill="#E3F3EF" stroke="#dce3e9" stroke-width="2"/>
+<text x="996" y="410" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="400" fill="#147d79" text-anchor="middle">7</text>
+<line x1="1055" y1="404" x2="1130" y2="404" stroke="#147d79" stroke-width="3"/>
+<polygon points="1130,404 1119.1946347717678,409.21958640933474 1119.1946347717678,398.78041359066526" fill="#147d79"/>
+<rect x="1140" y="373" width="360" height="64" rx="8" fill="#E3F3EF" stroke="#dce3e9" stroke-width="2"/>
+<text x="1320.0" y="412" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="700" fill="#147d79" text-anchor="middle">C1  [512]</text>
+<text x="92" y="498" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="30" font-weight="700" fill="#172d43" text-anchor="start">C2</text>
+<text x="165" y="494" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="22" font-weight="400" fill="#607285" text-anchor="start">token 位置</text>
+<rect x="350" y="460" width="74" height="56" rx="5" fill="#f4f7f9" stroke="#dce3e9" stroke-width="2"/>
+<text x="387" y="494" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="400" fill="#147d79" text-anchor="middle">4</text>
+<rect x="437" y="460" width="74" height="56" rx="5" fill="#f4f7f9" stroke="#dce3e9" stroke-width="2"/>
+<text x="474" y="494" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="400" fill="#147d79" text-anchor="middle">5</text>
+<rect x="524" y="460" width="74" height="56" rx="5" fill="#f4f7f9" stroke="#dce3e9" stroke-width="2"/>
+<text x="561" y="494" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="400" fill="#147d79" text-anchor="middle">6</text>
+<rect x="611" y="460" width="74" height="56" rx="5" fill="#f4f7f9" stroke="#dce3e9" stroke-width="2"/>
+<text x="648" y="494" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="400" fill="#147d79" text-anchor="middle">7</text>
+<rect x="698" y="460" width="74" height="56" rx="5" fill="#E3F3EF" stroke="#dce3e9" stroke-width="2"/>
+<text x="735" y="494" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="400" fill="#147d79" text-anchor="middle">8</text>
+<rect x="785" y="460" width="74" height="56" rx="5" fill="#E3F3EF" stroke="#dce3e9" stroke-width="2"/>
+<text x="822" y="494" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="400" fill="#147d79" text-anchor="middle">9</text>
+<rect x="872" y="460" width="74" height="56" rx="5" fill="#E3F3EF" stroke="#dce3e9" stroke-width="2"/>
+<text x="909" y="494" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="400" fill="#147d79" text-anchor="middle">10</text>
+<rect x="959" y="460" width="74" height="56" rx="5" fill="#E3F3EF" stroke="#dce3e9" stroke-width="2"/>
+<text x="996" y="494" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="400" fill="#147d79" text-anchor="middle">11</text>
+<line x1="1055" y1="488" x2="1130" y2="488" stroke="#147d79" stroke-width="3"/>
+<polygon points="1130,488 1119.1946347717678,493.21958640933474 1119.1946347717678,482.78041359066526" fill="#147d79"/>
+<rect x="1140" y="457" width="360" height="64" rx="8" fill="#E3F3EF" stroke="#dce3e9" stroke-width="2"/>
+<text x="1320.0" y="496" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="700" fill="#147d79" text-anchor="middle">C2  [512]</text>
+<text x="88" y="577" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="400" fill="#172d43" text-anchor="start">首块缺失槽：值填 0、分数填 −∞。相邻条目跨块重叠，产出步长仍然是 4。</text>
+<rect x="60" y="635" width="1480" height="115" rx="8" fill="#E3F3EF" stroke="none" stroke-width="2"/>
+<text x="88" y="678" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="28" font-weight="700" fill="#147d79" text-anchor="start">每个通道 c 各自选择时间位置</text>
+<text x="88" y="720" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="24" font-weight="400" fill="#172d43" text-anchor="start">α[j,c] = softmax_time(z[j,c] + b[j,c]);  C[c] = Σ[j] α[j,c] v[j,c]</text>
+<text x="1050" y="679" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="23" font-weight="400" fill="#607285" text-anchor="start">不是对 512 个通道做 softmax</text>
+<text x="1050" y="717" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="23" font-weight="400" fill="#607285" text-anchor="start">然后：RMSNorm → 部分 RoPE</text>
+<rect x="60" y="785" width="720" height="505" rx="10" fill="#FFFFFF" stroke="#dce3e9" stroke-width="2"/>
+<text x="85" y="835" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="30" font-weight="700" fill="#147d79" text-anchor="start">HCA · 128 → 1，不重叠</text>
+<rect x="95" y="875" width="390" height="88" rx="8" fill="#E3F3EF" stroke="#dce3e9" stroke-width="2"/>
+<text x="290.0" y="914" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="700" fill="#147d79" text-anchor="middle">原始位置 0…127</text>
+<text x="290.0" y="952" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="23" font-weight="400" fill="#172d43" text-anchor="middle">128 个时间槽 × 512 通道</text>
+<line x1="485" y1="919" x2="535" y2="919" stroke="#147d79" stroke-width="3"/>
+<polygon points="535,919 524.1946347717678,924.2195864093347 524.1946347717678,913.7804135906653" fill="#147d79"/>
+<rect x="545" y="875" width="195" height="88" rx="8" fill="#E3F3EF" stroke="#dce3e9" stroke-width="2"/>
+<text x="642.5" y="916" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="27" font-weight="700" fill="#147d79" text-anchor="middle">C0</text>
+<text x="642.5" y="952" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="23" font-weight="400" fill="#172d43" text-anchor="middle">[512]</text>
+<rect x="95" y="995" width="390" height="88" rx="8" fill="#E3F3EF" stroke="#dce3e9" stroke-width="2"/>
+<text x="290.0" y="1034" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="700" fill="#147d79" text-anchor="middle">原始位置 128…255</text>
+<text x="290.0" y="1072" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="23" font-weight="400" fill="#172d43" text-anchor="middle">下一完整块，独立池化</text>
+<line x1="485" y1="1039" x2="535" y2="1039" stroke="#147d79" stroke-width="3"/>
+<polygon points="535,1039 524.1946347717678,1044.2195864093349 524.1946347717678,1033.7804135906651" fill="#147d79"/>
+<rect x="545" y="995" width="195" height="88" rx="8" fill="#E3F3EF" stroke="#dce3e9" stroke-width="2"/>
+<text x="642.5" y="1036" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="27" font-weight="700" fill="#147d79" text-anchor="middle">C1</text>
+<text x="642.5" y="1072" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="23" font-weight="400" fill="#172d43" text-anchor="middle">[512]</text>
+<text x="92" y="1159" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="24" font-weight="400" fill="#172d43" text-anchor="start">压缩后的各块全部供主注意力读取。</text>
+<text x="92" y="1202" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="24" font-weight="400" fill="#607285" text-anchor="start">未满 128 的尾部留在临时状态中；</text>
+<text x="92" y="1242" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="24" font-weight="400" fill="#607285" text-anchor="start">不会提前生成包含未来 token 的块。</text>
+<rect x="820" y="785" width="720" height="505" rx="10" fill="#FFFFFF" stroke="#dce3e9" stroke-width="2"/>
+<text x="845" y="835" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="30" font-weight="700" fill="#172d43" text-anchor="start">CSA 可见性：完整块才开放</text>
+<text x="854" y="876" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="22" font-weight="400" fill="#607285" text-anchor="start">query t</text>
+<text x="1130" y="879" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="400" fill="#147d79" text-anchor="middle">C0</text>
+<text x="1240" y="879" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="400" fill="#147d79" text-anchor="middle">C1</text>
+<text x="1350" y="879" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="400" fill="#147d79" text-anchor="middle">C2</text>
+<text x="900" y="920" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="22" font-weight="400" fill="#172d43" text-anchor="middle">0</text>
+<rect x="1085" y="899" width="90" height="24" rx="3" fill="#e8edf2" stroke="none" stroke-width="2"/>
+<rect x="1195" y="899" width="90" height="24" rx="3" fill="#e8edf2" stroke="none" stroke-width="2"/>
+<rect x="1305" y="899" width="90" height="24" rx="3" fill="#e8edf2" stroke="none" stroke-width="2"/>
+<text x="900" y="949" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="22" font-weight="400" fill="#172d43" text-anchor="middle">1</text>
+<rect x="1085" y="928" width="90" height="24" rx="3" fill="#e8edf2" stroke="none" stroke-width="2"/>
+<rect x="1195" y="928" width="90" height="24" rx="3" fill="#e8edf2" stroke="none" stroke-width="2"/>
+<rect x="1305" y="928" width="90" height="24" rx="3" fill="#e8edf2" stroke="none" stroke-width="2"/>
+<text x="900" y="978" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="22" font-weight="400" fill="#172d43" text-anchor="middle">2</text>
+<rect x="1085" y="957" width="90" height="24" rx="3" fill="#e8edf2" stroke="none" stroke-width="2"/>
+<rect x="1195" y="957" width="90" height="24" rx="3" fill="#e8edf2" stroke="none" stroke-width="2"/>
+<rect x="1305" y="957" width="90" height="24" rx="3" fill="#e8edf2" stroke="none" stroke-width="2"/>
+<text x="900" y="1007" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="22" font-weight="400" fill="#172d43" text-anchor="middle">3</text>
+<rect x="1085" y="986" width="90" height="24" rx="3" fill="#147d79" stroke="none" stroke-width="2"/>
+<rect x="1195" y="986" width="90" height="24" rx="3" fill="#e8edf2" stroke="none" stroke-width="2"/>
+<rect x="1305" y="986" width="90" height="24" rx="3" fill="#e8edf2" stroke="none" stroke-width="2"/>
+<text x="1420" y="1005" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="20" font-weight="400" fill="#147d79" text-anchor="start">满块</text>
+<text x="900" y="1036" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="22" font-weight="400" fill="#172d43" text-anchor="middle">4</text>
+<rect x="1085" y="1015" width="90" height="24" rx="3" fill="#147d79" stroke="none" stroke-width="2"/>
+<rect x="1195" y="1015" width="90" height="24" rx="3" fill="#e8edf2" stroke="none" stroke-width="2"/>
+<rect x="1305" y="1015" width="90" height="24" rx="3" fill="#e8edf2" stroke="none" stroke-width="2"/>
+<text x="900" y="1065" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="22" font-weight="400" fill="#172d43" text-anchor="middle">5</text>
+<rect x="1085" y="1044" width="90" height="24" rx="3" fill="#147d79" stroke="none" stroke-width="2"/>
+<rect x="1195" y="1044" width="90" height="24" rx="3" fill="#e8edf2" stroke="none" stroke-width="2"/>
+<rect x="1305" y="1044" width="90" height="24" rx="3" fill="#e8edf2" stroke="none" stroke-width="2"/>
+<text x="900" y="1094" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="22" font-weight="400" fill="#172d43" text-anchor="middle">6</text>
+<rect x="1085" y="1073" width="90" height="24" rx="3" fill="#147d79" stroke="none" stroke-width="2"/>
+<rect x="1195" y="1073" width="90" height="24" rx="3" fill="#e8edf2" stroke="none" stroke-width="2"/>
+<rect x="1305" y="1073" width="90" height="24" rx="3" fill="#e8edf2" stroke="none" stroke-width="2"/>
+<text x="900" y="1123" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="22" font-weight="400" fill="#172d43" text-anchor="middle">7</text>
+<rect x="1085" y="1102" width="90" height="24" rx="3" fill="#147d79" stroke="none" stroke-width="2"/>
+<rect x="1195" y="1102" width="90" height="24" rx="3" fill="#147d79" stroke="none" stroke-width="2"/>
+<rect x="1305" y="1102" width="90" height="24" rx="3" fill="#e8edf2" stroke="none" stroke-width="2"/>
+<text x="1420" y="1121" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="20" font-weight="400" fill="#147d79" text-anchor="start">满块</text>
+<text x="900" y="1152" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="22" font-weight="400" fill="#172d43" text-anchor="middle">8</text>
+<rect x="1085" y="1131" width="90" height="24" rx="3" fill="#147d79" stroke="none" stroke-width="2"/>
+<rect x="1195" y="1131" width="90" height="24" rx="3" fill="#147d79" stroke="none" stroke-width="2"/>
+<rect x="1305" y="1131" width="90" height="24" rx="3" fill="#e8edf2" stroke="none" stroke-width="2"/>
+<text x="850" y="1197" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#607285" text-anchor="start">青色：可读；灰色：未完成 / 未来</text>
+<text x="850" y="1238" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="24" font-weight="400" fill="#172d43" text-anchor="start">可见块数 = floor((t + 1) / 4)</text>
+<text x="850" y="1273" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="23" font-weight="400" fill="#607285" text-anchor="start">t=3 可读 C0；t=2 不可读。</text>
+<line x1="60" y1="1325" x2="1540" y2="1325" stroke="#dce3e9" stroke-width="2"/>
+<text x="60" y="1361" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#607285" text-anchor="start">依据：V4 报告 §2.3.1–2.3.2；固定 Pro Compressor L279–377、可见性索引 L269–276。</text>
+<text x="60" y="1396" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#607285" text-anchor="start">原创张量与掩码示意；门控权重未取自训练模型，token 按零起点编号。</text>
+</svg><figcaption><span class="fnum">图 5</span>CSA 的重叠压缩与 HCA 的非重叠压缩。上方格子表示参与池化的 token 位置，下方矩阵表示因果可见性，均不表示训练后模型的真实权重。CSA 每四个新 token 生成一条记录，但除首块外，每次可汇集前一块与当前块的八个时间槽。<span class="figure-hint">点按图解可放大查看</span></figcaption></figure>
+<p>CSA 的压缩率为 4，同时采用相邻块重叠。当前四个 token 与前四个 token 经过各自分支，组成八个候选槽，再进行逐通道加权。这样相邻压缩条目之间可以跨越分块边界交换局部信息。首块没有前一块，缺失位置的分数被置为负无穷，使其在 softmax 中权重为零。</p>
+<p>HCA 的压缩率为 128，不采用这套重叠安排。它把更长片段压进一条记录，存储更省，但细节竞争也更强。两个层型交替出现，意味着模型同时拥有较细的历史摘要和较粗的历史摘要，而非每层都强行使用同一压缩强度。</p>
+<h4>分块压缩怎样保持因果性？</h4>
+<p>预填充会同时处理很多 token，压缩器也能并行算出多个块。但“已经计算出一个压缩块”不代表序列中所有查询都能读取它。查询位置 t 只能看到已经完整结束的块。</p>
+<p>按代码的零起点位置编号，压缩率为 r 时，位置 t 可读取的压缩块数量为 ⌊(t+1)/r⌋。所以 r=4 时，t=2 还看不到第一块，t=3 刚好能看到含自身的第一块；它没有看到未来，因此仍满足因果性。</p>
+<p>这是一个容易被结构图画错的边界：不能让第一个 token 读取由前四个 token 聚合出的完整向量。训练时的大矩阵并行必须依靠可见性规则阻断这种信息泄漏。</p>
+<h4>代码里为什么有两种 softmax 维度？</h4>
+<p>预填充将序列整理成“批量、块、块内时间槽、通道”，所以用 <code>softmax(dim=2)</code>；逐 token 解码中的临时状态只有“批量、时间槽、通道”，所以用 <code>softmax(dim=1)</code>。轴编号不同，归一化的语义却相同。</p>
+<pre><code># 预填充：沿块内时间槽加权
+kv = (kv * score.softmax(dim=2)).sum(dim=2)
+# 解码：状态槽累计完整后，沿时间槽加权
+kv = (kv_state * score_state.softmax(dim=1)).sum(dim=1, keepdim=True)</code></pre>
+<p>解码还需要保存未完成块的临时值与分数。只有凑满新块，才追加一个长期压缩条目。即使总缓存规模下降，这些临时状态、块边界分支和混合精度处理也不会消失。</p>
+<p class="src">依据：<a href="https://huggingface.co/deepseek-ai/DeepSeek-V4-Pro/blob/b5968e9190ef611bbf34a7229255be88a0e937c1/inference/model.py#L279">Compressor</a>；<a href="https://huggingface.co/deepseek-ai/DeepSeek-V4-Pro/blob/b5968e9190ef611bbf34a7229255be88a0e937c1/inference/model.py#L269">压缩块可见性索引</a>；V4 报告 §2.3.1–2.3.2。</p>
+
+<h3 id="sparse">CSA 与 HCA：存储缩小之后，应该读哪些条目？</h3>
+<div class="tags">网络结构 · 稀疏选择与局部补偿</div>
+<p>压缩决定存储颗粒度，选择决定读取范围。CSA 同时使用二者：先按 4 压缩，再由索引器挑选少数条目。HCA 按 128 强压缩后直接读取所有已完成的压缩条目，不再运行同样的 Top-k 索引器。</p>
+<figure><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1430" width="1600" height="1430" role="img"><title>V4 的两种全局读取：CSA 筛选，HCA 全读</title><desc>主512维KV与独立128维索引键明确分开。每种层各自将全局记忆与128局部位置放进同一次softmax。</desc>
+<rect width="1600" height="1430" fill="#ffffff"/>
+<text x="60" y="77" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="39" font-weight="700" fill="#172d43" text-anchor="start">V4 的两种全局读取：CSA 筛选，HCA 全读</text>
+<text x="60" y="126" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="400" fill="#607285" text-anchor="start">这是两种不同层型；不是把 CSA 与 HCA 的输出在同一层相加。</text>
+<rect x="60" y="165" width="940" height="1130" rx="10" fill="#FFFFFF" stroke="#dce3e9" stroke-width="2"/>
+<rect x="1040" y="165" width="500" height="1130" rx="10" fill="#FFFFFF" stroke="#dce3e9" stroke-width="2"/>
+<text x="85" y="219" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="32" font-weight="700" fill="#245e94" text-anchor="start">CSA：先压缩，再选择</text>
+<text x="1065" y="218" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="31" font-weight="700" fill="#245e94" text-anchor="start">HCA：重压缩，全读</text>
+<rect x="90" y="255" width="880" height="80" rx="8" fill="#E7F0F8" stroke="#dce3e9" stroke-width="2"/>
+<text x="530.0" y="296" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="27" font-weight="700" fill="#245e94" text-anchor="middle">同一层的输入隐藏状态 x</text>
+<line x1="530" y1="335" x2="530" y2="360" stroke="#607285" stroke-width="3"/>
+<line x1="530" y1="360" x2="295" y2="360" stroke="#607285" stroke-width="3"/>
+<line x1="295" y1="360" x2="295" y2="390" stroke="#607285" stroke-width="3"/>
+<polygon points="295,390 289.78041359066526,379.1946347717679 300.21958640933474,379.1946347717679" fill="#607285"/>
+<line x1="530" y1="335" x2="530" y2="360" stroke="#607285" stroke-width="3"/>
+<line x1="530" y1="360" x2="765" y2="360" stroke="#607285" stroke-width="3"/>
+<line x1="765" y1="360" x2="765" y2="390" stroke="#607285" stroke-width="3"/>
+<polygon points="765,390 759.7804135906653,379.1946347717679 770.2195864093347,379.1946347717679" fill="#607285"/>
+<rect x="90" y="390" width="410" height="325" rx="8" fill="#E3F3EF" stroke="#dce3e9" stroke-width="2"/>
+<text x="295" y="437" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="29" font-weight="700" fill="#147d79" text-anchor="middle">主记忆路径</text>
+<text x="295" y="488" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="24" font-weight="400" fill="#172d43" text-anchor="middle">独立压缩器 · ratio 4</text>
+<line x1="295" y1="510" x2="295" y2="548" stroke="#147d79" stroke-width="3"/>
+<polygon points="295,548 289.78041359066526,537.1946347717678 300.21958640933474,537.1946347717678" fill="#147d79"/>
+<text x="295" y="587" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="27" font-weight="700" fill="#147d79" text-anchor="middle">主 KV：每条 512 维</text>
+<text x="295" y="633" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="400" fill="#172d43" text-anchor="middle">[B, floor(T/4), 512]</text>
+<text x="295" y="688" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="23" font-weight="400" fill="#607285" text-anchor="middle">同一向量用作 K 和 V</text>
+<rect x="560" y="390" width="410" height="325" rx="8" fill="#E7F0F8" stroke="#dce3e9" stroke-width="2"/>
+<text x="765" y="437" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="29" font-weight="700" fill="#245e94" text-anchor="middle">独立索引路径</text>
+<text x="765" y="484" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="24" font-weight="400" fill="#172d43" text-anchor="middle">自己的压缩器 · ratio 4</text>
+<text x="765" y="531" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="26" font-weight="700" fill="#245e94" text-anchor="middle">索引 K：每条 128 维</text>
+<text x="765" y="572" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="24" font-weight="400" fill="#172d43" text-anchor="middle">[B, floor(T/4), 128]</text>
+<line x1="590" y1="595" x2="940" y2="595" stroke="#dce3e9" stroke-width="2"/>
+<text x="765" y="637" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="22" font-weight="400" fill="#172d43" text-anchor="middle">共享低秩 qr → 独立查询投影</text>
+<text x="765" y="678" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="24" font-weight="400" fill="#245e94" text-anchor="middle">索引 Q：64 头 × 128 维</text>
+<line x1="765" y1="715" x2="765" y2="745" stroke="#245e94" stroke-width="3"/>
+<polygon points="765,745 759.7804135906653,734.1946347717678 770.2195864093347,734.1946347717678" fill="#245e94"/>
+<rect x="560" y="745" width="410" height="110" rx="8" fill="#E7F0F8" stroke="#dce3e9" stroke-width="2"/>
+<text x="765.0" y="782" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="23" font-weight="700" fill="#245e94" text-anchor="middle">点积 → ReLU → 头加权求和</text>
+<text x="765.0" y="822" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="23" font-weight="400" fill="#172d43" text-anchor="middle">扫描所有已完成索引条目</text>
+<text x="765" y="845" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="23" font-weight="400" fill="#172d43" text-anchor="middle">再按位置取 Top-k</text>
+<line x1="295" y1="715" x2="295" y2="885" stroke="#147d79" stroke-width="3"/>
+<polygon points="295,885 289.78041359066526,874.1946347717678 300.21958640933474,874.1946347717678" fill="#147d79"/>
+<line x1="765" y1="855" x2="765" y2="870" stroke="#245e94" stroke-width="3"/>
+<line x1="765" y1="870" x2="990" y2="870" stroke="#245e94" stroke-width="3"/>
+<line x1="990" y1="870" x2="990" y2="930" stroke="#245e94" stroke-width="3"/>
+<line x1="990" y1="930" x2="510" y2="930" stroke="#245e94" stroke-width="3"/>
+<polygon points="510,930 520.8053652282322,924.7804135906653 520.8053652282322,935.2195864093347" fill="#245e94"/>
+<text x="555" y="903" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#245e94" text-anchor="start">只传选中位置，不传最终权重</text>
+<rect x="90" y="885" width="420" height="100" rx="8" fill="#E3F3EF" stroke="#dce3e9" stroke-width="2"/>
+<text x="300.0" y="924" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="700" fill="#147d79" text-anchor="middle">读取被选中的主 KV</text>
+<text x="300.0" y="962" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="23" font-weight="400" fill="#172d43" text-anchor="middle">Pro ≤ 1,024；Flash ≤ 512 条</text>
+<rect x="1070" y="255" width="440" height="80" rx="8" fill="#E7F0F8" stroke="#dce3e9" stroke-width="2"/>
+<text x="1290.0" y="296" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="27" font-weight="700" fill="#245e94" text-anchor="middle">输入隐藏状态 x</text>
+<line x1="1290" y1="335" x2="1290" y2="390" stroke="#607285" stroke-width="3"/>
+<polygon points="1290,390 1284.7804135906651,379.1946347717679 1295.2195864093349,379.1946347717679" fill="#607285"/>
+<rect x="1070" y="390" width="440" height="110" rx="8" fill="#E3F3EF" stroke="#dce3e9" stroke-width="2"/>
+<text x="1290.0" y="429" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="700" fill="#147d79" text-anchor="middle">独立压缩器 · ratio 128</text>
+<text x="1290.0" y="467" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="23" font-weight="400" fill="#172d43" text-anchor="middle">不重叠；每条 512 维</text>
+<line x1="1290" y1="500" x2="1290" y2="550" stroke="#147d79" stroke-width="3"/>
+<polygon points="1290,550 1284.7804135906651,539.1946347717678 1295.2195864093349,539.1946347717678" fill="#147d79"/>
+<rect x="1070" y="550" width="440" height="110" rx="8" fill="#E3F3EF" stroke="#dce3e9" stroke-width="2"/>
+<text x="1290.0" y="591" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="27" font-weight="700" fill="#147d79" text-anchor="middle">主 KV</text>
+<text x="1290.0" y="627" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="23" font-weight="400" fill="#172d43" text-anchor="middle">[B, floor(T/128), 512]</text>
+<line x1="1290" y1="660" x2="1290" y2="730" stroke="#147d79" stroke-width="3"/>
+<polygon points="1290,730 1284.7804135906651,719.1946347717678 1295.2195864093349,719.1946347717678" fill="#147d79"/>
+<rect x="1070" y="730" width="440" height="105" rx="8" fill="#E3F3EF" stroke="#dce3e9" stroke-width="2"/>
+<text x="1290.0" y="769" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="700" fill="#147d79" text-anchor="middle">读取所有已完成压缩块</text>
+<text x="1290.0" y="807" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="23" font-weight="400" fill="#172d43" text-anchor="middle">无索引器，无 Top-k 筛选</text>
+<text x="1290" y="910" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="400" fill="#172d43" text-anchor="middle">T = 1,048,576 时</text>
+<text x="1290" y="953" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="400" fill="#147d79" text-anchor="middle">共 8,192 条全局记忆</text>
+<rect x="560" y="995" width="410" height="90" rx="8" fill="#E3F3EF" stroke="#dce3e9" stroke-width="2"/>
+<text x="765.0" y="1034" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="700" fill="#147d79" text-anchor="middle">局部窗口原始 KV</text>
+<text x="765.0" y="1072" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="23" font-weight="400" fill="#172d43" text-anchor="middle">最近 ≤ 128 个位置</text>
+<line x1="295" y1="985" x2="295" y2="1100" stroke="#147d79" stroke-width="3"/>
+<line x1="295" y1="1100" x2="530" y2="1100" stroke="#147d79" stroke-width="3"/>
+<line x1="530" y1="1100" x2="530" y2="1130" stroke="#147d79" stroke-width="3"/>
+<polygon points="530,1130 524.7804135906653,1119.1946347717678 535.2195864093347,1119.1946347717678" fill="#147d79"/>
+<line x1="765" y1="1085" x2="765" y2="1100" stroke="#147d79" stroke-width="3"/>
+<line x1="765" y1="1100" x2="530" y2="1100" stroke="#147d79" stroke-width="3"/>
+<line x1="530" y1="1100" x2="530" y2="1130" stroke="#147d79" stroke-width="3"/>
+<polygon points="530,1130 524.7804135906653,1119.1946347717678 535.2195864093347,1119.1946347717678" fill="#147d79"/>
+<rect x="90" y="1130" width="880" height="125" rx="8" fill="#E7F0F8" stroke="#dce3e9" stroke-width="2"/>
+<text x="530.0" y="1172" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="28" font-weight="700" fill="#245e94" text-anchor="middle">主注意力：同一次 softmax + sink</text>
+<text x="530.0" y="1207" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="23" font-weight="400" fill="#172d43" text-anchor="middle">主 Q 每头 512 维；重新计算主注意力权重</text>
+<text x="530" y="1235" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="23" font-weight="400" fill="#172d43" text-anchor="middle">局部窗口 + 选中的压缩条目 → 每头输出 512 维</text>
+<rect x="1070" y="995" width="440" height="90" rx="8" fill="#E3F3EF" stroke="#dce3e9" stroke-width="2"/>
+<text x="1290.0" y="1034" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="700" fill="#147d79" text-anchor="middle">局部窗口原始 KV</text>
+<text x="1290.0" y="1072" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="23" font-weight="400" fill="#172d43" text-anchor="middle">最近 ≤ 128 个位置</text>
+<line x1="1510" y1="785" x2="1525" y2="785" stroke="#147d79" stroke-width="3"/>
+<line x1="1525" y1="785" x2="1525" y2="1100" stroke="#147d79" stroke-width="3"/>
+<line x1="1525" y1="1100" x2="1290" y2="1100" stroke="#147d79" stroke-width="3"/>
+<line x1="1290" y1="1100" x2="1290" y2="1130" stroke="#147d79" stroke-width="3"/>
+<polygon points="1290,1130 1284.7804135906651,1119.1946347717678 1295.2195864093349,1119.1946347717678" fill="#147d79"/>
+<line x1="1290" y1="1085" x2="1290" y2="1130" stroke="#147d79" stroke-width="3"/>
+<polygon points="1290,1130 1284.7804135906651,1119.1946347717678 1295.2195864093349,1119.1946347717678" fill="#147d79"/>
+<rect x="1070" y="1130" width="440" height="125" rx="8" fill="#E7F0F8" stroke="#dce3e9" stroke-width="2"/>
+<text x="1290.0" y="1170" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="26" font-weight="700" fill="#245e94" text-anchor="middle">同一次 softmax + sink</text>
+<text x="1290.0" y="1207" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="23" font-weight="400" fill="#172d43" text-anchor="middle">全部压缩条目 + 局部窗口</text>
+<text x="1290" y="1234" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="22" font-weight="400" fill="#172d43" text-anchor="middle">主 Q / 输出每头 512 维</text>
+<text x="60" y="1349" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="400" fill="#172d43" text-anchor="start">Top-k 减少本步读取，不会删除其他历史条目；不同未来查询可以选择不同位置。</text>
+<line x1="60" y1="1370" x2="1540" y2="1370" stroke="#dce3e9" stroke-width="2"/>
+<text x="60" y="1406" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#607285" text-anchor="start">依据：V4 报告 §2.3；固定 Pro Indexer L380–433、Attention L508–533。原创结构示意。</text>
+</svg><figcaption><span class="fnum">图 6</span>两种长历史路径都与局部窗口汇合。CSA 的索引器扫描压缩索引键，昂贵的主注意力只读选中位置；HCA 没有该筛选步骤，但候选总数已经被更强地压缩。<span class="figure-hint">点按图解可放大查看</span></figcaption></figure>
+<p>CSA 的索引器有自己的一套较小表示：64 个 128 维查询头，以及每个压缩块一个 128 维索引键。索引键也通过独立压缩器生成，不能把它与主注意力的 512 维 KV 看成同一个数组。</p>
+<p>记索引查询为 <em>q</em><sup>I</sup><sub>t,h</sub>∈ℝ<sup>128</sup>、索引键为 <em>k</em><sup>I</sup><sub>j</sub>∈ℝ<sup>128</sup>，上标 I 用来区别主注意力。ReLU 将负数截为零，TopK 返回分数最高的最多 K 个有效位置。省略精度与缩放细节后，索引评分具有如下形状：</p>
+<div class="eq">I<sub>t,j</sub> = Σ<sub>h=1</sub><sup>64</sup> w<sub>t,h</sub> · ReLU((q<sup>I</sup><sub>t,h</sub>)<sup>T</sup>k<sup>I</sup><sub>j</sub>)<br>J<sup>global</sup><sub>t</sub> = TopK<sub>j</sub>(I<sub>t,j</sub>)</div>
+<p><em>w</em><sub>t,h</sub> 是当前 token 产生的头权重；代码没有把这组权重做 softmax，也不保证它们非负，因此不能将它们理解为 64 个概率。所有索引头的贡献合成为一个位置分数，然后选出一份位置集合供主注意力头共同读取。这里没有先算主注意力完整的昂贵 softmax 再删除小权重；索引器承担的是低成本候选筛选。主注意力仍会使用自己的 512 维查询重新计算被选条目的最终权重。</p>
+<p>Pro 最多选择 1,024 个压缩条目，Flash 最多选择 512 个。两者还读取最近 128 个原始位置，补偿压缩可能丢失的局部细节。局部条目与压缩条目进入同一次主注意力归一化；不能画成两个各自 softmax 的结果简单相加。</p>
+<p>索引器本身仍然扫描全部已完成压缩块。因此，CSA 把<strong>主要注意力的候选数</strong>限制住了，却没有让整层的全部计算对上下文长度保持常数。Top-k、索引打分和存储访问仍然需要计入成本。</p>
+<div class="widget" id="cache-explorer">
+<h4>交互图 · 历史越长，什么在增长？</h4>
+<div class="controls"><label>上下文 <select id="cache-length"><option value="4096">4,096 token</option><option value="65536">65,536 token</option><option value="1048576" selected>1,048,576 token</option></select></label><button id="cache-csa" aria-pressed="true">V4-Pro · CSA</button><button id="cache-hca" aria-pressed="false">V4-Pro · HCA</button></div>
+<svg viewBox="0 0 920 380" role="img" aria-label="比较V4单层压缩缓存存储条目、索引扫描与主注意力读取量"><defs><marker id="cache-arrow" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6" fill="none" stroke="#526b7f"/></marker></defs>
+<text x="24" y="35" font-size="18" fill="#172d43">一层主注意力 · 512 维共享 K=V</text><text x="24" y="72" font-size="15" fill="#607285" id="cache-assumption"></text>
+<rect x="24" y="105" width="250" height="112" rx="5" fill="#e6f2ef"/><text x="42" y="134" font-size="15" fill="#147d79">长期保存的压缩条目</text><text x="42" y="174" font-size="29" fill="#172d43" id="cache-stored"></text><text x="42" y="201" font-size="14" fill="#607285" id="cache-bytes"></text>
+<path d="M280,160 H327" fill="none" stroke="#526b7f" stroke-width="2" marker-end="url(#cache-arrow)"/>
+<rect x="339" y="105" width="240" height="112" rx="5" fill="#f1f4f7"/><text x="357" y="134" font-size="15" fill="#245e94" id="cache-index-title"></text><text x="357" y="174" font-size="28" fill="#172d43" id="cache-index"></text><text x="357" y="201" font-size="14" fill="#607285" id="cache-index-note"></text>
+<path d="M587,160 H631" fill="none" stroke="#526b7f" stroke-width="2" marker-end="url(#cache-arrow)"/>
+<rect x="644" y="105" width="250" height="112" rx="5" fill="#e8eff7"/><text x="662" y="134" font-size="15" fill="#245e94">主注意力读取条目上界</text><text x="662" y="174" font-size="28" fill="#172d43" id="cache-read"></text><text x="662" y="201" font-size="14" fill="#607285">包含最多 128 个局部位置</text>
+<text x="24" y="260" font-size="15" fill="#607285">压缩缓存容量 · 以 1M 上下文 CSA 为固定标尺</text><rect x="24" y="277" width="870" height="24" fill="#edf1f4"/><rect id="cache-bar" x="24" y="277" height="24" fill="#147d79" style="transition:width .35s"/><text x="24" y="340" font-size="15" fill="#172d43" id="cache-takeaway"></text>
+</svg><p class="readout">计算推导，不是硬件实测。统一假设主 KV 为 BF16；K=V 只计一份。容量只包含压缩主 KV，不含窗口、索引、缩放因子、分配碎片及其他层。读取量不计 attention sink。</p>
+</div>
+<script>(()=>{const root=document.getElementById('cache-explorer');let mode='csa';const el=id=>root.querySelector('#cache-'+id);const fmt=n=>n.toLocaleString('en-US');function draw(){const n=+el('length').value,ratio=mode==='csa'?4:128,stored=Math.floor(n/ratio),selected=mode==='csa'?Math.min(1024,stored):stored;el('csa').setAttribute('aria-pressed',String(mode==='csa'));el('hca').setAttribute('aria-pressed',String(mode==='hca'));el('assumption').textContent='N = '+fmt(n)+'；压缩率 '+ratio+'；局部窗口 128；批量 B=1';el('stored').textContent=fmt(stored)+' 条';el('bytes').textContent=(stored*512*2/1048576).toLocaleString('en-US',{maximumFractionDigits:2})+' MiB · BF16 账本';el('index-title').textContent=mode==='csa'?'轻量索引器扫描':'无 Top-k 索引器';el('index').textContent=mode==='csa'?fmt(stored)+' 条':'直接读取';el('index-note').textContent=mode==='csa'?'扫描范围仍随 N 增长':'对全部压缩条目做注意力';el('read').textContent=fmt(selected+Math.min(n,128))+' 条';el('bar').setAttribute('width',String(Math.max(1,870*stored/262144)));el('takeaway').textContent=mode==='csa'?'存储与索引扫描继续增长；主注意力选中的压缩条目封顶于 1,024。':'压缩更强；主注意力读取全部压缩条目，因此读取量仍随 N 增长。'}el('length').addEventListener('change',draw);for(const m of ['csa','hca'])el(m).addEventListener('click',()=>{mode=m;draw()});draw()})();</script>
+
+<p>令 <em>N</em> 为截至当前已处理的总 token 数，区别于一次前向调用的输入长度 S。在 N=1,048,576 时，CSA 存储 262,144 个压缩条目，但 Pro 主注意力每步最多读取其中 1,024 个，再加局部 128 个位置。HCA 仅存储 8,192 个压缩条目，但每步读取全部这些条目。一个方案压缩较轻、读取更稀疏；另一个压缩更重、对压缩历史读取更完整。这才是二者互补的具体含义。</p>
+<p class="src">依据：<a href="https://huggingface.co/deepseek-ai/DeepSeek-V4-Pro/blob/b5968e9190ef611bbf34a7229255be88a0e937c1/inference/model.py#L380">Indexer</a> 与 <a href="https://huggingface.co/deepseek-ai/DeepSeek-V4-Pro/blob/b5968e9190ef611bbf34a7229255be88a0e937c1/inference/model.py#L508">局部／压缩索引合并</a>。交互图中的容量均为指定精度下的计算推导，不是论文性能结果。</p>
+
+<h3 id="mhc">mHC：四条残差流怎样交换信息，而不是把注意力计算四遍？</h3>
+<div class="tags">网络结构 · 跨层信息传递</div>
+<p>普通残差连接的形式是 x′=x+F(x)，其中 F 表示带归一化的注意力或前馈子层。它提供直接的信息通路，但所有层都围绕一条隐藏流工作。Hyper-Connections 扩展为多条残差流，并学习它们如何混合；随之出现的问题是，混合矩阵在深层反复相乘，可能放大数值和梯度。</p>
+<p>mHC，即 Manifold-Constrained Hyper-Connections，对残差混合施加约束。对单个 token，把四条流写为矩阵 H∈ℝ<sup>4×d</sup>，一个子层可写成：</p>
+<div class="eq">u = aH ∈ ℝ<sup>d</sup><br>H′ = BH + p · F(u)<br><small>a: 1×4 的输入混合权重；p: 4×1 的写回权重；B: 4×4 的残差混合矩阵。</small></div>
+<figure><svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1450" viewBox="0 0 1600 1450" role="img"><title>mHC：四条残差流怎样包住一个子层</title><desc></desc>
+<rect width="1600" height="1450" fill="#FFFFFF"/>
+<text x="60" y="52" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="20" font-weight="400" fill="#607285" text-anchor="start">机制图 / SHARED MECHANISM</text>
+<text x="60" y="112" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="40" font-weight="700" fill="#172D43" text-anchor="start">mHC：扩展残差通路，不把子层宽度扩大四倍</text>
+<text x="60" y="153" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="23" font-weight="400" fill="#607285" text-anchor="start">每个 token 保留 4 条宽度 D 的残差流；Attention 或 MoE 本体仍接收 [B,S,D]。</text>
+<line x1="60" y1="182" x2="1540" y2="182" stroke="#C7D3DE" stroke-width="2"/>
+<text x="60" y="251" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="28" font-weight="700" fill="#74609A" text-anchor="start">输入 H</text>
+<text x="60" y="287" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="23" font-weight="400" fill="#607285" text-anchor="start">[B,S,4,D]</text>
+<rect x="45" y="305" width="240" height="240" rx="7" fill="none" stroke="#C7D3DE" stroke-width="2"/>
+<rect x="60" y="320" width="210" height="42" rx="7" fill="#F0ECF6" stroke="none" stroke-width="2"/>
+<text x="165" y="345" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="20" font-weight="400" fill="#74609A" text-anchor="middle">流 1  [B,S,D]</text>
+<rect x="60" y="376" width="210" height="42" rx="7" fill="#F0ECF6" stroke="none" stroke-width="2"/>
+<text x="165" y="401" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="20" font-weight="400" fill="#74609A" text-anchor="middle">流 2  [B,S,D]</text>
+<rect x="60" y="432" width="210" height="42" rx="7" fill="#F0ECF6" stroke="none" stroke-width="2"/>
+<text x="165" y="457" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="20" font-weight="400" fill="#74609A" text-anchor="middle">流 3  [B,S,D]</text>
+<rect x="60" y="488" width="210" height="42" rx="7" fill="#F0ECF6" stroke="none" stroke-width="2"/>
+<text x="165" y="513" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="20" font-weight="400" fill="#74609A" text-anchor="middle">流 4  [B,S,D]</text>
+<rect x="410" y="365" width="290" height="116" rx="7" fill="#F0ECF6" stroke="none" stroke-width="2"/>
+<text x="555.0" y="402" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="700" fill="#74609A" text-anchor="middle">Hpre：4 → 1</text>
+<text x="555.0" y="466" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#607285" text-anchor="middle">[1,4] · [4,D]</text>
+<rect x="835" y="365" width="310" height="116" rx="7" fill="#EAF2F8" stroke="none" stroke-width="2"/>
+<text x="990.0" y="402" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="700" fill="#245E94" text-anchor="middle">F：Attention 或 MoE</text>
+<text x="990.0" y="466" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#607285" text-anchor="middle">输入 / 输出 [B,S,D]</text>
+<rect x="1270" y="365" width="270" height="116" rx="7" fill="#F0ECF6" stroke="none" stroke-width="2"/>
+<text x="1405.0" y="402" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="700" fill="#74609A" text-anchor="middle">Hpost：1 → 4</text>
+<text x="1405.0" y="466" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#607285" text-anchor="middle">[4,1] · [1,D]</text>
+<line x1="270" y1="341" x2="340" y2="341" stroke="#74609A" stroke-width="2"/>
+<line x1="340" y1="341" x2="340" y2="423" stroke="#74609A" stroke-width="2"/>
+<line x1="340" y1="423" x2="410" y2="423" stroke="#74609A" stroke-width="2"/>
+<polygon points="410,423 399.1946347717679,428.21958640933474 399.1946347717679,417.78041359066526" fill="#74609A"/>
+<line x1="270" y1="397" x2="340" y2="397" stroke="#74609A" stroke-width="2"/>
+<line x1="340" y1="397" x2="340" y2="423" stroke="#74609A" stroke-width="2"/>
+<line x1="340" y1="423" x2="410" y2="423" stroke="#74609A" stroke-width="2"/>
+<polygon points="410,423 399.1946347717679,428.21958640933474 399.1946347717679,417.78041359066526" fill="#74609A"/>
+<line x1="270" y1="453" x2="340" y2="453" stroke="#74609A" stroke-width="2"/>
+<line x1="340" y1="453" x2="340" y2="423" stroke="#74609A" stroke-width="2"/>
+<line x1="340" y1="423" x2="410" y2="423" stroke="#74609A" stroke-width="2"/>
+<polygon points="410,423 399.1946347717679,428.21958640933474 399.1946347717679,417.78041359066526" fill="#74609A"/>
+<line x1="270" y1="509" x2="340" y2="509" stroke="#74609A" stroke-width="2"/>
+<line x1="340" y1="509" x2="340" y2="423" stroke="#74609A" stroke-width="2"/>
+<line x1="340" y1="423" x2="410" y2="423" stroke="#74609A" stroke-width="2"/>
+<polygon points="410,423 399.1946347717679,428.21958640933474 399.1946347717679,417.78041359066526" fill="#74609A"/>
+<line x1="700" y1="423" x2="835" y2="423" stroke="#245E94" stroke-width="3"/>
+<polygon points="835,423 824.1946347717678,428.21958640933474 824.1946347717678,417.78041359066526" fill="#245E94"/>
+<line x1="1145" y1="423" x2="1270" y2="423" stroke="#245E94" stroke-width="3"/>
+<polygon points="1270,423 1259.1946347717678,428.21958640933474 1259.1946347717678,417.78041359066526" fill="#245E94"/>
+<text x="746" y="399" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="22" font-weight="400" fill="#245E94" text-anchor="middle">[B,S,D]</text>
+<text x="1205" y="399" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="22" font-weight="400" fill="#245E94" text-anchor="middle">[B,S,D]</text>
+<rect x="410" y="685" width="465" height="116" rx="7" fill="#F0ECF6" stroke="none" stroke-width="2"/>
+<text x="642.5" y="722" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="700" fill="#74609A" text-anchor="middle">Hres：4 路残差之间混合</text>
+<text x="642.5" y="786" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#607285" text-anchor="middle">[4,4] · [4,D] → [4,D]</text>
+<line x1="165" y1="545" x2="165" y2="743" stroke="#74609A" stroke-width="3"/>
+<line x1="165" y1="743" x2="410" y2="743" stroke="#74609A" stroke-width="3"/>
+<polygon points="410,743 399.1946347717679,748.2195864093347 399.1946347717679,737.7804135906653" fill="#74609A"/>
+<rect x="1270" y="685" width="270" height="116" rx="7" fill="#F0ECF6" stroke="none" stroke-width="2"/>
+<text x="1405.0" y="722" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="700" fill="#74609A" text-anchor="middle">逐元素相加</text>
+<text x="1405.0" y="786" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#607285" text-anchor="middle">[B,S,4,D]</text>
+<line x1="875" y1="743" x2="1270" y2="743" stroke="#74609A" stroke-width="3"/>
+<polygon points="1270,743 1259.1946347717678,748.2195864093347 1259.1946347717678,737.7804135906653" fill="#74609A"/>
+<line x1="1405" y1="481" x2="1405" y2="685" stroke="#74609A" stroke-width="3"/>
+<polygon points="1405,685 1399.7804135906651,674.1946347717678 1410.2195864093349,674.1946347717678" fill="#74609A"/>
+<text x="1122" y="723" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="23" font-weight="400" fill="#74609A" text-anchor="middle">残差分支</text>
+<text x="1430" y="593" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="23" font-weight="400" fill="#74609A" text-anchor="start">子层写回</text>
+<rect x="410" y="995" width="730" height="115" rx="7" fill="#FBF0E5" stroke="none" stroke-width="2"/>
+<text x="775.0" y="1032" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="700" fill="#B96C29" text-anchor="middle">从 H 动态生成映射参数，再施加约束</text>
+<text x="775.0" y="1095" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#607285" text-anchor="middle">Flatten → RMSNorm → 线性投影 + 静态偏置</text>
+<line x1="165" y1="743" x2="165" y2="1052" stroke="#74609A" stroke-width="3"/>
+<line x1="165" y1="1052" x2="410" y2="1052" stroke="#74609A" stroke-width="3"/>
+<polygon points="410,1052 399.1946347717679,1057.2195864093349 399.1946347717679,1046.7804135906651" fill="#74609A"/>
+<line x1="505" y1="995" x2="505" y2="895" stroke="#B96C29" stroke-width="3" stroke-dasharray="9 7"/>
+<line x1="505" y1="895" x2="355" y2="895" stroke="#B96C29" stroke-width="3" stroke-dasharray="9 7"/>
+<line x1="355" y1="895" x2="355" y2="290" stroke="#B96C29" stroke-width="3" stroke-dasharray="9 7"/>
+<line x1="355" y1="290" x2="555" y2="290" stroke="#B96C29" stroke-width="3" stroke-dasharray="9 7"/>
+<line x1="555" y1="290" x2="555" y2="365" stroke="#B96C29" stroke-width="3" stroke-dasharray="9 7"/>
+<polygon points="555,365 549.7804135906653,354.1946347717679 560.2195864093347,354.1946347717679" fill="#B96C29"/>
+<line x1="775" y1="995" x2="775" y2="801" stroke="#B96C29" stroke-width="3" stroke-dasharray="9 7"/>
+<polygon points="775,801 780.2195864093347,811.8053652282322 769.7804135906653,811.8053652282322" fill="#B96C29"/>
+<line x1="1140" y1="1052" x2="1570" y2="1052" stroke="#B96C29" stroke-width="3" stroke-dasharray="9 7"/>
+<line x1="1570" y1="1052" x2="1570" y2="290" stroke="#B96C29" stroke-width="3" stroke-dasharray="9 7"/>
+<line x1="1570" y1="290" x2="1405" y2="290" stroke="#B96C29" stroke-width="3" stroke-dasharray="9 7"/>
+<line x1="1405" y1="290" x2="1405" y2="365" stroke="#B96C29" stroke-width="3" stroke-dasharray="9 7"/>
+<polygon points="1405,365 1399.7804135906651,354.1946347717679 1410.2195864093349,354.1946347717679" fill="#B96C29"/>
+<text x="60" y="1192" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="30" font-weight="700" fill="#172D43" text-anchor="start">Hout = Hres · H + Hpost · F(Hpre · H)</text>
+<text x="60" y="1245" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="24" font-weight="400" fill="#172D43" text-anchor="start">Hpre = sigmoid(·)；Hpost = 2 sigmoid(·)；Hres 经 Sinkhorn 得到近似双随机矩阵。</text>
+<text x="60" y="1289" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="23" font-weight="400" fill="#607285" text-anchor="start">双随机约束只作用于 Hres：元素非负，行和与列和约为 1；并非要求 Hres 恒等于单位矩阵。</text>
+<line x1="60" y1="1348" x2="1540" y2="1348" stroke="#C7D3DE" stroke-width="2"/>
+<text x="60" y="1382" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="20" font-weight="400" fill="#607285" text-anchor="start">实线：激活数据；橙色虚线：动态映射控制。图中 Hpost 用列向量 [4,1]，与原 mHC 行向量记法互为转置。</text>
+<text x="60" y="1415" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="18" font-weight="400" fill="#607285" text-anchor="start">依据 mHC（arXiv:2512.24880）§4 与 DeepSeek-V4 报告 §2.2（公式 1–8）重绘；V4 为 4 路。</text>
+</svg><figcaption><span class="fnum">图 7</span>mHC 的三条关系。实线表示数据流，虚线表示根据输入产生混合参数。只有残差混合矩阵受到近似双随机约束；不能把输入混合与写回权重也说成同一种矩阵。<span class="figure-hint">点按图解可放大查看</span></figcaption></figure>
+<p>B 经过 Sinkhorn 交替行列归一化，近似成为非负、行和与列和均为 1 的双随机矩阵。其残差混合更接近受控的信息重分配，避免任意线性映射反复堆叠。实际配置使用 20 次迭代并加入数值稳定项，因此“近似”二字有意义；此外，F 分支仍会注入新信息，不能据此宣称整层恒定保范数。</p>
+<p>这三组系数并非只由固定参数决定。每个 token 的四流状态先展平为 4d 维，经过归一化和一个小投影，产生 24 个控制量：4 个输入混合、4 个写回以及 16 个残差混合量。实际内核对输入混合使用 sigmoid，对写回使用 2×sigmoid，只有残差矩阵使用 Sinkhorn。因此，a 和 p 的元素之和并不要求等于 1。按本文的矩阵左乘记法，B 对应代码 <code>comb</code> 的转置；这是存储下标方向差异，不是另一种混合机制。</p>
+<p>注意力本体只接收 u，而不是分别处理四条完整输入。MoE 子层同样只计算一次再写回。增加的成本主要来自残差激活存储、混合参数生成和归一化，而不是把整层所有矩阵乘法简单乘四。</p>
+<p>源码中 <code>hc_pre()</code> 返回混合后的输入以及写回参数，随后执行 <code>attn_norm → attn</code>，再由 <code>hc_post()</code> 合并输出与原残差。MoE 分支重复这套外壳，但使用另一组混合参数。它的位置在子层外围，不能与 MoE 的专家选择混为一谈。</p>
+<p class="src">依据：<a href="https://arxiv.org/abs/2512.24880">mHC 原始论文</a>；<a href="https://huggingface.co/deepseek-ai/DeepSeek-V4-Pro/blob/b5968e9190ef611bbf34a7229255be88a0e937c1/inference/model.py#L647">Block、hc_pre、hc_post</a>；<a href="https://huggingface.co/deepseek-ai/DeepSeek-V4-Pro/blob/b5968e9190ef611bbf34a7229255be88a0e937c1/inference/kernel.py#L372">sigmoid 与 Sinkhorn 的实际内核</a>。本节 a/B/p 与不同论文版本中的记号不同，但形状与作用明确对应。</p>
+
+<h3 id="moe">MoE：前三层按 token 查路由，后续层根据表示选专家</h3>
+<div class="tags">网络结构 · 路由优化与分布式执行</div>
+<p>注意力更新 token 与历史之间的关系，MoE 随后对当前表示进行条件非线性变换。V4 的每层都包含 MoE：Pro 有 384 个路由专家，Flash 有 256 个；每个 token 经过 6 个选中专家和 1 个共享专家。</p>
+<p>早期三个层使用哈希路由，根据输入 token ID 得到专家选择；后续层才根据隐藏表示进行学习式路由。参考实现通过 <code>tid2eid[input_ids]</code> 查询一个固定的“词表编号 → 六个专家编号”映射，而非在前向传播时重新运行哈希函数。相同 token 在同一层选择相同专家集合，但混合权重仍由当前隐藏状态的亲和分数计算，因而可以随上下文变化。这并不意味着前三层不训练：专家内部矩阵仍然学习，固定的是“选谁”的映射。哈希路径也不等于“随机丢 token”。</p>
+<figure><svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1260" viewBox="0 0 1600 1260" role="img"><title>MoE：路由和专家计算是两条不同的路径</title><desc></desc>
+<rect width="1600" height="1260" fill="#FFFFFF"/>
+<text x="60" y="52" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="20" font-weight="400" fill="#607285" text-anchor="start">机制图 / SHARED MECHANISM</text>
+<text x="60" y="112" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="40" font-weight="700" fill="#172D43" text-anchor="start">MoE：路由做选择，专家做变换</text>
+<text x="60" y="153" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="23" font-weight="400" fill="#607285" text-anchor="start">以 4 个路由专家、Top-2 和 1 个共享专家为示意；不代表本文任一完整模型的专家配置。</text>
+<line x1="60" y1="182" x2="1540" y2="182" stroke="#C7D3DE" stroke-width="2"/>
+<rect x="65" y="557" width="255" height="105" rx="7" fill="#EAF2F8" stroke="none" stroke-width="2"/>
+<text x="192.5" y="594" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="700" fill="#245E94" text-anchor="middle">输入 token 表示</text>
+<text x="192.5" y="647" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#607285" text-anchor="middle">x: [D]</text>
+<rect x="420" y="235" width="300" height="100" rx="7" fill="#FBF0E5" stroke="none" stroke-width="2"/>
+<text x="570.0" y="272" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="700" fill="#B96C29" text-anchor="middle">路由评分</text>
+<text x="570.0" y="320" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#607285" text-anchor="middle">s: [4]</text>
+<rect x="420" y="382" width="300" height="100" rx="7" fill="#FBF0E5" stroke="none" stroke-width="2"/>
+<text x="570.0" y="419" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="700" fill="#B96C29" text-anchor="middle">Top-2 选择</text>
+<text x="570.0" y="467" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#607285" text-anchor="middle">index = {1, 3}</text>
+<rect x="420" y="557" width="300" height="105" rx="7" fill="#FBF0E5" stroke="none" stroke-width="2"/>
+<text x="570.0" y="594" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="700" fill="#B96C29" text-anchor="middle">分发 x 到选中专家</text>
+<text x="570.0" y="647" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#607285" text-anchor="middle">dispatch</text>
+<line x1="192" y1="557" x2="192" y2="285" stroke="#245E94" stroke-width="3"/>
+<line x1="192" y1="285" x2="420" y2="285" stroke="#245E94" stroke-width="3"/>
+<polygon points="420,285 409.1946347717679,290.21958640933474 409.1946347717679,279.78041359066526" fill="#245E94"/>
+<line x1="570" y1="335" x2="570" y2="382" stroke="#B96C29" stroke-width="3"/>
+<polygon points="570,382 564.7804135906653,371.1946347717679 575.2195864093347,371.1946347717679" fill="#B96C29"/>
+<line x1="570" y1="482" x2="570" y2="557" stroke="#B96C29" stroke-width="3" stroke-dasharray="9 7"/>
+<polygon points="570,557 564.7804135906653,546.1946347717678 575.2195864093347,546.1946347717678" fill="#B96C29"/>
+<line x1="320" y1="609" x2="420" y2="609" stroke="#245E94" stroke-width="3"/>
+<polygon points="420,609 409.1946347717679,614.2195864093347 409.1946347717679,603.7804135906653" fill="#245E94"/>
+<rect x="890" y="230" width="290" height="104" rx="7" fill="#E9EEF2" stroke="none" stroke-width="2"/>
+<text x="1035" y="268" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="26" font-weight="700" fill="#607285" text-anchor="middle">路由专家 E0</text>
+<text x="1035" y="311" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#607285" text-anchor="middle">本 token 不执行</text>
+<rect x="890" y="384" width="290" height="104" rx="7" fill="#FBF0E5" stroke="none" stroke-width="2"/>
+<text x="1035" y="422" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="26" font-weight="700" fill="#B96C29" text-anchor="middle">路由专家 E1</text>
+<text x="1035" y="465" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#607285" text-anchor="middle">FFN: [D] → [D]</text>
+<rect x="890" y="538" width="290" height="104" rx="7" fill="#E9EEF2" stroke="none" stroke-width="2"/>
+<text x="1035" y="576" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="26" font-weight="700" fill="#607285" text-anchor="middle">路由专家 E2</text>
+<text x="1035" y="619" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#607285" text-anchor="middle">本 token 不执行</text>
+<rect x="890" y="692" width="290" height="104" rx="7" fill="#FBF0E5" stroke="none" stroke-width="2"/>
+<text x="1035" y="730" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="26" font-weight="700" fill="#B96C29" text-anchor="middle">路由专家 E3</text>
+<text x="1035" y="773" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#607285" text-anchor="middle">FFN: [D] → [D]</text>
+<line x1="720" y1="609" x2="810" y2="609" stroke="#B96C29" stroke-width="3"/>
+<line x1="810" y1="609" x2="810" y2="436" stroke="#B96C29" stroke-width="3"/>
+<line x1="810" y1="436" x2="890" y2="436" stroke="#B96C29" stroke-width="3"/>
+<polygon points="890,436 879.1946347717678,441.21958640933474 879.1946347717678,430.78041359066526" fill="#B96C29"/>
+<line x1="810" y1="609" x2="810" y2="744" stroke="#B96C29" stroke-width="3"/>
+<line x1="810" y1="744" x2="890" y2="744" stroke="#B96C29" stroke-width="3"/>
+<polygon points="890,744 879.1946347717678,749.2195864093347 879.1946347717678,738.7804135906653" fill="#B96C29"/>
+<rect x="1280" y="530" width="260" height="130" rx="7" fill="#FBF0E5" stroke="none" stroke-width="2"/>
+<text x="1410.0" y="567" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="700" fill="#B96C29" text-anchor="middle">按权重汇总</text>
+<text x="1410.0" y="645" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#607285" text-anchor="middle">g1 E1(x) + g3 E3(x)</text>
+<line x1="1180" y1="436" x2="1240" y2="436" stroke="#B96C29" stroke-width="3"/>
+<line x1="1240" y1="436" x2="1240" y2="565" stroke="#B96C29" stroke-width="3"/>
+<line x1="1240" y1="565" x2="1280" y2="565" stroke="#B96C29" stroke-width="3"/>
+<polygon points="1280,565 1269.1946347717678,570.2195864093347 1269.1946347717678,559.7804135906653" fill="#B96C29"/>
+<line x1="1180" y1="744" x2="1240" y2="744" stroke="#B96C29" stroke-width="3"/>
+<line x1="1240" y1="744" x2="1240" y2="625" stroke="#B96C29" stroke-width="3"/>
+<line x1="1240" y1="625" x2="1280" y2="625" stroke="#B96C29" stroke-width="3"/>
+<polygon points="1280,625 1269.1946347717678,630.2195864093347 1269.1946347717678,619.7804135906653" fill="#B96C29"/>
+<line x1="720" y1="432" x2="772" y2="432" stroke="#B96C29" stroke-width="3" stroke-dasharray="9 7"/>
+<line x1="772" y1="432" x2="772" y2="200" stroke="#B96C29" stroke-width="3" stroke-dasharray="9 7"/>
+<line x1="772" y1="200" x2="1410" y2="200" stroke="#B96C29" stroke-width="3" stroke-dasharray="9 7"/>
+<line x1="1410" y1="200" x2="1410" y2="530" stroke="#B96C29" stroke-width="3" stroke-dasharray="9 7"/>
+<polygon points="1410,530 1404.7804135906651,519.1946347717678 1415.2195864093349,519.1946347717678" fill="#B96C29"/>
+<text x="890" y="365" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#B96C29" text-anchor="start">权重 g1、g3 沿虚线进入汇总</text>
+<rect x="420" y="893" width="500" height="100" rx="7" fill="#E6F3F0" stroke="none" stroke-width="2"/>
+<text x="670.0" y="930" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="700" fill="#147D79" text-anchor="middle">共享专家 Eshared：每个 token 都执行</text>
+<text x="670.0" y="978" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#607285" text-anchor="middle">FFN: [D] → [D]</text>
+<line x1="192" y1="662" x2="192" y2="943" stroke="#147D79" stroke-width="3"/>
+<line x1="192" y1="943" x2="420" y2="943" stroke="#147D79" stroke-width="3"/>
+<polygon points="420,943 409.1946347717679,948.2195864093347 409.1946347717679,937.7804135906653" fill="#147D79"/>
+<rect x="1280" y="893" width="260" height="100" rx="7" fill="#EAF2F8" stroke="none" stroke-width="2"/>
+<text x="1410.0" y="930" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="700" fill="#245E94" text-anchor="middle">相加并输出</text>
+<text x="1410.0" y="978" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#607285" text-anchor="middle">y: [D]</text>
+<line x1="1410" y1="660" x2="1410" y2="893" stroke="#B96C29" stroke-width="3"/>
+<polygon points="1410,893 1404.7804135906651,882.1946347717678 1415.2195864093349,882.1946347717678" fill="#B96C29"/>
+<line x1="920" y1="943" x2="1280" y2="943" stroke="#147D79" stroke-width="3"/>
+<polygon points="1280,943 1269.1946347717678,948.2195864093347 1269.1946347717678,937.7804135906653" fill="#147D79"/>
+<text x="60" y="1084" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="24" font-weight="400" fill="#172D43" text-anchor="start">批量实现会将 [B,S,D] 展平为 [B·S,D]，按专家聚集 token，计算后再散回原顺序。</text>
+<text x="60" y="1125" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="23" font-weight="400" fill="#607285" text-anchor="start">共享专家和路由专家都在 FFN 分支内；它们不是一组独立聊天模型。</text>
+<line x1="60" y1="1158" x2="1540" y2="1158" stroke="#C7D3DE" stroke-width="2"/>
+<text x="60" y="1192" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="20" font-weight="400" fill="#607285" text-anchor="start">实线：token 表示的数据流。橙色虚线：路由选择或混合权重。此图不提供性能或显存比例。</text>
+<text x="60" y="1225" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="18" font-weight="400" fill="#607285" text-anchor="start">依据 DeepSeekMoE、DeepSeek-V3 的专家分工与路由机制重绘；省略容量限制、通信与路由归一化细节。</text>
+</svg><figcaption><span class="fnum">图 8</span>共享专家与路由专家的数据路径。图用少数专家展示加权合并关系，实际 V4 是 top-6，GLM-5.3 系列是 top-8；示意路线不代表某段真实文本的专家选择。<span class="figure-hint">点按图解可放大查看</span></figcaption></figure>
+<p>学习式路由根据隐藏向量生成亲和分数。与 V3 的 sigmoid 不同，V4 使用 √softplus 形式，即把路由线性层的输出 z 变为 √ln(1+exp(z))，并延续利用偏置调节负载的思路。偏置影响专家的入选机会；选定专家后，代码取<strong>未加偏置</strong>的原始亲和分数，在这六个专家内部归一化，再乘路由缩放系数：Pro 为 2.5，Flash 为 1.5。因此最终六个混合权重之和分别为 2.5 或 1.5，而不是一概等于 1。</p>
+<p>单个专家是带门控的 FFN。先省略实现中的幅度截断，其核心可概括为：</p>
+<div class="eq">E(x) = W<sub>down</sub>[SiLU(W<sub>gate</sub>x) ⊙ (W<sub>up</sub>x)]<br>y = E<sub>shared</sub>(x) + Σ<sub>i∈S(x)</sub>g<sub>i</sub>E<sub>i</sub>(x)</div>
+<p>这里 x∈ℝ<sup>d</sup>；W<sub>gate</sub>、W<sub>up</sub> 把它投影到专家中间宽度 <em>f</em>，W<sub>down</sub> 再从 f 维映射回 d 维；⊙ 是逐元素乘法。SiLU（Sigmoid Linear Unit）为 u·sigmoid(u)，其中 sigmoid(u)=1/(1+exp(−u))。S(x) 简写六个被选专家的集合，在前三个哈希层中，该集合由输入 token ID 给定；g<sub>i</sub> 是上述归一化并缩放后的路由权重，共享专家不经过这组权重。实际两个固定配置还都设置 <code>swiglu_limit=10</code>：up 分支截断到 [−10,10]，gate 分支只截断上界 10，再计算 SiLU 与乘积。这个稳定性处理没有改变矩阵形状，但会改变大幅值输入下的数值结果。</p>
+<p>Pro 中一个专家的三个主要矩阵约有 3×7,168×3,072≈6,606 万参数。这解释了为什么专家数可以大幅增加总容量，而每个 token 只执行很小一部分。但所有专家仍要存储；如果分散在多张卡上，token 还要被发送到相应设备，再收回结果。</p>
+<p>“激活参数”只描述参与计算的权重规模，不能直接预测请求延迟。小矩阵利用率、专家负载不均、跨节点通信和批量大小都会改变收益。V4 相应的训练系统工作，正是在避免稀疏计算省下的时间被等待和搬运抵消。</p>
+<p class="src">依据：<a href="https://huggingface.co/deepseek-ai/DeepSeek-V4-Pro/blob/b5968e9190ef611bbf34a7229255be88a0e937c1/inference/model.py#L546">Gate / Expert / MoE</a>；V4 报告 §2.1 与 §3.1。三矩阵参数量为本文推导，未包含路由器、归一化及量化辅助数据。</p>
+
+<h3 id="execution">把层连接起来：预填充与单步解码为什么走不同分支？</h3>
+<p>现在可以完整追踪一个请求了。官方 <code>generate.py</code> 先调用 <code>encoding_dsv4.encode_messages()</code> 将消息组织成检查点要求的提示格式，再调用 <code>tokenizer.encode()</code> 得到 token IDs；经 embedding 后，表示扩展为四路残差。每个 Block 顺序执行“mHC 输入混合 → RMSNorm → Attention → mHC 写回”和“mHC 输入混合 → RMSNorm → MoE → mHC 写回”。最终 <code>hc_head</code> 将四流合为 <code>[B,S,d]</code>，经 RMSNorm 后，参考实现只对最后一个位置做词表投影，返回 <code>[B,129280]</code>，而非所有位置的 <code>[B,S,129280]</code>。这些 logits 是尚未归一化的词表分数：温度大于零时，生成器经温度缩放与 softmax 得到分布并采样；温度不大于零时直接取最大分数。选出的 token 再作为下一轮输入，遇到结束符或长度限制时停止，最后由 tokenizer 解码为文本。<code>Transformer.forward()</code> 本身只负责一次前向计算。</p>
+<p>预填充以 <code>start_pos=0</code> 进入。它可以一次投影整段提示词，批量整理完整压缩块，同时把未凑齐的尾部保留在压缩器状态里。局部历史则写入循环缓存，只需要长期保存最近 128 个位置。此时临时用于注意力的数组可能包含整段提示词的投影，不应把临时预填充激活与最终驻留缓存混为一谈。</p>
+<p>单步解码时 S=1。新局部 KV 写入 <code>start_pos % 128</code>，覆盖离开窗口的槽；压缩器更新未完成块的状态，仅在边界完成时追加一条长期压缩记录。索引器在 CSA 层计算新查询的候选位置，HCA 层直接列出已完成压缩块。注意力输出再进入专家计算。</p>
+<pre><code># 从参考实现整理出的解码骨架；省略量化、并行和分支细节
+window_cache[:, position % 128] = new_kv
+compressor.update(new_hidden, position)   # 满块时才产生新条目
+indices = concatenate(local_indices, compressed_indices)
+output = sparse_attention(query, cache, indices)
+output = inverse_rope_on_position_channels(output)
+output = grouped_output_projection(output)</code></pre>
+<p>这段是结构摘要，不是可以替代完整模型的实现。实际源码还需要维护压缩缓存偏移、张量并行的本地头数、索引有效性、低精度模拟及不同层型的分支。</p>
+<p class="src">固定实现入口：<a href="https://huggingface.co/deepseek-ai/DeepSeek-V4-Pro/blob/b5968e9190ef611bbf34a7229255be88a0e937c1/inference/model.py#L769">Transformer</a>；<a href="https://huggingface.co/deepseek-ai/DeepSeek-V4-Pro/blob/b5968e9190ef611bbf34a7229255be88a0e937c1/inference/model.py#L703">ParallelHead</a>；<a href="https://huggingface.co/deepseek-ai/DeepSeek-V4-Pro/blob/b5968e9190ef611bbf34a7229255be88a0e937c1/encoding/encoding_dsv4.py">消息编码实现</a>；<a href="https://huggingface.co/deepseek-ai/DeepSeek-V4-Pro/blob/b5968e9190ef611bbf34a7229255be88a0e937c1/inference/generate.py#L125">编码、tokenizer 与生成循环的连接</a>。上述路径已在固定版本中核实存在；公开推理示例不是生产服务调度器。</p>
+
+<h3 id="cost">成本账本：参数、激活、缓存、通信必须分开算</h3>
+<p>对比缓存时，最稳妥的起点是先写出条目数，再决定每个条目实际占多少字节。统一采用 BF16（bfloat16，16 位浮点格式）、只计主 KV 时，在批量 B、已处理长度 N 下，容纳历史所需的一层近似容量是：</p>
+<div class="eq">M<sub>CSA</sub> ≈ B · [128 + ⌊N/4⌋] · 512 · 2 字节<br>M<sub>HCA</sub> ≈ B · [128 + ⌊N/128⌋] · 512 · 2 字节</div>
+<p>这里 K=V，所以不再额外乘一个“键和值两份”的 2；公式末尾的 2 是 BF16 每个元素的字节数。CSA 还需另计索引器缓存，两个层型都需另计压缩器状态。模型总量还要按各层类型分别加总，不能随意拿某一层乘全部层数。</p>
+<p>固定参考实现通过量化再还原模拟部分低精度数值；在官方生成入口设置的 BF16 默认精度下，这里的缓存张量仍以 BF16 分配。代码注释明确区分了数值模拟与实际低精度存储。因此，看见 <code>act_quant()</code> 不能直接宣布显存已经按 FP8（8 位浮点格式）的字节数下降。</p>
+<p>还要区分“需要多少有效条目”和“程序已经预留多少空间”。参考代码按 <code>max_batch_size</code> 与 <code>max_seq_len</code> 预分配缓冲区，实际已分配容量不会随着 N 每步增加；上式和交互图描述的是指定历史长度的容量账本。窗口项保留 128 个槽，短序列尚未占满；压缩状态、分配策略和缓存复用还会继续影响部署中的总显存。</p>
+<p>报告提供了一个具体比较：在一百万 token 上下文下，V4-Pro 的单 token 推理浮点运算次数（FLOPs）约为 V3.2 的 <strong>27%</strong>，KV 缓存约为其 <strong>10%</strong>。报告引言和图 1 将前者标为“等效 FP8 FLOPs”的估算；§2.3.4 进一步说明，V4 的主 KV 采用位置维 BF16、其余维 FP8 的混合存储，索引计算使用 FP4。这些数字使用报告自己的精度与模型口径，不能拿本文统一 BF16 的单层账本直接复算，也不是硬件延迟实测。<a href="https://arxiv.org/html/2606.19348v1#S1">依据：V4 报告引言、图 1 与 §2.3.4</a>。</p>
+<p>这个结果支持长上下文下设计效率的讨论，但不能直接变成任意 GPU 上的加速倍数。硬件、缓存精度、并发、内核、预填充比例和上下文复用命中率都会改变端到端结果。</p>
+<p class="src">依据：V4 报告 §2.3.4、§3.5；<a href="https://huggingface.co/deepseek-ai/DeepSeek-V4-Pro/blob/b5968e9190ef611bbf34a7229255be88a0e937c1/inference/model.py#L517">参考代码关于 KV 精度的注释</a>。本节公式为统一精度下的容量推导，故意不与生产存储口径拼接。</p>
+
+<h3 id="training">训练目标与系统：哪些改变结构，哪些改变模型学到的行为？</h3>
+<p>V4 延续了多 token 预测 MTP。附加模块在训练时提供更远后继 token 的监督，推理时可以参与草稿生成。但“训练多个未来位置”和“推理一定更快”之间，还隔着候选验证、接受率与调度开销。后续 DSpark 是单独的推测解码模块演进，也不应误算为主干增加了同样数量的正常层。</p>
+<p>Muon 则属于优化方法。它改变矩阵参数的更新几何，不是推理图中的一个神经层。长上下文所需的并行、低精度算子与通信重叠属于训练系统；它们使结构能够在实际资源内完成训练，却不能从一份推理示例反推全部实现细节。</p>
+<p>R1 以来的强化学习路线主要发生在后训练阶段：采样回答或行动轨迹，取得结果反馈，再调整策略。组相对策略优化（Group Relative Policy Optimization，GRPO）这类方法利用同一问题的一组回答之间的相对奖励构造更新信号；后续复杂任务还需要可靠环境、拒绝无效捷径的验证器以及高吞吐采样系统。把这条流程画到网络层内部，会混淆训练算法与部署结构。</p>
+<p>V4 的报告还讨论专长模型训练与 on-policy distillation（在学生自身生成轨迹上进行的蒸馏）。这里的“专长模型”是训练阶段的教师，不是 MoE 层里的一个专家矩阵。学生在自己的生成轨迹上接收教师分布的指导，向最终统一模型整合不同专长，关系属于后训练蒸馏。</p>
+<p class="src">依据：<a href="https://arxiv.org/html/2606.19348v1#S5">V4 报告 §5</a>；<a href="https://arxiv.org/html/2501.12948v1#S2">R1 报告 §2</a>；<a href="https://arxiv.org/html/2402.03300v3">DeepSeekMath 的 GRPO</a>。本文未复现训练，也不以训练算法名称代替实验因果证据。</p>
+
+<h2 id="v41">V4.1：为什么又把整张网络分成上下两段？</h2>
+<p>V4 处理了长历史的压缩与读取，但智能体请求还会反复送入工具输出、新文件和新的上下文片段。缓存未命中的输入仍要经过预填充。V4.1-Flash 的重要改动，是把这一阶段也当作架构设计对象。</p>
+<p>其 40 个因果 Transformer 层分为 20 层因果编码器和 20 层解码器。上半部分的全局 KV 由下半部分的末层表示生成，而不再依赖上半部分各层完整处理所有提示 token 的结果。这样，大部分提示位置可以避免上半部分的完整计算；局部滑动窗口相关的尾部状态仍需处理，不能简单说“预填充永远只运行前 20 层”。</p>
+<p>CSA2 又在深度方向复用 KV、索引键或 Top-k 结果。此时既要看序列压缩率，也要看哪些层是真正拥有缓存的来源层；逐层各分配一份再求和，会高估实际结构需求。报告中的 FP4（4 位浮点格式）全局缓存和 SWA Bounded Replay（滑动窗口的有界重放）进一步处理存储及持久化开销，后者以有限范围重算换取减少保留的局部历史。</p>
+<p>这已经不同于 V4 中 CSA/HCA 的简单交替。报告还引入 Engram 条件记忆，并改用后续训练的 DSpark，不能假定 MTP 的预训练安排一直未变。552B 是骨干参数，另有约 196B 的 Engram 参数；把它写成“模型总共 552B”会低估实际需要存储的权重。</p>
+<p>2026 年 10 月的 V4.1-Flash-1017 被官方称为小幅更新。其模型卡不足以证明又一次新的主干换代；本文将九月报告中的结构与十月检查点的能力更新分开描述。</p>
+<p class="src">依据：<a href="https://arxiv.org/html/2609.19969v1#S2">V4.1-Flash 报告 §2</a>、§3.2；<a href="https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash-1017">1017 模型卡</a>。此处按报告分析新结构，未对其整套实现做与 V4 相同深度的逐函数验证。</p>
+
+<h2 id="evidence">回到同一次生成，哪一代改了哪笔开销？</h2>
+<p>设模型为了做完一道题多生成一页推导。R1 的训练改变哪些推导更有可能被写出来。V3.1 使调用者能选择思考或直接作答的模式。每写下一个 token，V3.2 要在当前可见的位置里找出候选，主注意力再读取这些位置。到了 V4，远处历史的基本读取单位变为压缩记录。于是，同一个任务的总耗时至少取决于两件事，模型写了多少步，以及每一步花了多少时间。对照实验要把输出预算、上下文长度和推理设置交代清楚。<a href="https://arxiv.org/html/2501.12948v1">R1 报告</a> · <a href="https://api-docs.deepseek.com/news/news250821/">V3.1 发布说明</a> · <a href="https://huggingface.co/deepseek-ai/DeepSeek-V3.2-Exp">V3.2-Exp 模型卡</a> · <a href="https://arxiv.org/html/2606.19348v1#S2.SS3">V4 报告 §2.3</a></p>
+<p>这也是与 GLM 相接的一处技术分叉。从逐位置筛选出发，DeepSeek-V4 改变了候选项本身，GLM-5.2 改变了相邻层复用候选项的方式。用同一份包含百万个 token 的输入，两者都能减少某个环节的开销，但需要统计的量分别是缓存条目数和索引执行次数。<a href="glm-family.html#glm52-change">对读 GLM-5.2 的索引共享与草稿消融</a></p>
+<p>配置与代码可以证明：查询如何投影、缓存保存什么、压缩沿哪个轴进行、哪些位置可见、专家如何被选中。它们无法单独证明某个改动贡献了多少能力提升。后者需要匹配模型规模、数据、训练预算与评测条件的消融。</p>
+<p>因此，对 V4 的一个可靠判断是：它把长上下文的成本分解到了多个可处理环节，并将表示压缩、稀疏访问、局部补偿与分布式执行放在一起设计。这比只看总参数或某个榜单，更能解释网络为什么长成这样。</p>
+<p>仍然开放的问题包括：压缩导致的细节损失在什么任务上最明显；索引器错误选择如何在多层中累积；更低精度与更长上下文如何共同影响稳定性；以及同一结构在不同硬件与服务负载下的真实收益。本文没有把“未公开”写成“没有使用”，也不把结构推导包装成实验结论。</p>
+<h3>可复核的核心材料</h3><ol class="sources"><li><a href="https://arxiv.org/html/2606.19348v1">DeepSeek-V4 技术报告，重点 §2、§3、§5</a>。</li><li><a href="https://huggingface.co/deepseek-ai/DeepSeek-V4-Pro/tree/b5968e9190ef611bbf34a7229255be88a0e937c1/inference">固定版本 Pro 推理实现与配置</a>；<a href="https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash/tree/60d8d70770c6776ff598c94bb586a859a38244f1/inference">固定版本 Flash 配置与实现</a>。</li><li><a href="https://arxiv.org/abs/2512.24880">mHC 原始论文</a>；<a href="https://arxiv.org/html/2405.04434v5">V2 的 MLA 设计</a>；<a href="https://arxiv.org/html/2412.19437v2">V3 的 MoE、MTP 与训练系统</a>。</li><li><a href="https://arxiv.org/html/2609.19969v1">V4.1-Flash 技术报告</a>；<a href="https://api-docs.deepseek.com/updates/">官方发布与更新记录</a>。</li></ol>
+<div class="end">本文依据公开源码开展静态研究，并以 NumPy 小张量检查了投影吸收、状态更新、池化与混合的代数关系；这些检查不等于运行完整模型或验证模型效果。未训练检查点，也未实测生产吞吐。图中用于展示路由、打分和门控的数值若为示意，均在图注中说明。可用浏览器打印功能导出 PDF；交互图的默认状态仍保留完整含义。</div></section><section class="comments-section" id="comments" aria-label="Discussion">
+<div class="comments-header">
+<h2>Discussion</h2>
+</div>
+<div id="utterances-container" class="utterances-container">
+</div>
+<noscript>请启用 JavaScript 后查看评论区。</noscript>
+</section></article></div></main><script>
+const sections=[...document.querySelectorAll('.post-page-content h2')];
+const toc=document.querySelector('#toc-links');
+function headingLink(heading) {
+    const link=document.createElement('a');
+    link.href='#'+heading.id;
+    link.textContent=heading.textContent;
+    return link;
+}
+let group;
+document.querySelectorAll('.post-page-content h2, .post-page-content h3').forEach((heading,i)=>{
+    if (!heading.id) heading.id='section-'+(i+1);
+    if (heading.tagName==='H2') {
+        toc.append(headingLink(heading));
+        group=null;
+        return;
+    }
+    if (!group) {
+        group=document.createElement('details');
+        const summary=document.createElement('summary');
+        summary.textContent='本章小节';
+        group.append(summary);
+        toc.append(group);
+    }
+    group.append(headingLink(heading));
+});
+if('IntersectionObserver'in window){const io=new IntersectionObserver(es=>es.forEach(e=>{if(e.isIntersecting){document.querySelectorAll('#toc-links a').forEach(a=>a.classList.toggle('active',a.hash==='#'+e.target.id))}}),{rootMargin:'-5% 0px -70% 0px'});sections.forEach(s=>io.observe(s))}
+const viewer=document.createElement('dialog');viewer.className='figure-dialog';viewer.innerHTML='<div class="figure-tools"><span>结构图 · 可滚动查看</span><div><button id="figure-size">原始尺寸</button> <button id="figure-close">关闭</button></div></div><div class="figure-canvas"></div>';document.body.append(viewer);
+const canvas=viewer.querySelector('.figure-canvas');
+document.querySelectorAll('figure>svg').forEach(svg=>{svg.setAttribute('tabindex','0');svg.setAttribute('aria-label',(svg.querySelector('title')?.textContent||'结构图')+'；点击放大');function show(){const clone=svg.cloneNode(true);clone.removeAttribute('tabindex');clone.querySelectorAll('[id]').forEach(el=>el.removeAttribute('id'));canvas.replaceChildren(clone);canvas.classList.toggle('actual',innerWidth<800);viewer.querySelector('#figure-size').textContent=canvas.classList.contains('actual')?'适合屏幕':'原始尺寸';viewer.showModal();canvas.scrollTop=0;canvas.scrollLeft=0}svg.addEventListener('click',show);svg.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();show()}})});
+viewer.querySelector('#figure-close').onclick=()=>viewer.close();viewer.querySelector('#figure-size').onclick=()=>{canvas.classList.toggle('actual');viewer.querySelector('#figure-size').textContent=canvas.classList.contains('actual')?'适合屏幕':'原始尺寸'};viewer.addEventListener('click',e=>{if(e.target===viewer)viewer.close()});
+</script><script src="../../app.js?v=50">
+</script></body></html>
