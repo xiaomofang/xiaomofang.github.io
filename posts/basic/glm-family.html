@@ -1,4 +1,4 @@
-<!doctype html><html lang="zh-CN" data-theme="night"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><script>(function(){try{var saved=localStorage.getItem('yichuan-theme');document.documentElement.setAttribute('data-theme',saved||(matchMedia('(prefers-color-scheme: dark)').matches?'night':'day'));}catch(e){}})();</script><link rel="stylesheet" href="../../styles.css?v=72" /><title>GLM 技术演进：从 GLM-5 到 5.2、5.3 与 Flash · MOFANG</title><meta name="description" content="沿着一次长程任务，追踪 GLM-5 的稀疏注意力、5.1 的持续工作能力和 5.2 的跨层索引共享，再拆开 5.3 与 Flash 各自处理历史的路径。"><link rel="canonical" href="https://xiaomofang.github.io/posts/basic/glm-family.html"><style>
+<!doctype html><html lang="zh-CN" data-theme="night"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><script>(function(){try{var saved=localStorage.getItem('yichuan-theme');document.documentElement.setAttribute('data-theme',saved||(matchMedia('(prefers-color-scheme: dark)').matches?'night':'day'));}catch(e){}})();</script><link rel="stylesheet" href="../../styles.css?v=72" /><title>GLM 技术演进：从 GLM-5 的稀疏注意力到 5.4 的循环深度 · MOFANG</title><meta name="description" content="从 GLM-5 的历史检索、5.1 的长程任务和 5.2 的索引共享，到 5.3 与 Flash 的两条分支，再看 GLM-5.4 如何让中间 28 层执行两轮，以及第二轮怎样读写缓存。"><link rel="canonical" href="https://xiaomofang.github.io/posts/basic/glm-family.html"><style>
 .family-layout{display:grid;grid-template-columns:minmax(145px,210px) minmax(0,1fr);gap:clamp(20px,3vw,52px);max-width:1360px;margin:auto;padding:0 16px}
 .family-layout .post-page{width:100%;min-width:0;max-width:1000px;margin-inline:auto}
 .family-nav{align-self:start;position:sticky;top:4rem;max-height:81vh;overflow:auto;font-size:14px;line-height:1.55;color:var(--text-soft);padding-block:14px}
@@ -40,47 +40,54 @@
         </button>
 </div>
 </div>
-</header><main class="site-main"><div class="family-layout"><aside class="family-nav" aria-label="文章目录"><details open><summary>文章目录</summary><nav id="toc-links"></nav></details></aside><article class="post-page family-article"><header class="post-page-header"><p class="post-page-category">Basic Knowledge · 模型架构</p><h1 class="post-page-title">GLM 技术演进：从 GLM-5 到 5.2、5.3 与 Flash</h1><p class="post-lead">沿着一次长程任务，追踪 GLM-5 的稀疏注意力、5.1 的持续工作能力和 5.2 的跨层索引共享，再拆开 5.3 与 Flash 各自处理历史的路径。</p><div class="post-page-keywords"><a class="post-keyword-chip" href="../../index.html?keyword=transformer">Transformer</a><a class="post-keyword-chip" href="../../index.html?keyword=attention">Attention 加速</a><a class="post-keyword-chip" href="../../index.html?keyword=training">训练</a><a class="post-keyword-chip" href="../../index.html?keyword=rope">RoPE · 位置编码</a></div><p class="post-page-meta" data-author="MOFANG" data-date="2026-11-20">2026年11月20日 · MOFANG</p><p class="src">版本资料核对至 2026-11-20 · 后代源码快照 2026-11-19 · 原创图解 · <a href="deepseek-family.html">同系列 · DeepSeek 技术演进</a></p></header><section class="post-page-content"><p>让模型持续修改一个工程，第一轮的输入可能只有一句需求。几十轮后，文件内容、测试输出和失败记录都进入了上下文。GLM-5 会让一个轻量索引器先在历史里挑选位置，再交给主注意力细读。同一个 token 经过下一层时，还要重新挑一遍吗？GLM-5.2 让一层选好位置，组内其余层就按这份地址读取各自的缓存，省去了重复扫描历史的工作。<a href="https://arxiv.org/html/2602.15763v1">GLM-5 技术报告</a> · <a href="https://z.ai/blog/glm-5.2">GLM-5.2 发布说明</a></p>
+</header><main class="site-main"><div class="family-layout"><aside class="family-nav" aria-label="文章目录"><details open><summary>文章目录</summary><nav id="toc-links"></nav></details></aside><article class="post-page family-article"><header class="post-page-header"><p class="post-page-category">Basic Knowledge · 模型架构</p><h1 class="post-page-title">GLM 技术演进：从 GLM-5 的稀疏注意力到 5.4 的循环深度</h1><p class="post-lead">从 GLM-5 的历史检索、5.1 的长程任务和 5.2 的索引共享，到 5.3 与 Flash 的两条分支，再看 GLM-5.4 如何让中间 28 层执行两轮，以及第二轮怎样读写缓存。</p><div class="post-page-keywords"><a class="post-keyword-chip" href="../../index.html?keyword=transformer">Transformer</a><a class="post-keyword-chip" href="../../index.html?keyword=attention">Attention 加速</a><a class="post-keyword-chip" href="../../index.html?keyword=training">训练</a><a class="post-keyword-chip" href="../../index.html?keyword=rope">RoPE · 位置编码</a></div><p class="post-page-meta" data-author="MOFANG" data-date="2026-11-20">2026年11月20日 · MOFANG</p><p class="src">更新于 2026-11-23 · 5.3 与 Flash 源码快照 2026-11-19 · 原创图解 · <a href="deepseek-family.html">同系列 · DeepSeek 技术演进</a></p></header><section class="post-page-content"><p>让模型持续修改一个工程，第一轮的输入可能只有一句需求。几十轮后，文件内容、测试输出和失败记录都进入了上下文。GLM-5 会让一个轻量索引器先在历史里挑选位置，再交给主注意力细读。同一个 token 经过下一层时，还要重新挑一遍吗？GLM-5.2 让一层选好位置，组内其余层就按这份地址读取各自的缓存，省去了重复扫描历史的工作。<a href="https://arxiv.org/html/2602.15763v1">GLM-5 技术报告</a> · <a href="https://z.ai/blog/glm-5.2">GLM-5.2 发布说明</a></p>
 <p>真正做完工程还需要模型能从失败中恢复并接着工作。因此这条路线也有一条训练线。GLM-5 建立稀疏注意力和智能体训练的基础，5.1 检验任务时间拉长后模型还能取得多少进展，5.2 同时改进长上下文计算与长轨迹训练。到了 5.3 和 5.3-Flash，前者沿用 5.2 基础模型，后者另训混合注意力骨干。<a href="https://z.ai/blog/glm-5.3">5.3 发布说明</a> · <a href="https://z.ai/blog/glm-5.3-flash">Flash 发布说明</a></p>
-<figure><svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1560" viewBox="0 0 1600 1560" role="img"><title>GLM家族：版本升级与新基座分支</title><desc></desc>
-<rect width="1600" height="1560" fill="#FFFFFF"/>
+<p>11 月 23 日发布的 <a href="#glm54-loop">GLM-5.4</a> 又改变了一个维度：一次前向可以多次经过同一组层。先看下图的基座来源，再沿正文比较 5.2 跨层复用的地址、5.3-Flash 压缩的索引和 5.4 跨轮读取的缓存。</p>
+<figure><svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1850" viewBox="0 0 1600 1850" role="img"><title>GLM 家族的发布顺序与训练分支</title><desc>5.2 与 5.3 共享基座，5.3-Flash 重新预训练。5.4 从 GLM-5 预训练基座改造而来，让中间 28 层执行两轮。</desc>
+<rect width="1600" height="1850" fill="#FFFFFF"/>
 <text x="60" y="52" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="20" font-weight="400" fill="#607285" text-anchor="start">谱系图 / GLM</text>
-<text x="60" y="112" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="40" font-weight="700" fill="#172D43" text-anchor="start">GLM：版本升级，并不都意味着换了网络</text>
-<text x="60" y="153" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="23" font-weight="400" fill="#607285" text-anchor="start">重点区分 5.3 的后训练升级与 5.3-Flash 的新基座；省略中间发布，不把名称相近当作权重继承。</text>
+<text x="60" y="112" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="40" font-weight="700" fill="#172D43" text-anchor="start">GLM：同一条时间线上的三条训练路线</text>
+<text x="60" y="153" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="23" font-weight="400" fill="#607285" text-anchor="start">从 GLM-5 到 5.4，分开追踪共享基座、重新预训练和既有基座的循环化改造。</text>
 <line x1="60" y1="182" x2="1540" y2="182" stroke="#C7D3DE" stroke-width="2"/>
 <text x="60" y="245" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="26" font-weight="700" fill="#607285" text-anchor="start">发布主线：灰虚线只表示版本顺序</text>
-<rect x="60" y="281" width="240" height="170" rx="8" fill="#EAF2F8" stroke="none" stroke-width="2"/>
+<rect x="60" y="281" width="220" height="170" rx="8" fill="#EAF2F8" stroke="none" stroke-width="2"/>
 <text x="80" y="320" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="700" fill="#245E94" text-anchor="start">GLM-4.5</text>
 <text x="80" y="360" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#172D43" text-anchor="start">2025.07</text>
 <text x="80" y="391" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#172D43" text-anchor="start">MoE + GQA</text>
-<line x1="300" y1="365" x2="370" y2="365" stroke="#607285" stroke-width="3" stroke-dasharray="9 7"/>
-<polygon points="370,365 359.1946347717679,370.21958640933474 359.1946347717679,359.78041359066526" fill="#607285"/>
-<rect x="370" y="281" width="240" height="170" rx="8" fill="#EAF2F8" stroke="none" stroke-width="2"/>
-<text x="390" y="320" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="700" fill="#245E94" text-anchor="start">GLM-5</text>
-<text x="390" y="360" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#172D43" text-anchor="start">2026.02</text>
-<text x="390" y="391" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#172D43" text-anchor="start">MLA + DSA</text>
-<text x="390" y="422" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#172D43" text-anchor="start">扩大预训练规模</text>
-<line x1="610" y1="365" x2="680" y2="365" stroke="#607285" stroke-width="3" stroke-dasharray="9 7"/>
-<polygon points="680,365 669.1946347717678,370.21958640933474 669.1946347717678,359.78041359066526" fill="#607285"/>
-<rect x="680" y="281" width="240" height="170" rx="8" fill="#EAF2F8" stroke="none" stroke-width="2"/>
-<text x="700" y="320" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="700" fill="#245E94" text-anchor="start">GLM-5.1</text>
-<text x="700" y="360" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#172D43" text-anchor="start">2026.04</text>
-<text x="700" y="391" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#172D43" text-anchor="start">长程任务能力升级</text>
-<text x="700" y="422" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#172D43" text-anchor="start">不据名称推断新架构</text>
-<line x1="920" y1="365" x2="990" y2="365" stroke="#607285" stroke-width="3" stroke-dasharray="9 7"/>
-<polygon points="990,365 979.1946347717678,370.21958640933474 979.1946347717678,359.78041359066526" fill="#607285"/>
-<rect x="990" y="281" width="240" height="170" rx="8" fill="#EAF2F8" stroke="none" stroke-width="2"/>
-<text x="1010" y="320" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="700" fill="#245E94" text-anchor="start">GLM-5.2</text>
-<text x="1010" y="360" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#172D43" text-anchor="start">2026.06</text>
-<text x="1010" y="391" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#172D43" text-anchor="start">IndexShare</text>
-<text x="1010" y="422" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#172D43" text-anchor="start">1M 长上下文</text>
-<line x1="1230" y1="365" x2="1300" y2="365" stroke="#607285" stroke-width="3" stroke-dasharray="9 7"/>
-<polygon points="1300,365 1289.1946347717678,370.21958640933474 1289.1946347717678,359.78041359066526" fill="#607285"/>
-<rect x="1300" y="281" width="240" height="170" rx="8" fill="#EAF2F8" stroke="none" stroke-width="2"/>
-<text x="1320" y="320" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="700" fill="#245E94" text-anchor="start">GLM-5.3</text>
-<text x="1320" y="360" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#172D43" text-anchor="start">2026.08</text>
-<text x="1320" y="391" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#172D43" text-anchor="start">与 5.2 共用基座</text>
-<text x="1320" y="422" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#172D43" text-anchor="start">扩大后训练</text>
+<line x1="280" y1="365" x2="312" y2="365" stroke="#607285" stroke-width="3" stroke-dasharray="9 7"/>
+<polygon points="312,365 301.1946347717679,370.21958640933474 301.1946347717679,359.78041359066526" fill="#607285"/>
+<rect x="312" y="281" width="220" height="170" rx="8" fill="#EAF2F8" stroke="none" stroke-width="2"/>
+<text x="332" y="320" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="700" fill="#245E94" text-anchor="start">GLM-5</text>
+<text x="332" y="360" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#172D43" text-anchor="start">2026.02</text>
+<text x="332" y="391" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#172D43" text-anchor="start">MLA + DSA</text>
+<text x="332" y="422" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#172D43" text-anchor="start">扩大预训练规模</text>
+<line x1="532" y1="365" x2="564" y2="365" stroke="#607285" stroke-width="3" stroke-dasharray="9 7"/>
+<polygon points="564,365 553.1946347717678,370.21958640933474 553.1946347717678,359.78041359066526" fill="#607285"/>
+<rect x="564" y="281" width="220" height="170" rx="8" fill="#EAF2F8" stroke="none" stroke-width="2"/>
+<text x="584" y="320" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="700" fill="#245E94" text-anchor="start">GLM-5.1</text>
+<text x="584" y="360" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#172D43" text-anchor="start">2026.04</text>
+<text x="584" y="391" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#172D43" text-anchor="start">长程任务能力升级</text>
+<line x1="784" y1="365" x2="816" y2="365" stroke="#607285" stroke-width="3" stroke-dasharray="9 7"/>
+<polygon points="816,365 805.1946347717678,370.21958640933474 805.1946347717678,359.78041359066526" fill="#607285"/>
+<rect x="816" y="281" width="220" height="170" rx="8" fill="#EAF2F8" stroke="none" stroke-width="2"/>
+<text x="836" y="320" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="700" fill="#245E94" text-anchor="start">GLM-5.2</text>
+<text x="836" y="360" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#172D43" text-anchor="start">2026.06</text>
+<text x="836" y="391" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#172D43" text-anchor="start">IndexShare</text>
+<text x="836" y="422" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#172D43" text-anchor="start">1M 长上下文</text>
+<line x1="1036" y1="365" x2="1068" y2="365" stroke="#607285" stroke-width="3" stroke-dasharray="9 7"/>
+<polygon points="1068,365 1057.1946347717678,370.21958640933474 1057.1946347717678,359.78041359066526" fill="#607285"/>
+<rect x="1068" y="281" width="220" height="170" rx="8" fill="#EAF2F8" stroke="none" stroke-width="2"/>
+<text x="1088" y="320" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="700" fill="#245E94" text-anchor="start">GLM-5.3</text>
+<text x="1088" y="360" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#172D43" text-anchor="start">2026.08</text>
+<text x="1088" y="391" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#172D43" text-anchor="start">与 5.2 共用基座</text>
+<text x="1088" y="422" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#172D43" text-anchor="start">扩大后训练</text>
+<line x1="1288" y1="365" x2="1320" y2="365" stroke="#607285" stroke-width="3" stroke-dasharray="9 7"/>
+<polygon points="1320,365 1309.1946347717678,370.21958640933474 1309.1946347717678,359.78041359066526" fill="#607285"/>
+<rect x="1320" y="281" width="220" height="170" rx="8" fill="#EAF2F8" stroke="none" stroke-width="2"/>
+<text x="1340" y="320" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="25" font-weight="700" fill="#245E94" text-anchor="start">GLM-5.4</text>
+<text x="1340" y="360" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#172D43" text-anchor="start">2026.11.23</text>
+<text x="1340" y="391" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#172D43" text-anchor="start">Loop Transformer</text>
+<text x="1340" y="422" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#172D43" text-anchor="start">共享层执行两轮</text>
 <text x="60" y="502" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="22" font-weight="400" fill="#607285" text-anchor="start">GLM-4.6 / 4.7 等节点在此省略；上排箭头不表示它们不存在，也不声明检查点初始化方式。</text>
 <line x1="60" y1="537" x2="1540" y2="537" stroke="#C7D3DE" stroke-width="2"/>
 <text x="60" y="593" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="28" font-weight="700" fill="#147D79" text-anchor="start">官方明确的同基座关系</text>
@@ -128,30 +135,45 @@
 <polygon points="750,1233 739.1946347717678,1238.2195864093349 739.1946347717678,1227.7804135906651" fill="#147D79"/>
 <text x="602" y="1210" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#147D79" text-anchor="start">后训练</text>
 <line x1="60" y1="1345" x2="1540" y2="1345" stroke="#C7D3DE" stroke-width="2"/>
-<line x1="60" y1="1382" x2="140" y2="1382" stroke="#147D79" stroke-width="3"/>
-<polygon points="140,1382 129.19463477176788,1387.2195864093349 129.19463477176788,1376.7804135906651" fill="#147D79"/>
-<text x="158" y="1387" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#607285" text-anchor="start">实线：已披露的训练 / 基座关系</text>
-<line x1="840" y1="1382" x2="920" y2="1382" stroke="#245E94" stroke-width="3" stroke-dasharray="9 7"/>
-<polygon points="920,1382 909.1946347717678,1387.2195864093349 909.1946347717678,1376.7804135906651" fill="#245E94"/>
-<text x="938" y="1387" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#607285" text-anchor="start">蓝虚线：架构 / 技术联系，非权重</text>
-<line x1="60" y1="1428" x2="140" y2="1428" stroke="#607285" stroke-width="3" stroke-dasharray="9 7"/>
-<polygon points="140,1428 129.19463477176788,1433.2195864093349 129.19463477176788,1422.7804135906651" fill="#607285"/>
-<text x="158" y="1433" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#607285" text-anchor="start">灰虚线：版本先后，不证明初始化</text>
-<text x="840" y="1433" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#607285" text-anchor="start">未披露的权重初始化关系，不补画为实线。</text>
+<text x="60" y="1401" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="28" font-weight="700" fill="#147D79" text-anchor="start">GLM-5.4 从预训练基座改造深度</text>
+<rect x="60" y="1453" width="500" height="140" rx="8" fill="#E6F3F0" stroke="none" stroke-width="2"/>
+<text x="80" y="1493" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="26" font-weight="700" fill="#147D79" text-anchor="start">GLM-5 预训练基座</text>
+<text x="80" y="1532" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#172D43" text-anchor="start">官方披露的改造起点</text>
+<rect x="750" y="1453" width="790" height="140" rx="8" fill="#E6F3F0" stroke="none" stroke-width="2"/>
+<text x="770" y="1494" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="27" font-weight="700" fill="#147D79" text-anchor="start">GLM-5.4</text>
+<text x="770" y="1532" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#172D43" text-anchor="start">第 27–54 层共享权重，同一组 28 层执行两轮</text>
+<text x="770" y="1563" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#172D43" text-anchor="start">第二轮复用第一轮的稀疏索引，另存本轮的局部 KV</text>
+<line x1="560" y1="1523" x2="750" y2="1523" stroke="#147D79" stroke-width="3"/>
+<polygon points="750,1523 739.1946347717678,1528.2195864093349 739.1946347717678,1517.7804135906651" fill="#147D79"/>
+<text x="601" y="1500" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#147D79" text-anchor="start">继续训练</text>
+<line x1="60" y1="1635" x2="1540" y2="1635" stroke="#C7D3DE" stroke-width="2"/>
+<line x1="60" y1="1672" x2="140" y2="1672" stroke="#147D79" stroke-width="3"/>
+<polygon points="140,1672 129.19463477176788,1677.2195864093349 129.19463477176788,1666.7804135906651" fill="#147D79"/>
+<text x="158" y="1677" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#607285" text-anchor="start">实线：已披露的训练 / 基座关系</text>
+<line x1="840" y1="1672" x2="920" y2="1672" stroke="#245E94" stroke-width="3" stroke-dasharray="9 7"/>
+<polygon points="920,1672 909.1946347717678,1677.2195864093349 909.1946347717678,1666.7804135906651" fill="#245E94"/>
+<text x="938" y="1677" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#607285" text-anchor="start">蓝虚线：架构 / 技术联系，非权重</text>
+<line x1="60" y1="1718" x2="140" y2="1718" stroke="#607285" stroke-width="3" stroke-dasharray="9 7"/>
+<polygon points="140,1718 129.19463477176788,1723.2195864093349 129.19463477176788,1712.7804135906651" fill="#607285"/>
+<text x="158" y="1723" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#607285" text-anchor="start">灰虚线：版本先后，不证明初始化</text>
+<text x="840" y="1723" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" font-weight="400" fill="#607285" text-anchor="start">未披露的权重初始化关系，不补画为实线。</text>
 <a href="https://z.ai/blog/glm-5" target="_blank">
-<text x="60" y="1481" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="19" font-weight="400" fill="#245E94" text-anchor="start">来源：GLM-5 官方公告</text>
+<text x="60" y="1771" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="19" font-weight="400" fill="#245E94" text-anchor="start">来源：GLM-5 官方公告</text>
 </a>
 <a href="https://z.ai/blog/glm-5.2" target="_blank">
-<text x="390" y="1481" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="19" font-weight="400" fill="#245E94" text-anchor="start">GLM-5.2 官方公告</text>
+<text x="370" y="1771" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="19" font-weight="400" fill="#245E94" text-anchor="start">GLM-5.2 官方公告</text>
 </a>
 <a href="https://z.ai/blog/glm-5.3" target="_blank">
-<text x="720" y="1481" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="19" font-weight="400" fill="#245E94" text-anchor="start">GLM-5.3 官方公告</text>
+<text x="650" y="1771" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="19" font-weight="400" fill="#245E94" text-anchor="start">GLM-5.3 官方公告</text>
 </a>
 <a href="https://z.ai/blog/glm-5.3-flash" target="_blank">
-<text x="1050" y="1481" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="19" font-weight="400" fill="#245E94" text-anchor="start">GLM-5.3-Flash 官方公告</text>
+<text x="930" y="1771" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="19" font-weight="400" fill="#245E94" text-anchor="start">GLM-5.3-Flash 官方公告</text>
 </a>
-<text x="60" y="1524" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="19" font-weight="400" fill="#607285" text-anchor="start">原创关系图；核查：2026-11-20。版本列表是本篇选择的关键节点，非家族全量清单。</text>
-</svg><figcaption><span class="fnum">图 1</span>从 GLM-4.5 往后阅读，留意网络设计变化和训练关系使用的不同线型。两个带 5.3 名称的检查点走了不同的训练路径。<span class="figure-hint">点按图解可放大查看</span></figcaption></figure>
+<a href="https://z.ai/blog/glm-5.4" target="_blank">
+<text x="1280" y="1771" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="19" font-weight="400" fill="#245E94" text-anchor="start">GLM-5.4 技术博客</text>
+</a>
+<text x="60" y="1814" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="19" font-weight="400" fill="#607285" text-anchor="start">原创关系图。资料核对至 2026-11-23。</text>
+</svg><figcaption><span class="fnum">图 1</span>从 GLM-4.5 往后阅读，留意网络设计变化和训练关系使用的不同线型。两个带 5.3 名称的检查点走了不同的训练路径。图下方另列 GLM-5 基座向 5.4 循环结构的改造。<span class="figure-hint">点按图解可放大查看</span></figcaption></figure>
 <h2 id="glm45-before">从 GLM-4.5 开始：先把推理、代码与工具放进同一个模型</h2>
 <p>2025 年 7 月 28 日发布的 GLM-4.5 已经能在同一个任务里写代码、调用工具并根据结果继续推理。把这三种能力放在同一套权重里，是后来 GLM-5 开始时已有的基础。官方规模为 355B 总参数、32B 激活参数，基础训练与中训练合计 23T token。这里的参数口径计入多 token 预测（MTP）的辅助层，排除词嵌入和输出层，不能直接与平台自动汇总的全部权重数量比较。<a href="https://z.ai/blog/glm-4.5">发布说明</a>、<a href="https://arxiv.org/html/2508.06471v1#S2.SS1">报告 §2.1 与表 1</a>。</p>
 <p>这一代主版是 92 层、隐藏宽度 5,120 的混合专家模型（MoE）。前 3 层使用稠密前馈网络（FFN），后 89 层从 160 个路由专家中选 8 个，再加共享专家。注意力使用 96 个查询头、8 个 KV 头的分组查询注意力，配合部分维度的旋转位置编码和 QK 归一化。它保留了普通逐位置 KV 表，也没有后来的潜变量压缩和稀疏索引器。<a href="https://huggingface.co/zai-org/GLM-4.5/blob/cbb2c7cfb52fa128a9660cb1a7a78e017899e115/config.json">固定配置 cbb2c7c</a>。</p>
@@ -1156,13 +1178,94 @@ token_indices = append_visible_tail(token_indices)</code></pre>
 <p>据此，评价更强的工具能力时，不能只指向某个注意力模块；评价某种架构效率时，也不能拿不同后训练预算的最终榜单作为干净消融。代码能证明结构执行，受控实验才能更有力地说明机制的独立作用。</p>
 <p class="src">依据：<a href="https://z.ai/blog/glm-5.3?trk=public_profile__posts-text">5.3 后训练说明</a>；<a href="https://z.ai/blog/glm-5.2">5.2 长任务 RL</a>；<a href="https://arxiv.org/html/2602.15763v1#S3">GLM-5 报告 §3</a>。本文没有复现这些训练，也不将发布方评测写成独立测量。</p>
 
+<h2 id="glm54-loop">GLM-5.4：让中间 28 层再算一遍</h2>
+<p>假设模型正在根据一张截图修复网页按钮错位。它可以先输出一段分析，把发现的位置关系写成文字，再生成补丁。还有一种花算力的方式：在决定下一个 token 之前，让已经读过截图和代码的中间层再处理一次当前表示。GLM-5.4 把这条路放进了旗舰模型。智谱在 2026 年 11 月 23 日披露，它从已经完成预训练的 <strong>GLM-5 基座</strong>出发，通过进一步训练把部分层改造成 Loop Transformer（沿网络深度循环的 Transformer）。5.3 延续 5.2 基座做后训练，5.3-Flash 另训混合注意力基座，5.4 又是一次不同的分支。<a href="https://mp.weixin.qq.com/s/D-IZr-QaT1or_chminK8IQ">智谱中文技术说明 · Loop 架构</a> · <a href="https://z.ai/blog/glm-5.4">英文技术说明与结构图</a></p>
+
+<h3 id="glm54-forward">一次前向，78 个层号如何走出 106 次块计算？</h3>
+<p>官方图把输入画成两路：文本经词嵌入得到向量，图像经 24 层视觉 Transformer（ViT）提取特征，再投影到语言主干所用的表示空间。接下来的层号都指语言主干。第 1–26 层先处理输入，第 27–54 层执行第一轮，更新后的状态重新送入<strong>同一组</strong>第 27–54 层。第二轮结束，才经第 55–78 层、最终归一化和语言模型输出头，得到词表上的分数。只数语言主干的块调用，一次前向走了 <strong>26 + 28 + 28 + 24 = 106 次</strong>。其中有 78 个不同的层号。多出的 28 步发生在生成同一个 token 的途中，无需先把中间判断写进上下文。<a href="https://z-ai-bj.oss-cn-beijing.aliyuncs.com/prompts-rich-media-resources/5.4-blog/image.png">智谱原图 · Prelude、Loop Pass 1/2 与 Coda</a></p>
+<p>改造已有基座有一个难点。中间层计算两遍，若每遍都把结果完整写回，激活的尺度可能膨胀，后段会突然收到训练时很少见的输入。因此，智谱在每一轮的 <strong>28 层出口</strong>放了一个门。设单个位置的轮次输入为向量 <i>x</i>，这一轮的候选输出为同维度向量 <i>h</i>。门读取归一化的 <i>x</i>，经过本轮独立的线性映射和 sigmoid 得到写入比例 β。交给下一段的是：</p>
+<div class="eq" aria-label="门控写回">新状态 = x + β × (h − x)</div>
+<p>例如某个通道原值为 2，候选值为 6，β 为 0.25，写回后是 3。按团队对训练结果的观察，第一轮在多数位置写得较轻，遇到难预测的位置才加大步长，第二轮倾向于写入更多修正。两轮各有自己的门，门控制的是这一次写回多少。即便 β 很小，候选值也已经算过了。是否能让简单位置真的少执行几层，是团队留到后续研究的问题。跨深度共享参数的想法至少可追溯到 2018 年的 Universal Transformer；5.4 值得细看的是如何把既有基座改成循环结构，并在长历史解码中负担得起第二轮。<a href="https://arxiv.org/abs/1807.03819">Universal Transformers</a> · <a href="https://z.ai/blog/glm-5.4">技术说明 · 逐 token 的门控更新</a></p>
+
+<h3 id="glm54-cache">第二轮看哪些历史？两个缓存集合，一次归一化</h3>
+<p>若每一轮都为每层保存一份完整的历史键值（KV），循环段的长期缓存就要存两遍。5.4 利用了一个区别：第二轮仍需要远处的线索，却未必需要为整段历史重新生成并常驻一套第二轮表示。第一轮的稀疏索引器已经选出了相关位置。第二轮拿自己的查询，读取第一轮按这些地址选出的 KV，再读取最近 128 个位置在<strong>第二轮</strong>产生的 KV。官方图给出的稀疏选择上限是 2,048 个位置。<a href="https://z-ai-bj.oss-cn-beijing.aliyuncs.com/prompts-rich-media-resources/5.4-blog/image.png">智谱原图 · Two-Bank Sparse MLA</a></p>
+<figure><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 514 418" role="img" aria-labelledby="g54cache-title g54cache-desc" font-family="'Microsoft YaHei','PingFang SC',sans-serif">
+  <title id="g54cache-title">GLM-5.4 第二轮注意力的两路 KV 来源</title>
+  <desc id="g54cache-desc">教学示例。生成第八个位置的表示时，第一轮索引选中位置二、五、七。第二轮沿用这些索引读取第一轮的键和值，并使用第二轮计算出的最近三个位置六、七、八的键和值。第七个位置在两路中各有一份不同的表示。</desc>
+  <rect width="514" height="418" rx="12" fill="var(--bg,#fff)"/>
+  <g fill="var(--text,#182332)">
+    <text x="19" y="36" font-size="24" font-weight="650">第二轮注意力读取哪些位置？</text>
+    <text x="20" y="67" font-size="17" fill="var(--text-soft,#475569)">示例取当前位置 8，局部窗口宽度为 3。</text>
+  </g>
+  <path d="M20 83H494 M20 130H494 M20 250H494" stroke="var(--border,#c5cbd2)"/>
+  <g fill="var(--text-soft,#475569)" font-size="17" text-anchor="middle">
+    <text x="143" y="112">1</text>
+    <text x="190" y="112">2</text>
+    <text x="237" y="112">3</text>
+    <text x="284" y="112">4</text>
+    <text x="331" y="112">5</text>
+    <text x="378" y="112">6</text>
+    <text x="425" y="112">7</text>
+    <text x="472" y="112">8</text>
+  </g>
+  <text x="20" y="112" fill="var(--text-soft,#475569)" font-size="17">token 位置</text>
+  <g fill="var(--text,#182332)" font-size="17" font-weight="600">
+    <text x="20" y="168">首轮稀疏 KV</text>
+    <text x="20" y="224">次轮局部 KV</text>
+  </g>
+  <path d="M425 176v28" stroke="var(--text-soft,#475569)" stroke-width="1.7" stroke-dasharray="4 3"/>
+  <g>
+    <path d="M138 162h10" stroke-width="2" stroke="var(--border,#bac3cc)"/>
+    <circle cx="190" cy="162" r="10" fill="var(--hue-blue,#3778af)"/>
+    <path d="M232 162h10" stroke-width="2" stroke="var(--border,#bac3cc)"/>
+    <path d="M279 162h10" stroke-width="2" stroke="var(--border,#bac3cc)"/>
+    <circle cx="331" cy="162" r="10" fill="var(--hue-blue,#3778af)"/>
+    <path d="M373 162h10" stroke-width="2" stroke="var(--border,#bac3cc)"/>
+    <circle cx="425" cy="162" r="10" fill="var(--hue-blue,#3778af)"/>
+    <path d="M467 162h10" stroke-width="2" stroke="var(--border,#bac3cc)"/>
+    <path d="M138 218h10" stroke-width="2" stroke="var(--border,#bac3cc)"/>
+    <path d="M185 218h10" stroke-width="2" stroke="var(--border,#bac3cc)"/>
+    <path d="M232 218h10" stroke-width="2" stroke="var(--border,#bac3cc)"/>
+    <path d="M279 218h10" stroke-width="2" stroke="var(--border,#bac3cc)"/>
+    <path d="M326 218h10" stroke-width="2" stroke="var(--border,#bac3cc)"/>
+    <rect x="369" y="209" width="18" height="18" rx="2" fill="var(--hue-orange,#a85819)"/>
+    <rect x="416" y="209" width="18" height="18" rx="2" fill="var(--hue-orange,#a85819)"/>
+    <rect x="463" y="209" width="18" height="18" rx="2" fill="var(--hue-orange,#a85819)"/>
+  </g>
+  <g fill="var(--text,#182332)" font-size="17">
+    <text x="20" y="280">圆点沿用首轮索引，读取首轮算出的 KV。</text>
+    <text x="20" y="307">方块只保留窗口内由第二轮算出的 KV。</text>
+    <text x="20" y="334" font-weight="650">位置 7 重叠，两路条目参与同一次 softmax。</text>
+  </g>
+  <path d="M20 350H494" stroke="var(--border,#c5cbd2)"/>
+  <g fill="var(--text-soft,#475569)" font-size="16">
+    <text x="20" y="378">图中选 3 项、窗口取 3，便于看清重叠的位置。</text>
+    <text x="20" y="401">5.4 官方结构图标注 top-k = 2048、窗口 = 128。</text>
+  </g>
+</svg>
+<figcaption><span class="fnum">图 10</span>同一个历史位置可以出现两次。图中两种颜色标出来自不同轮次的表示。缩小的位置数用于看清重叠，实际检索上限和窗口长度标在图内。依据智谱 GLM-5.4 结构说明原创绘制。<span class="figure-hint">点按图解可放大查看</span></figcaption></figure>
+<p>把图中的位置 7 想成文件里的一处变量声明。第一轮把它选为相关线索，近期窗口里又恰好有它的第二轮表示。两个条目虽然位置相同，键和值来自不同计算深度，按位置去重会丢掉其中一份信息。下面用展开后的逻辑键值写出一次读取；为便于看清归一化范围，只画一个查询头，省略批量、位置编码和实际 MLA 内核。代码里的 scale 是注意力打分的缩放系数，d 和 d_value 分别为键与值的维度。</p>
+<pre><code class="language-python"># 单查询 q: [d]，每行 K 对应一行 V；I 是第一轮留下的历史地址
+K = cat([K_pass1[I], K_pass2_window], dim=0)  # [n_sparse + n_window, d]
+V = cat([V_pass1[I], V_pass2_window], dim=0)  # [n_sparse + n_window, d_value]
+weights = softmax((K @ q) * scale, dim=0)
+output = weights @ V                          # [d_value]</code></pre>
+<p>这里的拼接只描述数学上的候选集合。两组分数共用一个 softmax 分母，于是近期修正能和远处线索直接竞争注意力权重。相比之下，若分别归一化再相加，就已经给每组预留了一整份权重。再和 5.2 的 IndexShare 对照：5.2 让一组<strong>不同层</strong>共用选址结果，5.4 在此基础上还让第二<strong>轮</strong>复用第一轮的地址，从而省掉再次运行索引器的成本。第二轮的查询、注意力加权和后续层计算仍要执行。<a href="https://z.ai/blog/glm-5.2">5.2 的跨层索引共享</a> · <a href="https://z.ai/blog/glm-5.4">5.4 的跨轮复用</a></p>
+<p>缓存也可以这样记账。以循环段的一层、一个请求为单位，历史长 <i>T</i>，只数每个位置的一条逻辑 KV 记录。朴素双轮需要约 2<i>T</i> 条；共享第一轮历史、第二轮只留滑窗，则约为 <i>T</i> + min(<i>T</i>, 128) 条。2,048 限制的是一次查询选出的地址数，历史长到一百万时仍须保留可供未来查询的第一轮记录。换算整机显存还需要缓存精度、索引数据、并行切分和临时工作区。</p>
+
+<h3 id="glm54-evidence">分数提高、输出缩短、交付更快，是三个测量问题</h3>
+<p>智谱给出了一个有基线的实验：在 30B 规模保持参数量相同，循环版的总训练计算量约多 10%。两者经过 200K 长上下文监督微调，开启思考模式评测。AIME 2025 数学题得分从 19.17 到 30.42，平均输出仅缩短 2%；GPQA-Diamond 科学问答从 47.58 到 56.26，平均少输出 2,473 个 token，约 11.7%。同样的改造，在一道数学题上可能主要改善答案，在另一类题上还可能节省生成步骤。这组结果支持继续研究怎样在输出长度与内部计算之间分配预算；要比较端到端时间，仍需计入每个 token 额外经过的 28 层，以及固定硬件和负载下的实测。<a href="https://z.ai/blog/glm-5.4">智谱技术说明 · 30B 同参数对照表</a></p>
+<p>750B 级旗舰给出了另一类证据。团队在 200 个实际编程场景中比较成品模型，图中 5.4 对 5.3 的胜、平、负比例分别为 51.1%、25.7%、23.1%（原图保留一位小数）。这个比较包含视觉、训练和服务端整套系统的变化，单凭胜率无法估算循环模块独自贡献了多少。报告还记录了旗舰在部分长任务上反复思考的现象；在 30B 的几项基准上输出变短，可以与这种观察同时成立。<a href="https://mp.weixin.qq.com/s/D-IZr-QaT1or_chminK8IQ">智谱 · 200 个场景对比及长思考观察</a></p>
+<p>线上交付又是另一个口径。智谱称它把核心算子融合以减少显存往返，并报告服务在非高峰时最高可达 200 token/s，高峰时约为 70–80 token/s。这些数字描述的是特定服务在不同时段的输出速度；公开说明没有给出可对齐的硬件、批量、输入输出长度以及单轮基线，因而无法从中算出 Loop 本身的加速比。<a href="https://z.ai/blog/glm-5.4">智谱 · 服务速度与推理实现</a></p>
+<p>团队所说的「泛 Coding」可以落到一个具体例子：模型生成代码，驱动 FreeCAD 建模，再调用 Blender 渲染六轴机械臂的动作。把界面、渲染结果和代码带入同一任务，拓宽的是编程可以交付的作品类型。5.3-Flash 此前已经具备视觉输入，本次的变化在于这条带循环深度的旗舰分支也接入视觉。11 月 23 日首发覆盖 GLM Coding Plan；通用 API 待安全评估，权重开放在官方计划中。截至本节核查日，前向细节来自发布方技术图文，尚无可用来逐行对照的 5.4 公开权重配置和推理实现。<a href="https://z.ai/blog/glm-5.3-flash">5.3-Flash 发布说明</a> · <a href="https://z.ai/blog/glm-5.4">5.4 的工程案例与可用性</a> · <a href="https://docs.bigmodel.cn/cn/coding-plan/overview">智谱套餐文档</a></p>
+
 <h2 id="history">回看 GLM 家族：延续的是研究路线，不是永久固定的掩码</h2>
 <p>原始 GLM 的重点是自回归空白填充：可见上下文内部双向读取，缺失片段逐 token 生成，二维位置区分空白锚点与块内位置。GLM-130B 随后在双语大规模训练中引入适合其规模的稳定性与结构设计；ChatGLM 把重点扩展到对话、缓存和生成接口。不能因为后续 tokenizer 仍含某种特殊标记，就断言所有模型还使用原始二维位置与可见性规则。</p>
-<p>GLM-4.5 使用分组查询注意力（GQA，Grouped-Query Attention）、MoE 和面向推理／智能体的训练；GLM-5 转向 MLA 与 DSA；5.2 引入 IndexShare；5.3 扩大同一基础模型上的后训练；5.3-Flash 则重新组合 KDA、池化索引、NoPE 与 mHC。这里同时存在架构继承、技术借鉴、新基础模型训练和后训练扩展，关系并不是一条按发布日期串起的权重链。</p>
+<p>GLM-4.5 使用分组查询注意力（GQA，Grouped-Query Attention）、MoE 和面向推理／智能体的训练；GLM-5 转向 MLA 与 DSA；5.2 引入 IndexShare；5.3 扩大同一基础模型上的后训练；5.3-Flash 则重新组合 KDA、池化索引、NoPE 与 mHC。5.4 对 GLM-5 基座的中间段作循环改造，让每个位置在一次前向中多经过 28 次块计算。这里同时存在架构继承、技术借鉴、新基础模型训练和后训练扩展，关系并不是一条按发布日期串起的权重链。</p>
 <p>用长上下文检索串起两个家族，可以画出一条更精确的技术传递线。DeepSeek-V3.2 与 GLM-5 都在昂贵的注意力之前筛选历史位置。GLM-5.2 接着减少一次选择在不同层的重复执行，DeepSeek-V4 则使选择器可以在压缩后的条目中搜索。GLM-5.3-Flash 又采用另一种粒度，只合并索引键，主注意力仍读取原始位置。比较几代模型时，先标出“被压缩的对象”和“重新选择的频率”，再谈内存或速度。<a href="https://arxiv.org/html/2602.15763v1#S2.SS1">GLM-5 报告 §2.1</a> · <a href="deepseek-family.html#sparse">对读 DeepSeek 的压缩与稀疏读取</a></p>
 <p>真正理解结构，最终应能回答三件事：每个位置留下了什么；下一层和下一个 token 实际读取了什么；省下的开销又以怎样的表示约束、信息损失或系统复杂度付出了代价。把这三件事说清楚，模型名称才会从一串缩写变成可以检查的计算过程。</p>
 <p class="src">沿革依据：<a href="https://arxiv.org/html/2103.10360v2">原始 GLM</a>；<a href="https://arxiv.org/abs/2210.02414">GLM-130B</a>；<a href="https://arxiv.org/abs/2406.12793">ChatGLM 家族报告</a>；<a href="https://arxiv.org/html/2508.06471v1">GLM-4.5</a>。</p>
-<h3>实现边界与进一步核查</h3><p>本文核查了模型配置、模型 forward、缓存更新和部分框架后端分支，但没有实际运行这些固定提交加载全部权重。Flash 的官方层型命名与框架内部规范名也存在适配层，因此这里不提供未经运行验证的一键部署承诺。生产环境中的缓存精度、分页、并行、内核选择和 MTP 调度，应继续以所部署版本的实现为准。</p>
+<h3 id="section-25">实现边界与进一步核查</h3><p>本文核查了模型配置、模型 forward、缓存更新和部分框架后端分支，但没有实际运行这些固定提交加载全部权重。Flash 的官方层型命名与框架内部规范名也存在适配层，因此这里不提供未经运行验证的一键部署承诺。生产环境中的缓存精度、分页、并行、内核选择和 MTP 调度，应继续以所部署版本的实现为准。</p>
 <ol class="sources"><li><a href="https://huggingface.co/zai-org/GLM-5.3/blob/ba32f8c19c8738e2c57c71798c601d477a7bf844/config.json">GLM-5.3 固定配置</a>；<a href="https://huggingface.co/zai-org/GLM-5.3-Flash/blob/46a050bec13002ad29ee795c16e61cf4fa3c4a9c/config.json">Flash 固定配置</a>。</li><li><a href="https://github.com/huggingface/transformers/tree/91987193f1cd198fb0947c7be75ffc2b02669e33/src/transformers/models/glm_moe_dsa">Transformers GLM MoE DSA</a>；<a href="https://github.com/huggingface/transformers/tree/91987193f1cd198fb0947c7be75ffc2b02669e33/src/transformers/models/glm5_next">Transformers GLM5 Next</a>。</li><li><a href="https://github.com/sgl-project/sglang/blob/5e32149fd6b58a30a4a72bbaa779aafc1bb6119a/python/sglang/srt/models/glm5_next.py">SGLang Flash 实现</a>；<a href="https://github.com/sgl-project/sglang/blob/5e32149fd6b58a30a4a72bbaa779aafc1bb6119a/python/sglang/srt/layers/attention/dsa/dsa_indexer_kpool.py">池化索引器</a>。</li><li><a href="https://arxiv.org/abs/2510.26692">Kimi Linear</a>；<a href="https://arxiv.org/abs/2512.24880">mHC</a>；<a href="https://arxiv.org/abs/2603.12201">IndexCache</a>。</li></ol>
 <div class="end">本文依据公开源码开展静态研究，并以 NumPy 小张量检查了投影吸收、状态更新、池化与混合的代数关系；这些检查不等于运行完整模型或验证模型效果。未训练检查点，也未实测生产吞吐。图中用于展示路由、打分和门控的数值若为示意，均在图注中说明。可用浏览器打印功能导出 PDF；交互图的默认状态仍保留完整含义。</div></section><section class="comments-section" id="comments" aria-label="Discussion">
 <div class="comments-header">
