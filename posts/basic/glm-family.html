@@ -34,7 +34,10 @@
 <a href="../../index.html">首页</a>
 <a href="../../interview/index.html">八股</a>
 </nav>
-<button id="theme-toggle" class="theme-toggle" type="button" aria-label="切换日夜主题">切换日夜</button>
+<button id="theme-toggle" class="theme-toggle" type="button" aria-label="切换日夜主题">
+          <span class="icon-sun">☀️</span>
+          <span class="icon-moon">🌙</span>
+        </button>
 </div>
 </div>
 </header><main class="site-main"><div class="family-layout"><aside class="family-nav" aria-label="文章目录"><details open><summary>文章目录</summary><nav id="toc-links"></nav></details></aside><article class="post-page family-article"><header class="post-page-header"><p class="post-page-category">Basic Knowledge · 模型架构</p><h1 class="post-page-title">GLM 技术演进：从 GLM-5 到 5.2、5.3 与 Flash</h1><p class="post-lead">沿着一次长程任务，追踪 GLM-5 的稀疏注意力、5.1 的持续工作能力和 5.2 的跨层索引共享，再拆开 5.3 与 Flash 各自处理历史的路径。</p><div class="post-page-keywords"><a class="post-keyword-chip" href="../../index.html?keyword=transformer">Transformer</a><a class="post-keyword-chip" href="../../index.html?keyword=attention">Attention 加速</a><a class="post-keyword-chip" href="../../index.html?keyword=training">训练</a><a class="post-keyword-chip" href="../../index.html?keyword=rope">RoPE · 位置编码</a></div><p class="post-page-meta" data-author="MOFANG" data-date="2026-11-20">2026年11月20日 · MOFANG</p><p class="src">版本资料核对至 2026-11-20 · 后代源码快照 2026-11-19 · 原创图解 · <a href="deepseek-family.html">同系列 · DeepSeek 技术演进</a></p></header><section class="post-page-content"><p>让模型持续修改一个工程，第一轮的输入可能只有一句需求。几十轮后，文件内容、测试输出和失败记录都进入了上下文。GLM-5 会让一个轻量索引器先在历史里挑选位置，再交给主注意力细读。同一个 token 经过下一层时，还要重新挑一遍吗？GLM-5.2 让一层选好位置，组内其余层就按这份地址读取各自的缓存，省去了重复扫描历史的工作。<a href="https://arxiv.org/html/2602.15763v1">GLM-5 技术报告</a> · <a href="https://z.ai/blog/glm-5.2">GLM-5.2 发布说明</a></p>

@@ -34,7 +34,10 @@
 <a href="../../index.html">首页</a>
 <a href="../../interview/index.html">八股</a>
 </nav>
-<button id="theme-toggle" class="theme-toggle" type="button" aria-label="切换日夜主题">切换日夜</button>
+<button id="theme-toggle" class="theme-toggle" type="button" aria-label="切换日夜主题">
+          <span class="icon-sun">☀️</span>
+          <span class="icon-moon">🌙</span>
+        </button>
 </div>
 </div>
 </header><main class="site-main"><div class="family-layout"><aside class="family-nav" aria-label="文章目录"><details open><summary>文章目录</summary><nav id="toc-links"></nav></details></aside><article class="post-page family-article"><header class="post-page-header"><p class="post-page-category">Basic Knowledge · 模型架构</p><h1 class="post-page-title">DeepSeek 技术演进：从 V3、R1、V3.1、V3.2 到 V4</h1><p class="post-lead">从 V3 的混合专家骨干出发，看 R1 如何训练推理，V3.1 怎样切换思考模式，V3.2 如何筛选历史，再沿 V4 的源码追踪一个 token 读写缓存的全过程。</p><div class="post-page-keywords"><a class="post-keyword-chip" href="../../index.html?keyword=transformer">Transformer</a><a class="post-keyword-chip" href="../../index.html?keyword=attention">Attention 加速</a><a class="post-keyword-chip" href="../../index.html?keyword=training">训练</a><a class="post-keyword-chip" href="../../index.html?keyword=speculative">投机推理</a></div><p class="post-page-meta" data-author="MOFANG" data-date="2026-11-20">2026年11月20日 · MOFANG</p><p class="src">版本资料核对至 2026-11-20 · 后代源码快照 2026-11-19 · 原创图解 · <a href="glm-family.html">同系列 · GLM 技术演进</a></p></header><section class="post-page-content"><p>2025 年 1 月，DeepSeek 用 V3-Base 做了一个实验。同一道数学题让模型答几次，按答案对错给奖励，模型会逐渐学会怎样推理吗？到了 9 月，团队面对的是另一种开销。模型每多想一步，就要再读一遍越来越长的历史。前一个问题催生了 R1 系列，后一个问题推动 V3.2 改写注意力读取历史的方式。<a href="https://arxiv.org/html/2501.12948v1#S2">R1 报告 §2</a> · <a href="https://huggingface.co/deepseek-ai/DeepSeek-V3.2-Exp">V3.2-Exp 模型卡</a></p>
