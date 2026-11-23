@@ -4,7 +4,6 @@
 .engine-post .header-inner { max-width:1320px; min-height:0; padding:18px 28px; }
 .engine-post .logo-text { font-size:14px; }
 .engine-post .site-nav a { font-size:13px; }
-.engine-post .theme-toggle { width:auto; height:auto; padding:6px 10px; font-size:13px; color:var(--text-soft); background:transparent; border:1px solid var(--border); border-radius:4px; }
 .engine-post .site-main { width:100%; max-width:1320px; padding:0 28px; }
 .ve-layout { display:grid; grid-template-columns:190px minmax(0,860px); gap:54px; align-items:start; padding:48px 0 72px; }
 .ve-rail { position:sticky; top:24px; font-size:13px; line-height:1.65; color:var(--text-soft); }

@@ -10,14 +10,14 @@
 <meta property="og:url" content="https://xiaomofang.github.io/posts/inference/llm-quantization-guide.html" />
 <meta name="description" content="系统理解大模型量化的原理、方法与发展，对比 GPTQ、AWQ、SmoothQuant、FP8、FP4、KV Cache 量化和主流工具链。" />
 <script>(function(){try{var saved=localStorage.getItem('yichuan-theme');document.documentElement.setAttribute('data-theme',saved||(window.matchMedia('(prefers-color-scheme: dark)').matches?'night':'day'));}catch(e){}})();</script>
-<link rel="stylesheet" href="../../styles.css?v=65" />
+<link rel="stylesheet" href="../../styles.css?v=74" />
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous" />
 <title>大模型量化全景：从数值原理到算法、工具与部署选择 · MOFANG</title>
 </head>
 <body class="transformer-post quant-post">
 <header class="site-header"><div class="header-inner">
 <a href="../../index.html" class="logo"><span class="logo-dot"></span><span class="logo-text">MOFANG</span></a>
-<div class="header-actions"><nav class="site-nav"><a href="../../index.html">返回博客</a></nav><button id="theme-toggle" class="theme-toggle" type="button" aria-label="切换明暗主题">明 / 暗</button></div>
+<div class="header-actions"><nav class="site-nav"><a href="../../index.html">返回博客</a></nav><button id="theme-toggle" class="theme-toggle" type="button" aria-label="切换明暗主题"><span class="icon-sun">☀️</span><span class="icon-moon">🌙</span></button></div>
 </div></header>
 <main class="site-main"><div class="tf-layout">
 <aside class="tf-rail" aria-label="文章目录"><details open><summary>文章目录</summary><ol><li><a href="#section-1"><span>01</span>显存与收益</a></li><li><a href="#section-2"><span>02</span>数值原理与手算</a></li><li><a href="#section-3"><span>03</span>读懂量化配置</a></li><li><a href="#section-4"><span>04</span>PTQ、QAT 与 QLoRA</a></li><li><a href="#section-5"><span>05</span>代表算法与对比</a></li><li><a href="#section-6"><span>06</span>FP8 与 FP4 格式</a></li><li><a href="#section-7"><span>07</span>KV Cache 量化</a></li><li><a href="#section-8"><span>08</span>性能与推理瓶颈</a></li><li><a href="#section-9"><span>09</span>发展脉络</a></li><li><a href="#section-10"><span>10</span>工具地图</a></li><li><a href="#section-11"><span>11</span>选型与实践流程</a></li><li><a href="#section-12"><span>12</span>质量与性能评测</a></li><li><a href="#section-13"><span>13</span>常见误解</a></li><li><a href="#section-14"><span>14</span>面试问答与场景题</a></li><li><a href="#section-15"><span>15</span>参考与延伸阅读</a></li></ol></details></aside>

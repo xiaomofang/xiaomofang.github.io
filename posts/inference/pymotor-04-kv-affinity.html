@@ -8,11 +8,11 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous" />
   <title>PyMotor 04 · 有缓存的节点，就该优先吗</title>
   <meta name="description" content="把 KV 事件、连续前缀、NPU/CPU/Disk 覆盖、介质加权、负载评分与回退连成闭环，手算一次选路，并设计可验证收益的对照实验。" />
-  <link rel="stylesheet" href="../../assets/pymotor/reader.css?v=3" />
+  <link rel="stylesheet" href="../../assets/pymotor/reader.css?v=4" />
 </head>
 <body class="pymotor-post">
 
-  <header class="site-header"><div class="header-inner"><a href="../../index.html" class="logo"><span class="logo-dot"></span><span class="logo-text">MOFANG</span></a><div class="header-actions"><nav class="site-nav"><a href="../../index.html">← 首页</a></nav><button id="theme-toggle" class="theme-toggle" type="button" aria-label="切换主题">切换日夜</button></div></div></header>
+  <header class="site-header"><div class="header-inner"><a href="../../index.html" class="logo"><span class="logo-dot"></span><span class="logo-text">MOFANG</span></a><div class="header-actions"><nav class="site-nav"><a href="../../index.html">← 首页</a></nav><button id="theme-toggle" class="theme-toggle" type="button" aria-label="切换主题"><span class="icon-sun">☀️</span><span class="icon-moon">🌙</span></button></div></div></header>
   <main class="site-main"><div class="pm-reader-layout"><aside class="pm-rail"><details open><summary>PyMotor · 阅读路径</summary><ol><li><a href="pymotor-00-overview.html"><span>00</span><span>系统全景</span></a></li><li><a href="pymotor-01-startup.html"><span>01</span><span>实例上线</span></a></li><li><a href="pymotor-02-request.html"><span>02</span><span>请求编排</span></a></li><li><a href="pymotor-03-scheduler-shm.html"><span>03</span><span>并发调度</span></a></li><li><a href="pymotor-04-kv-affinity.html" aria-current="page"><span>04</span><span>缓存亲和</span></a></li><li><a href="pymotor-05-stream-recovery.html"><span>05</span><span>流式恢复</span></a></li><li><a href="pymotor-06-node-manager.html"><span>06</span><span>节点运行时</span></a></li><li><a href="pymotor-07-ep-fault-tolerance.html"><span>07</span><span>大 EP 恢复</span></a></li><li><a href="pymotor-08-observability.html"><span>08</span><span>观测与复盘</span></a></li></ol><small>从一次执行理解系统，再用条件变化检验理解。</small></details></aside><article class="post-page">
     <header class="post-page-header">
 <p class="pm-kicker">PYMOTOR / 系统剖面 04</p>

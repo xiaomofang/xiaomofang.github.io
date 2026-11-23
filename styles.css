@@ -2110,7 +2110,7 @@ body {
 .transformer-post .header-inner { max-width:1380px; min-height:0; padding:20px 28px; }
 .transformer-post .logo-text { font-size:14px; }
 .transformer-post .site-nav a { font-size:13px; }
-.transformer-post .theme-toggle { width:auto; height:auto; padding:6px 10px; font-size:13px; color:var(--text-soft); background:transparent; border:1px solid var(--border); border-radius:4px; }
+.quant-post .post-page .theme-toggle { width:auto; height:auto; padding:6px 10px; font-size:13px; color:var(--text-soft); background:transparent; border:1px solid var(--border); border-radius:4px; }
 .transformer-post .site-main { width:100%; max-width:1380px; padding:0 28px; }
 .tf-layout { display:grid; grid-template-columns:190px minmax(0,880px); gap:54px; align-items:start; padding:48px 0 72px; }
 .tf-rail { position:sticky; top:24px; font-size:13px; line-height:1.65; color:var(--text-soft); max-height:calc(100vh - 48px); overflow-y:auto; padding-right:10px; }

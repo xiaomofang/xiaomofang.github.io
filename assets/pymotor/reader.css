@@ -29,17 +29,6 @@
 }
 .pymotor-post .logo-text { font-size: 14px; }
 .pymotor-post .site-nav a { font-size: 13px; }
-.pymotor-post .theme-toggle {
-  font: inherit;
-  font-size: 13px;
-  width: auto;
-  height: auto;
-  padding: 5px 10px;
-  color: var(--text-soft);
-  background: transparent;
-  border-color: var(--pm-line);
-  border-radius: 4px;
-}
 .pymotor-post .site-main { max-width: 1300px; padding: 0 36px; width: 100%; }
 .pm-reader-layout {
   display: grid;
