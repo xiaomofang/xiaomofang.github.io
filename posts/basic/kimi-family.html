@@ -1,0 +1,345 @@
+<!doctype html><html lang="zh-CN" data-theme="night"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><script>(function(){try{var saved=localStorage.getItem('yichuan-theme');document.documentElement.setAttribute('data-theme',saved||(matchMedia('(prefers-color-scheme: dark)').matches?'night':'day'));}catch(e){}})();</script><link rel="stylesheet" href="../../styles.css?v=72" /><title>Kimi 技术演进：从长文档助手、K2 到 K3.1 Pro · MOFANG</title><meta name="description" content="k1.5 怎样学会花时间解题？K2 怎样让一万亿参数协作？从 Kimi Linear 的一张状态矩阵出发，追踪 K3 怎样读历史、读前层、选专家，以及 K3.1 Pro 为什么又加了一道索引。"><link rel="canonical" href="https://xiaomofang.github.io/posts/basic/kimi-family.html"><style>
+.family-layout{display:grid;grid-template-columns:minmax(145px,210px) minmax(0,1fr);gap:clamp(20px,3vw,52px);max-width:1360px;margin:auto;padding:0 16px}
+.family-layout .post-page{width:100%;min-width:0;max-width:1000px;margin-inline:auto}
+.family-nav{align-self:start;position:sticky;top:4rem;max-height:81vh;overflow:auto;font-size:14px;line-height:1.55;color:var(--text-soft);padding-block:14px}
+.family-nav a{display:block;text-decoration:none;color:var(--text-soft);margin:10px 0}.family-nav summary{cursor:pointer;color:var(--text);font-weight:600}
+.family-nav a.active,.family-nav a:hover{color:var(--accent)}.family-nav details details{margin:4px 0 12px 10px;font-size:12px}
+.family-article h2,.family-article h3,.family-article h4{scroll-margin-top:4rem}
+.family-article figure{margin:30px 0}.family-article figure svg,.family-article figure img,.figure-canvas svg,.family-article .widget svg{display:block;width:100%;height:auto}
+.family-article figure>svg{cursor:zoom-in}.family-article figcaption,.family-article .src,.family-article .tags,.family-article .end{color:var(--text-soft);font-size:.83em}
+.family-article .fnum{font-weight:bold;margin-right:.4em}.figure-hint{display:block;color:var(--accent);font-size:.85em}
+.family-article .eq,.family-article .scope,.family-article .note,.family-article .widget{padding:16px;margin:20px 0;background:var(--surface-muted);border:1px solid var(--border);border-radius:5px}
+.family-article .eq{text-align:center;overflow-x:auto;font-family:'Cambria Math',serif;line-height:1.8}
+.family-article .inline-table{max-width:100%;overflow-x:auto}.family-article .inline-table table{border-collapse:collapse;width:100%}
+.family-article .inline-table td,.family-article .inline-table th{border-bottom:1px solid var(--border);padding:.55em .65em;text-align:left}
+.family-article pre{max-width:100%;overflow-x:auto}.family-article :not(pre)>code{overflow-wrap:anywhere}
+.family-article .controls{display:flex;gap:.7em;flex-wrap:wrap;margin:.7em 0;align-items:center}
+.family-article .controls button,.family-article .controls select,.figure-tools button{font:inherit;font-size:14px;padding:6px 12px;border:1px solid var(--border);color:var(--text);background:var(--bg);border-radius:5px;cursor:pointer}
+.family-article .controls button[aria-pressed=true]{border-color:var(--accent);color:var(--accent)}
+.family-article .widget svg{background:white;border-radius:4px;font-family:'Microsoft YaHei',sans-serif}
+.family-article .readout{font-size:.85em}.figure-dialog{width:min(96vw,1700px);max-height:94vh;padding:0;color:var(--text);border:1px solid var(--border);background:var(--bg)}
+.figure-dialog::backdrop{background:rgb(0 0 0/.72)}.figure-tools{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;font-size:14px}
+.figure-canvas{overflow:auto;max-height:79vh}.figure-canvas.actual svg{width:1600px;max-width:none}
+@media(max-width:800px){.family-layout{display:block;padding:0 6px}.family-nav{position:static;max-height:230px}.family-nav a{margin:6px 0}}
+@media print{.family-nav,.figure-hint,.family-article .controls,.figure-dialog,.site-header,.comments-section{display:none}.family-layout{display:block}}
+
+.kimi-figure>svg{border:1px solid var(--border);border-radius:10px}
+.kimi-moba{border:1px solid var(--border);border-radius:10px;padding:clamp(14px,3vw,26px);background:var(--surface-muted)}
+.kimi-moba h4{margin:0 0 .35em;font-size:1.13em}
+.kimi-moba p{margin:.5em 0 1em}
+.kimi-controls{display:flex;align-items:center;flex-wrap:wrap;gap:12px}
+.kimi-controls select{font:inherit;font-size:.88em;padding:4px 10px;color:var(--text);background:var(--bg);border:1px solid var(--text-soft);border-radius:5px}
+.kimi-blocks{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin:16px 0 10px}
+.kimi-block{padding:10px;border:1px solid var(--border);border-radius:5px;font-size:.83em;line-height:1.65}
+.kimi-block>*{display:block}.kimi-block span{color:var(--text-soft)}
+.kimi-block[data-read="yes"]{border-color:var(--hue-blue);box-shadow:inset 0 2px var(--hue-blue)}
+.kimi-current{border-color:var(--hue-purple);border-style:dashed}
+.kimi-answer{font-weight:600}
+.family-article details>summary{cursor:pointer}.family-article a:focus-visible,.family-article svg:focus-visible{outline:2px solid var(--accent)}
+@media(max-width:620px){
+  .kimi-blocks{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .family-post .site-main{padding-inline:6px;width:100%}
+  .family-layout{padding-inline:0}
+  .family-layout .post-page{padding-inline:12px}
+}
+</style></head><body class="family-post"><div class="ambient" aria-hidden="true"></div><canvas id="star-canvas"></canvas><header class="site-header">
+<div class="header-inner">
+<a href="../../index.html" class="logo">
+<span class="logo-dot">
+</span>
+<span class="logo-text">MOFANG</span>
+</a>
+<div class="header-actions">
+<nav class="site-nav">
+<a href="../../index.html">首页</a>
+<a href="../../interview/index.html">八股</a>
+</nav>
+<button id="theme-toggle" class="theme-toggle" type="button" aria-label="切换日夜主题">
+          <span class="icon-sun">☀️</span>
+          <span class="icon-moon">🌙</span>
+        </button>
+</div>
+</div>
+</header><main class="site-main"><div class="family-layout"><aside class="family-nav" aria-label="文章目录"><details open><summary>文章目录</summary><nav id="toc-links"></nav></details></aside><article class="post-page family-article"><header class="post-page-header"><p class="post-page-category">Basic Knowledge · 模型架构</p><h1 class="post-page-title">Kimi 技术演进：从长文档助手、K2 到 K3.1 Pro</h1><p class="post-lead">k1.5 怎样学会花时间解题？K2 怎样让一万亿参数协作？从 Kimi Linear 的一张状态矩阵出发，追踪 K3 怎样读历史、读前层、选专家，以及 K3.1 Pro 为什么又加了一道索引。</p><div class="post-page-keywords"><a class="post-keyword-chip" href="../../index.html?keyword=transformer">Transformer</a><a class="post-keyword-chip" href="../../index.html?keyword=attention">Attention 加速</a><a class="post-keyword-chip" href="../../index.html?keyword=training">训练</a></div><p class="post-page-meta" data-author="MOFANG" data-date="2026-11-26">2026年11月26日 · MOFANG</p><p class="src">资料核对至 2026 年 11 月 26 日 · 同系列　<a href="deepseek-family.html">DeepSeek</a>　<a href="glm-family.html">GLM</a></p></header><section class="post-page-content"><p>把一套软件的旧手册、新版界面截图和一次失败的运行日志交给 Kimi，让它找出升级后哪个参数改了名字。第一步是让三份材料放得进同一个请求。第二步是从几万行文字里找到对应的两处定义。最难的是第三步：旧手册和界面互相矛盾，模型得决定要不要查代码、怎样验证改法、工具返回之后从哪里接着做。这三个困难分别落在输入窗口、注意力和训练反馈上。Kimi 的几次大变化，也发生在不同的地方。</p>
+<p>沿时间看，2023 年的 Kimi Chat 从长文档起家，2025 年的 k1.5 开始认真计算「解一题值得花多少输出 token」，之后的 K2 把稀疏专家和工具任务放大到万亿参数级。沿技术来源看，路线更有意思：后来进入 K3 的递推注意力，此前在一条单独开放权重的 Kimi Linear 支线上做过对照实验。读下图时，先看箭头上写的是哪种关系。<a href="https://www.kimi.com/en/blog/">月之暗面研究档案</a> · <a href="https://arxiv.org/abs/2510.26692">Kimi Linear 报告</a> · <a href="https://arxiv.org/abs/2607.24653">K3 报告</a></p>
+<figure class="kimi-figure"><svg xmlns="http://www.w3.org/2000/svg" role="img" viewBox="0 0 440 650" font-family="system-ui, sans-serif"><title>Kimi 家族的六组技术与训练关系</title><desc>每行独立阅读；箭头旁标明权重初始化、架构采用或训练更新。</desc><rect width="440" height="650" rx="14" fill="var(--bg)" stroke="var(--border)"/><text x="17" y="32" fill="var(--text)" font-size="20" font-weight="650">哪些版本共享技术，哪些模型接着训练？</text><path d="M16 50H424" stroke="var(--border)"/><text x="18" y="97" fill="var(--text)" font-size="19" font-weight="600">Moonlight 中间权重</text><text x="236" y="97" fill="var(--text)" font-size="19" font-weight="600">Kimi-VL</text><path d="M211 90h17m-6 -5 6 5 -6 5" stroke="var(--accent)" stroke-width="2" fill="none"/><text x="18" y="72" fill="var(--accent)" font-size="15" font-weight="600">语言侧初始化</text><text x="18" y="128" fill="var(--text-soft)" font-size="15" font-weight="400">读过 5.2T 文本 token 的检查点进入视觉语言训练。</text><path d="M16 150H424" stroke="var(--border)"/><text x="18" y="197" fill="var(--text)" font-size="19" font-weight="600">K2 预训练后期检查点</text><text x="236" y="197" fill="var(--text)" font-size="19" font-weight="600">K2.5</text><path d="M211 190h17m-6 -5 6 5 -6 5" stroke="var(--accent)" stroke-width="2" fill="none"/><text x="18" y="172" fill="var(--accent)" font-size="15" font-weight="600">语言侧初始化</text><text x="18" y="228" fill="var(--text-soft)" font-size="15" font-weight="400">在原有语言能力上继续进行图文联合预训练。</text><path d="M16 250H424" stroke="var(--border)"/><text x="18" y="297" fill="var(--text)" font-size="19" font-weight="600">Kimi-VL / MoonViT</text><text x="236" y="297" fill="var(--text)" font-size="19" font-weight="600">K2.5 / MoonViT-3D</text><path d="M211 290h17m-6 -5 6 5 -6 5" stroke="var(--hue-blue)" stroke-width="2" fill="none"/><text x="18" y="272" fill="var(--hue-blue)" font-size="15" font-weight="600">视觉设计</text><text x="18" y="328" fill="var(--text-soft)" font-size="15" font-weight="400">把原生分辨率的图像处理设计扩展到视频。</text><path d="M16 350H424" stroke="var(--border)"/><text x="18" y="397" fill="var(--text)" font-size="19" font-weight="600">K2.6</text><text x="236" y="397" fill="var(--text)" font-size="19" font-weight="600">K2.7 Code</text><path d="M211 390h17m-6 -5 6 5 -6 5" stroke="var(--accent)" stroke-width="2" fill="none"/><text x="18" y="372" fill="var(--accent)" font-size="15" font-weight="600">模型更新</text><text x="18" y="428" fill="var(--text-soft)" font-size="15" font-weight="400">模型卡说明基于 K2.6，面向长程软件工程。</text><path d="M16 450H424" stroke="var(--border)"/><text x="18" y="497" fill="var(--text)" font-size="19" font-weight="600">Kimi Linear</text><text x="236" y="497" fill="var(--text)" font-size="19" font-weight="600">K3</text><path d="M211 490h17m-6 -5 6 5 -6 5" stroke="var(--hue-blue)" stroke-width="2" fill="none"/><text x="18" y="472" fill="var(--hue-blue)" font-size="15" font-weight="600">架构采用</text><text x="18" y="528" fill="var(--text-soft)" font-size="15" font-weight="400">KDA 从 48B 混合模型的试验进入 2.8T 主干。</text><path d="M16 550H424" stroke="var(--border)"/><text x="18" y="597" fill="var(--text)" font-size="19" font-weight="600">K3</text><text x="236" y="597" fill="var(--text)" font-size="19" font-weight="600">K3.1 Pro</text><path d="M211 590h17m-6 -5 6 5 -6 5" stroke="var(--hue-purple)" stroke-width="2" fill="none"/><text x="18" y="572" fill="var(--hue-purple)" font-size="15" font-weight="600">训练与结构</text><text x="18" y="628" fill="var(--text-soft)" font-size="15" font-weight="400">扩大后训练，并在全局注意力路径加入稀疏检索。</text></svg><figcaption>图 1 · 六组有公开依据的关系。每行单独阅读；同一个版本可以从前代沿用一种设计，也可以从另一个检查点继续训练。原创谱系图。<span class="figure-hint">点按图解可放大查看</span></figcaption></figure>
+<h2 id="long-context">Kimi Chat：把一本手册放进来，代价发生在哪里？</h2>
+<p>2023 年 10 月 9 日，Kimi Chat 开始内测。合作方火山引擎记载，当时产品支持约 20 万汉字的上下文输入；2024 年 3 月公布的长文档能力达到 200 万字。这里的单位值得保留原样：用户数的是汉字，模型处理的是 tokenizer 切出的 token。换一篇含英文缩写、代码和路径的手册，两者的换算就会变。早期公告记录了产品能力，无法据此反推出后来某个开放检查点的缓存布局。<a href="https://docs.volcengine.com/docs/Informationdynamics/MoonshotAIlargemodelserviceKimiChatbeginsinternaltestingVolcanoEngineprovidestraininginferenceaccele?lang=zh">火山引擎 · Kimi Chat 内测公告</a> · <a href="https://docs.volcengine.com/docs/Technicalanalysis/Supporting2millionwordlengthcontextwhathardtechnologyishiddenbehindKimi?lang=en">火山引擎 · 长上下文技术说明</a></p>
+<p>先用标准因果注意力算一笔账。若序列有 <i>T</i> 个 token，位置 1 能看 1 个，位置 2 能看 2 个，一直到位置 <i>T</i> 能看 <i>T</i> 个。每个头在提示词预填充阶段共有 <i>T</i>(<i>T</i>+1)/2 对可见的位置。输入加长十倍，成对计算量接近百倍。到了逐 token 解码阶段，旧位置的键和值能留在 KV cache（键值缓存）里，每一步只新增一份当前记录，但下一次查询仍可能读取全部历史。这是解释瓶颈的基线，实际内核可以分块计算，无须真的在显存中摆出一张完整的三角矩阵。</p>
+<p>这个区分解释了月之暗面为何还做了 <strong>Mooncake</strong>。多个请求若共享很长的前缀，服务能否把已有 KV 送到需要它的解码设备，直接影响首个 token 要等多久。Mooncake 把预填充和解码的机器分工，以缓存的复用、放置和传输安排请求。它给出的答案属于推理服务系统。换一套调度可以改变用户等待的时间，即使模型每一层的公式都不变。<a href="https://github.com/kvcache-ai/Mooncake">Mooncake 官方实现</a> · <a href="../inference/mooncake-architecture-overview.html">本站 Mooncake 架构剖析</a></p>
+
+<h2 id="k15">k1.5：输入能放长，解题过程也能放长吗？</h2>
+<p>2025 年 1 月 20 日发布的 Kimi k1.5 把长上下文预算用到了另一个地方。给一道有图的数学题，模型可以先试一种解法，发现矛盾，回头换一种，再交出最终答案。训练团队先用长推理轨迹做监督微调，再做强化学习（RL，reinforcement learning）：对同一道题采样多个完整回答，用答案校验或程序测试给结果打分，并据此调整以后采到这些行为的概率。中途绕路而最终纠正的解法也有机会得到正反馈。技术报告讨论的是多模态长、短推理模型及其训练配方，未在这些材料里给出可与 K2 逐层对齐的开放权重配置。<a href="https://github.com/MoonshotAI/Kimi-k1.5">k1.5 官方仓库</a> · <a href="https://arxiv.org/html/2501.12599v1#S2">技术报告 §2</a></p>
+<p>把强化学习的窗口推到 128K，会遇到一个训练系统问题：同一批题里，有的几百步就结束，有的推理还在继续。如果要求整条长轨迹一次生成完，短任务先做完的资源就容易空等。k1.5 采用 <em>partial rollout</em>（分段采样）。这一轮用完生成预算，把已生成的前缀存入缓冲区，下一轮再接着采样，其他工作进程可以处理短题。省下的是重复生成前缀和等待的开销。代价是旧前缀可能来自更新前的策略，需要训练系统处理跨轮样本。<a href="https://arxiv.org/html/2501.12599v1#S2.SS6.SSS2">报告 §2.6.2、图 3b</a></p>
+<p>会花时间以后，还得学会何时停笔。报告把「长解法教短模型」称为 <em>long2short</em>。其中一个做法很直观：同一道题采样八次，能验证为正确的回答里挑最短的一条用来训练。另一种做法是在强化学习的结果奖励上叠加相对长度项。假设同一题最短和最长的回答分别为 100、300 个 token，那么正确的 150-token 回答对应的长度项为 0.5 − (150 − 100)/(300 − 100) = 0.25；同样短但答错，只能得到 0 的长度项。这样模型能从简洁的正确推理中获益，草草交错答案也占不到长度便宜。数字是示例；实际总奖励还要乘长度项权重。<a href="https://arxiv.org/html/2501.12599v1#S2.SS3.SSS3">长度奖励定义</a> · <a href="https://arxiv.org/html/2501.12599v1#S2.SS4">四种 long2short 做法</a></p>
+<p>在 AIME 2024 数学赛题上，团队报告的长推理模型 pass@1 为 77.5%，短推理模型为 60.8%。pass@1 衡量采样一个答案时的正确率。两张表里的模型经过不同训练，这组数字说明两种成品在同一套题上的取舍。要把差值解释成「多写某个数量的 token 值几分」，还得固定权重、改变预算重新测量。<a href="https://arxiv.org/html/2501.12599v1#S3.SS2">报告 §3.2，表 2、表 3</a></p>
+
+<h2 id="branches">三条早期支线：优化器、视觉与工具各自改了哪里？</h2>
+<p><strong>Moonlight 留下一条可以追到权重的线。</strong> 2025 年 2 月，团队用 16B 总参数、约 3B 激活的 Moonlight 研究 Muon 优化器如何放大。把每一步参数更新看成矩阵，Muon 对动量矩阵做近似正交化；模型变大后，长宽不同的矩阵收到的更新尺度并不一致。研究者调整各矩阵更新的均方根尺度，并引入权重衰减。在论文的 800M 参数、100B 训练 token 对照中，加入衰减的版本在后期取得了较低验证损失。这里改的是训练时写回权重的方式。K2 的 MuonClip 又针对注意力分数增加了一道控制，后文会拆开这一步。<a href="https://arxiv.org/html/2502.16982v1#S2">Muon 研究 §2、图 2</a> · <a href="https://huggingface.co/moonshotai/Moonlight-16B-A3B">Moonlight 模型卡</a></p>
+<p><strong>Kimi-VL 把像素送进了这条语言主干。</strong> 4 月 10 日发布的 Kimi-VL 从 Moonlight 已读过 5.2 万亿个纯文本 token 的中间检查点开始。原生分辨率视觉编码器 MoonViT 先提取图像特征，把相邻 2×2 的网格位置合到通道维，投影后接入语言模型，再继续图文混合训练。以 4×4 网格为例，这一步从 16 个空间位置变成 4 个，每个位置暂时带四份局部特征；语言模型为这张图分配的序列位置随之减少。公开的 Instruct、Thinking 及后来的 Thinking-2506 让这条视觉研究线能被独立核查。<a href="https://arxiv.org/html/2504.07491v1#S2">Kimi-VL 技术报告 §2、图 3</a> · <a href="https://github.com/MoonshotAI/Kimi-VL">Kimi-VL 版本记录</a></p>
+<p><strong>同年 6 月的两个名字记录了智能体训练的不同试验。</strong> Kimi-Dev-72B 的模型卡把基座列为 Qwen2.5-72B，训练中生成补丁并在隔离环境里运行测试，能否让测试通过成为反馈。Kimi-Researcher 则学习如何检索、打开网页、利用中间结果决定下一次查询；同一个问题可以产生长度不同、工具选择不同的轨迹。工具返回的内容会占用上下文，工具等待时间也会进入任务耗时。读后面 K2 的评测时记住这点：换模型、换工具和换执行环境，都可能改变一道题能否完成。<a href="https://huggingface.co/moonshotai/Kimi-Dev-72B">Kimi-Dev 模型卡</a> · <a href="https://moonshotai.github.io/Kimi-Researcher/">Kimi-Researcher 技术说明</a></p>
+
+<h3 id="moba">MoBA 的选择题：这一条查询，值得细读哪几段历史？</h3>
+<p>月之暗面 2025 年 2 月的 MoBA（Mixture of Block Attention，分块选择注意力）提供了一个很直观的长文本对照。把过去的键按连续位置切块，对第 <i>j</i> 块取平均键 <i>mⱼ</i>。当前查询 <i>q</i> 和它做点积，分数 <i>q·mⱼ</i> 决定哪几个历史块进入精读。块内仍保留逐 token 的键和值，历史块与当前块的有效位置一起参与注意力归一化。当前块强制保留并使用因果掩码，否则块均值有可能把后文泄漏给前面的查询。切换图中的查询方向，看看哪一段旧文字会被读到。<a href="https://arxiv.org/html/2502.13189v1#S2">MoBA §2，式 (6) 与算法 1</a></p>
+<figure class="kimi-moba" aria-labelledby="moba-title">
+  <h4 id="moba-title">同一份历史，换一个查询</h4>
+  <p>每块含两个位置。第 7 个位置发出查询，预算容许读取一个完整历史块和当前块。</p>
+  <div class="kimi-controls"><label for="moba-query">查询向量 q</label>
+    <select id="moba-query"><option value="1,0">(1, 0)</option><option value="0,1">(0, 1)</option><option value="-1,0">(−1, 0)</option></select>
+  </div>
+  <div class="kimi-blocks">
+    <div class="kimi-block" data-key="2,0" data-read="yes"><b>位置 1、2</b><span>平均键 (2, 0)</span><small>分数 2 · 选中</small></div>
+    <div class="kimi-block" data-key="0,2"><b>位置 3、4</b><span>平均键 (0, 2)</span><small>分数 0 · 跳过</small></div>
+    <div class="kimi-block" data-key="-2,0"><b>位置 5、6</b><span>平均键 (−2, 0)</span><small>分数 −2 · 跳过</small></div>
+    <div class="kimi-block kimi-current"><b>位置 7、8</b><span>当前块始终入选</span><small>位置 8 被遮挡</small></div>
+  </div>
+  <p class="kimi-answer" aria-live="polite">本次精读位置 1、2、7。</p>
+  <figcaption>图 2 · MoBA 原创计算示例。蓝色框由查询与历史块平均键的点积决定；当前块只放行至当前位置。键与查询均为示例数值。</figcaption>
+</figure>
+<p>这种选择可能漏掉「一个不起眼段落里唯一重要的一行」，因为均值会冲淡少量特殊的键。论文在 8K 序列、块宽 512、总共选 3 块的设置下，最多保留当前块加两个历史块，最长位置约跳过 81.25% 的候选位置。算得少的对象是注意力配对；被跳过的块仍需留给未来的查询。后面读到 Kimi Linear 时，关注对象要换成另一件事：那里的一部分层连逐位置记录都换成了递推状态。<a href="https://arxiv.org/html/2502.13189v1#S3">MoBA §3，表 1 与图 3</a> · <a href="https://arxiv.org/abs/2510.26692">Kimi Linear 技术报告</a></p>
+<h2 id="k2-backbone">K2：一万亿参数如何参与下一词预测？</h2>
+<p>假设提示末尾是「请修改这个函数」。下一词可能是解释文字，也可能是代码。2025 年 7 月 11 日发布的 Kimi K2 用同一条主干预测两者。Kimi-K2-Base 是预训练基座，Kimi-K2-Instruct 经过后训练，定位于直接应答与工具调用。报告记载了约 1.04 万亿总参数、每个 token 约 320 亿激活参数和 15.5 万亿预训练 token。这三个数分别衡量模型容量、单个位置用到的参数和训练数据量。<a href="https://platform.kimi.com/blog/posts/changelog">开放平台发布记录</a> · <a href="https://arxiv.org/html/2507.20534v1#S2">K2 技术报告 §2</a> · <a href="https://github.com/MoonshotAI/Kimi-K2">两个检查点的定位</a></p>
+<h3 id="k2-forward">沿着一次前向，分别看注意力和专家</h3>
+<p>从官方 K2-Base 权重仓库的 Python 实现读起。<code>TikTokenTokenizer</code> 将文字编码成整数。假设一批只有一个样本，分词后长 <i>T</i>，则 <code>input_ids</code> 形状为 <code>[1,T]</code>。<code>DeepseekV3Model.embed_tokens</code> 查表后得到 <code>[1,T,7168]</code>。每个位置现在有一行向量，它先后通过 61 层。代码沿用 DeepSeek-V3 的类名，实际执行的层数、专家数和注意力头数由 Moonshot 发布的配置决定。<a href="https://huggingface.co/moonshotai/Kimi-K2-Base/blob/ce72df012259dcc55d945e890f815fe7ef69159c/tokenization_kimi.py#L26">固定版分词器</a> · <a href="https://huggingface.co/moonshotai/Kimi-K2-Base/blob/ce72df012259dcc55d945e890f815fe7ef69159c/config.json">K2-Base 配置</a> · <a href="https://huggingface.co/moonshotai/Kimi-K2-Base/blob/ce72df012259dcc55d945e890f815fe7ef69159c/modeling_deepseek.py#L1347">模型入口</a></p>
+<p>每层先从此前的位置读信息。K2 使用多头潜在注意力（Multi-head Latent Attention，MLA）。在一个头里，查询分成 128 维内容部分和 64 维旋转位置部分。键值侧，线性层先把每个位置压成 512 维内容潜变量，另产生 64 维位置键。参考实现把潜变量展开成 64 个头各自的内容键与值，每头各 128 维；位置键在头间共享。<code>transpose</code> 把头维移到序列维之前，便于每个头独立算查询和历史键的点积。加上因果掩码后，位置只能读取自身及以前的值。注意力输出最后投影回 7168 维，与输入残差相加。<a href="https://huggingface.co/moonshotai/Kimi-K2-Base/blob/ce72df012259dcc55d945e890f815fe7ef69159c/modeling_deepseek.py#L751">DeepseekV3Attention.forward</a></p>
+<p>读到 <code>past_key_value.update</code> 时值得停一下：这一版参考代码将<strong>已经展开</strong>的每头 K、V 交给缓存接口。MLA 的代数结构允许优化内核缓存 512+64 个元素再参与计算，生产服务究竟存哪种布局取决于部署后端。比如提示长 <i>T</i> 时，预填充要处理 <i>T</i> 行；下一步解码只投影一个新位置，但它的查询仍须访问先前 <i>T</i> 个位置和自己。只凭配置算出的压缩缓存容量无法代替这段程序的实测显存。<a href="https://huggingface.co/moonshotai/Kimi-K2-Base/blob/ce72df012259dcc55d945e890f815fe7ef69159c/modeling_deepseek.py#L805">参考代码的缓存更新</a></p>
+<p>接下来是每个位置自己的非线性变换。第一层走稠密前馈网络，后面 60 层使用混合专家（Mixture of Experts，MoE）。把批量和序列展平成 <i>N</i> 行后，路由器将 <code>[N,7168]</code> 映射成 <code>[N,384]</code> 分数。每个位置从 384 个可选专家中取 8 个，同时始终走一个共享专家。举例说，若两个位置选到同一个专家，推理实现可以把这两行凑到一起执行该专家的矩阵乘法，再将结果送回各自原来的位置。这也解释了工程上的代价：当专家分布在不同设备上时，需要搬运这些行，权重存储、跨卡通信和批次大小都会影响延迟。<a href="https://huggingface.co/moonshotai/Kimi-K2-Base/blob/ce72df012259dcc55d945e890f815fe7ef69159c/modeling_deepseek.py#L523">DeepseekV3MoE.forward 与 moe_infer</a></p>
+<p>选谁与给多少权重还有一个细微区别。<code>MoEGate.forward</code> 先算每位专家的 sigmoid 分数 <i>s</i>，把一个按专家保存的校正偏置加到 <i>s</i> 上做选择。得到 8 个编号后，代码再从原始 <i>s</i> 取回对应分数，归一化并乘配置系数 2.827。最终共享专家的输出与 8 个路由专家的加权和相加。举一个只用两位候选、选一位的示意：原分为 0.60、0.58，偏置为 0、0.05，第二位因 0.63 入选；参与后续归一化的是 0.58。<a href="https://huggingface.co/moonshotai/Kimi-K2-Base/blob/ce72df012259dcc55d945e890f815fe7ef69159c/modeling_deepseek.py#L423">MoEGate.forward</a></p>
+<p>61 层之后，最后一次归一化和语言模型输出头把每个位置映射到 163,840 个词表分数。生成器在最后一个位置的分数上按选定策略采样或取最大值。新 ID 追加到序列，再走下一次单步解码。对长提示，头数直接影响注意力算量。报告在 128K 长度、384 个路由专家的设置下估算，将头数从 64 增至 128，推理浮点运算量增加 83%；在等训练 token 的对照中，加倍头数仅让验证损失下降约 0.5%–1.2%。K2 选了 64 头。这里的 83% 是计算量估算，真实计时还取决于访存和内核。<a href="https://arxiv.org/html/2507.20534v1#S2.SS3">K2 报告 §2.3，图 5、6</a> · <a href="https://huggingface.co/moonshotai/Kimi-K2-Base/blob/ce72df012259dcc55d945e890f815fe7ef69159c/modeling_deepseek.py#L1515">DeepseekV3ForCausalLM</a></p>
+
+<h3 id="k2-muonclip">MuonClip：限制失控的注意力分数，要改哪组权重？</h3>
+<p>前向里看不到 K2 的另一项关键改动，因为它发生在一次训练更新的末尾。Muon 利用梯度动量的矩阵结构，借助 Newton–Schulz 迭代近似正交化更新方向。团队把它放大到 53B 总参数、9B 激活参数的中等规模试验后，观察到部分头送入 softmax 的最大分数迅速超过 1,000。如果一个位置的分数远高于其余位置，softmax 会把几乎全部权重分给它；个别头的这种异常增长给训练稳定性带来困难。<a href="https://arxiv.org/html/2507.20534v1#S2.SS1">K2 报告 §2.1，图 2 与算法 1</a></p>
+<p>对注意力头 <i>h</i>，记一次前向在当前批次观察到的最大缩放点积为 <i>S</i>。若它超过阈值 τ=100，定义 γ=τ/<i>S</i>。本步梯度更新完成后，内容查询和内容键的投影权重各乘 √γ，因此它们的点积多出 √γ × √γ = γ。位置部分的键由各头共享，为避免牵连其他头，仅将该头的位置查询权重乘 γ。举例说，若 <i>S</i>=400，则 γ=0.25，内容查询与键的权重各减半。把输入暂时固定，只看这次缩放，原来 400 的分数就会落到 100。本批次已经完成的前向和反向照常保留，下一批输入仍会产生自己的分数。<a href="https://arxiv.org/html/2507.20534v1#S2.SS1">按头裁剪的公式及 MLA 特例</a></p>
+<p>团队报告，K2 前 70,000 个训练步里，只有 12.7% 的注意力头曾触发裁剪，后期各头逐渐落回阈值以内。作者还用 3B 总参数、0.5B 激活参数的小模型，将阈值压到 30 做对照，损失曲线与原 Muon 接近。前者是一次大训练的观测，后者才是有基线的消融。若对照 GLM-5.4，K2 此处监控的是 <i>q·k</i> 所形成的注意力分数；GLM-5.4 的门则读取当前 token 的状态，调节循环结果向残差流写回的比例。两者介入的时机和对象各异。<a href="https://arxiv.org/html/2507.20534v1#A4">K2 报告附录 D</a> · <a href="glm-family.html#glm54-forward">GLM-5.4 的逐轮门控</a></p>
+
+<h2 id="k2-thinking">从 0905 到 Thinking：一次请求怎样变成多轮工作？</h2>
+<p>即使每次都能预测一个合法 token，模型也可能发出参数错误的工具调用，或者在失败后一直重试。K2 的后训练把这段过程变成可学习的轨迹。团队收集真实工具规格并合成更多接口，再按工具组合生成任务和验收准则。模拟环境记录调用带来的状态变化，让模型看到成功、部分成功和错误反馈；筛选后的轨迹可以用于学习「读反馈，再决定下一步」。在这种训练里，任务是否最终完成才是跨多轮行为的证据，单次生成的语法正确率只能覆盖其中一部分。<a href="https://arxiv.org/html/2507.20534v1#S3">K2 报告 §3，图 8</a></p>
+<p><strong>2025 年 9 月 5 日，Kimi-K2-Instruct-0905。</strong> 与首发 Instruct 相比，配置仍为 61 层、64 头、384 选 8，上下文位置上限从 131,072 提到 262,144。官方在 SWE-bench Verified 软件修复任务中报告，0711 版为 65.8，0905 版为 69.2 ± 0.63。后一个数字是完整测试集独立跑五次的均值与标准差，使用团队改造的 SWE-agent 环境，限制工具可见上下文，并预先清理目标提交之外不可达的 Git 对象。这给出了版本对比，仍然无法把这 3.4 分单独归给窗口扩展。<a href="https://platform.kimi.com/blog/posts/kimi-k2-0905">官方更新说明</a> · <a href="https://huggingface.co/moonshotai/Kimi-K2-Instruct-0905/blob/ac6c49f04883bd0a0598b790693a72061c676629/README.md">模型卡与评测条件</a></p>
+<p><strong>2025 年 11 月 6 日，Kimi K2 Thinking。</strong> 它把推理穿插在工具调用之间：先制定行动，读取工具结果，再根据结果修订计划。每次继续生成仍使用同一语言主干。团队报告，在长程任务中观察到 200–300 次连续调用；这描述的是整段任务可维持的交互长度。网页聊天当时只开放部分工具，还限制步数，因而同一道题在网页端不一定重现报告成绩。为控制长时间逐词解码的开销，团队在后训练中做量化感知训练（QAT），对 MoE 权重使用四位整数量化，模型卡的评测也使用 INT4 权重；激活、缓存和全部算子各自有精度设置。<a href="https://www.kimi.com/en/blog/kimi-k2-thinking">Thinking 官方说明</a> · <a href="https://huggingface.co/moonshotai/Kimi-K2-Thinking/blob/a51ccc050d73dab088bf7b0e2dd9b30ae85a4e55/README.md">模型卡 §3–4</a></p>
+
+<h2 id="k25-vision">K2.5：当工具返回的是一张截图</h2>
+<p>假设智能体要修一个错位的按钮。测试日志说「已渲染」，却不会告诉模型按钮遮住了哪一行文字。2026 年 1 月 27 日发布的 Kimi K2.5 接入了能读原始画面的视觉分支。报告把训练起点写得很具体：语言侧取接近 K2 预训练末期的检查点，继续进行约 15 万亿视觉与文本 token 的联合预训练；视觉侧继承 Kimi-VL 的原生分辨率设计，并把 MoonViT 扩展成可共用参数处理图像和视频的 MoonViT-3D。K2 Thinking 等模型也为后续指令数据提供候选回答，这属于数据来源，与初始化整个语言主干是两件事。<a href="https://arxiv.org/html/2602.02276v1#S4">K2.5 报告 §4.1–4.4</a> · <a href="https://www.kimi.com/en/help/agent/agent-swarm">发布日期</a></p>
+<p>看一组便于算尺寸的输入。假设预处理后的四帧画面均为 56×56 像素，恰好组成一个时间块。每帧切成 4×4 个 14×14 像素的补丁，四帧合计 64 个。27 层视觉编码器对这个时空块编码，输出可看成 <code>[4,4,4,1152]</code>，依次代表时间、高、宽和通道。在 <code>tpool_patch_merger</code> 中，对时间维取平均，同一空间位置的四帧信息汇成一组；每个 2×2 邻域的四个特征并排拼接。结果是四组 <code>[4,1152]</code> 特征，分别归一化、展平成 4,608 维，再投影到语言宽度 7,168。整块视频因此占用 <strong>4 个视觉位置</strong>进入语言序列。真实视频按多个时间块和预处理后的分辨率计算，4 并非整段视频的固定容量。<a href="https://huggingface.co/moonshotai/Kimi-K2.5/blob/94b44e57fb4797fde1c1872bed70aef3c93a07f6/config.json">视觉配置</a> · <a href="https://huggingface.co/moonshotai/Kimi-K2.5/blob/94b44e57fb4797fde1c1872bed70aef3c93a07f6/modeling_kimi_k25.py#L605">时空合并</a> · <a href="https://huggingface.co/moonshotai/Kimi-K2.5/blob/94b44e57fb4797fde1c1872bed70aef3c93a07f6/modeling_kimi_k25.py#L737">PatchMergerMLP</a></p>
+<figure class="kimi-figure"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 460 537" role="img" aria-labelledby="k25vt-title k25vt-desc" font-family="Microsoft YaHei,PingFang SC,sans-serif">
+<title id="k25vt-title">K2.5 如何把一个视频时间块放进语言序列</title>
+<desc id="k25vt-desc">四帧示例图像各有十六个补丁。视觉塔先进行时空编码。对同一空间格在四帧的特征向量求均值，例如某一通道的二、四、六、八平均得到五。再将相邻的二乘二空间格按通道拼接并投影，四个空间组对应四个语言序列位置。</desc>
+<rect x="0" y="0" width="460" height="537" rx="12" fill="var(--bg,#fff)" fill-opacity="1" stroke="none"/>
+<text x="17" y="33" font-size="24" font-weight="680" text-anchor="start" fill="var(--text,#17211c)">四帧画面如何变成四个视觉位置？</text>
+<text x="18" y="61" font-size="17" font-weight="400" text-anchor="start" fill="var(--text-soft,#49524c)">示例：每帧 56 × 56 像素，每个补丁 14 × 14。</text>
+<text x="18" y="95" font-size="20" font-weight="600" text-anchor="start" fill="var(--text,#17211c)">视觉塔编码后，每帧有 4 × 4 个空间格</text>
+<text x="63" y="124" font-size="17" font-weight="400" text-anchor="middle" fill="var(--text-soft,#49524c)">帧 1</text>
+<path d="M45 136v72 M27 154h72" fill="none" stroke="var(--text-soft,#49524c)" stroke-width="0.85" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M63 136v72 M27 172h72" fill="none" stroke="var(--text-soft,#49524c)" stroke-width="0.85" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M81 136v72 M27 190h72" fill="none" stroke="var(--text-soft,#49524c)" stroke-width="0.85" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
+<rect x="27" y="136" width="72" height="72" rx="0" fill="none" fill-opacity="1" stroke="var(--text-soft,#49524c)"/>
+<rect x="27" y="136" width="18" height="18" rx="0" fill="var(--hue-blue,#2563a9)" fill-opacity="0.2" stroke="var(--hue-blue,#2563a9)"/>
+<text x="36" y="150" font-size="15" font-weight="670" text-anchor="middle" fill="var(--text,#17211c)">2</text>
+<path d="M63 210v13" fill="none" stroke="var(--text-soft,#49524c)" stroke-width="1.4" stroke-opacity="1" stroke-linejoin="round" stroke-linecap="round"/>
+<text x="173" y="124" font-size="17" font-weight="400" text-anchor="middle" fill="var(--text-soft,#49524c)">帧 2</text>
+<path d="M155 136v72 M137 154h72" fill="none" stroke="var(--text-soft,#49524c)" stroke-width="0.85" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M173 136v72 M137 172h72" fill="none" stroke="var(--text-soft,#49524c)" stroke-width="0.85" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M191 136v72 M137 190h72" fill="none" stroke="var(--text-soft,#49524c)" stroke-width="0.85" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
+<rect x="137" y="136" width="72" height="72" rx="0" fill="none" fill-opacity="1" stroke="var(--text-soft,#49524c)"/>
+<rect x="137" y="136" width="18" height="18" rx="0" fill="var(--hue-blue,#2563a9)" fill-opacity="0.2" stroke="var(--hue-blue,#2563a9)"/>
+<text x="146" y="150" font-size="15" font-weight="670" text-anchor="middle" fill="var(--text,#17211c)">4</text>
+<path d="M173 210v13" fill="none" stroke="var(--text-soft,#49524c)" stroke-width="1.4" stroke-opacity="1" stroke-linejoin="round" stroke-linecap="round"/>
+<text x="283" y="124" font-size="17" font-weight="400" text-anchor="middle" fill="var(--text-soft,#49524c)">帧 3</text>
+<path d="M265 136v72 M247 154h72" fill="none" stroke="var(--text-soft,#49524c)" stroke-width="0.85" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M283 136v72 M247 172h72" fill="none" stroke="var(--text-soft,#49524c)" stroke-width="0.85" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M301 136v72 M247 190h72" fill="none" stroke="var(--text-soft,#49524c)" stroke-width="0.85" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
+<rect x="247" y="136" width="72" height="72" rx="0" fill="none" fill-opacity="1" stroke="var(--text-soft,#49524c)"/>
+<rect x="247" y="136" width="18" height="18" rx="0" fill="var(--hue-blue,#2563a9)" fill-opacity="0.2" stroke="var(--hue-blue,#2563a9)"/>
+<text x="256" y="150" font-size="15" font-weight="670" text-anchor="middle" fill="var(--text,#17211c)">6</text>
+<path d="M283 210v13" fill="none" stroke="var(--text-soft,#49524c)" stroke-width="1.4" stroke-opacity="1" stroke-linejoin="round" stroke-linecap="round"/>
+<text x="393" y="124" font-size="17" font-weight="400" text-anchor="middle" fill="var(--text-soft,#49524c)">帧 4</text>
+<path d="M375 136v72 M357 154h72" fill="none" stroke="var(--text-soft,#49524c)" stroke-width="0.85" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M393 136v72 M357 172h72" fill="none" stroke="var(--text-soft,#49524c)" stroke-width="0.85" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M411 136v72 M357 190h72" fill="none" stroke="var(--text-soft,#49524c)" stroke-width="0.85" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
+<rect x="357" y="136" width="72" height="72" rx="0" fill="none" fill-opacity="1" stroke="var(--text-soft,#49524c)"/>
+<rect x="357" y="136" width="18" height="18" rx="0" fill="var(--hue-blue,#2563a9)" fill-opacity="0.2" stroke="var(--hue-blue,#2563a9)"/>
+<text x="366" y="150" font-size="15" font-weight="670" text-anchor="middle" fill="var(--text,#17211c)">8</text>
+<path d="M393 210v13" fill="none" stroke="var(--text-soft,#49524c)" stroke-width="1.4" stroke-opacity="1" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M63 223H393" fill="none" stroke="var(--text-soft,#49524c)" stroke-width="1.4" stroke-opacity="1" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M230 223V235 m-4 -5 4 5 4 -5" fill="none" stroke="var(--text-soft,#49524c)" stroke-width="1.8" stroke-opacity="1" stroke-linejoin="round" stroke-linecap="round"/>
+<text x="18" y="262" font-size="20" font-weight="650" text-anchor="start" fill="var(--text,#17211c)">沿时间取均值</text>
+<text x="18" y="289" font-size="17" font-weight="400" text-anchor="start" fill="var(--text-soft,#49524c)">同一格、同一通道： (2 + 4 + 6 + 8) / 4 = 5</text>
+<text x="18" y="316" font-size="17" font-weight="400" text-anchor="start" fill="var(--text-soft,#49524c)">每格保留 1,152 维；空间网格仍是 4 × 4。</text>
+<path d="M18 333H442" fill="none" stroke="var(--text-soft,#49524c)" stroke-width="1" stroke-opacity="0.3" stroke-linejoin="round" stroke-linecap="round"/>
+<rect x="25" y="380" width="54" height="54" rx="0" fill="var(--hue-blue,#2563a9)" fill-opacity="0.12" stroke="var(--hue-blue,#2563a9)"/>
+<path d="M52 380v54 M25 407h54" fill="none" stroke="var(--text-soft,#49524c)" stroke-width="0.85" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
+<rect x="25" y="380" width="54" height="54" rx="0" fill="none" fill-opacity="1" stroke="var(--text-soft,#49524c)"/>
+<text x="38.5" y="399" font-size="16" font-weight="650" text-anchor="middle" fill="var(--text,#17211c)">A</text>
+<rect x="79" y="380" width="54" height="54" rx="0" fill="var(--hue-orange,#a95110)" fill-opacity="0.12" stroke="var(--hue-orange,#a95110)"/>
+<path d="M106 380v54 M79 407h54" fill="none" stroke="var(--text-soft,#49524c)" stroke-width="0.85" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
+<rect x="79" y="380" width="54" height="54" rx="0" fill="none" fill-opacity="1" stroke="var(--text-soft,#49524c)"/>
+<text x="92.5" y="399" font-size="16" font-weight="650" text-anchor="middle" fill="var(--text,#17211c)">B</text>
+<rect x="25" y="434" width="54" height="54" rx="0" fill="var(--accent,#14733a)" fill-opacity="0.12" stroke="var(--accent,#14733a)"/>
+<path d="M52 434v54 M25 461h54" fill="none" stroke="var(--text-soft,#49524c)" stroke-width="0.85" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
+<rect x="25" y="434" width="54" height="54" rx="0" fill="none" fill-opacity="1" stroke="var(--text-soft,#49524c)"/>
+<text x="38.5" y="453" font-size="16" font-weight="650" text-anchor="middle" fill="var(--text,#17211c)">C</text>
+<rect x="79" y="434" width="54" height="54" rx="0" fill="var(--hue-purple,#8248a4)" fill-opacity="0.12" stroke="var(--hue-purple,#8248a4)"/>
+<path d="M106 434v54 M79 461h54" fill="none" stroke="var(--text-soft,#49524c)" stroke-width="0.85" stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>
+<rect x="79" y="434" width="54" height="54" rx="0" fill="none" fill-opacity="1" stroke="var(--text-soft,#49524c)"/>
+<text x="92.5" y="453" font-size="16" font-weight="650" text-anchor="middle" fill="var(--text,#17211c)">D</text>
+<text x="18" y="360" font-size="20" font-weight="650" text-anchor="start" fill="var(--text,#17211c)">按 2 × 2 邻域拼接并投影</text>
+<path d="M146 434h33 m-5 -4 5 4 -5 4" fill="none" stroke="var(--text-soft,#49524c)" stroke-width="1.8" stroke-opacity="1" stroke-linejoin="round" stroke-linecap="round"/>
+<rect x="194" y="410" width="49" height="50" rx="6" fill="var(--hue-blue,#2563a9)" fill-opacity="0.13" stroke="var(--hue-blue,#2563a9)"/>
+<text x="218.5" y="443" font-size="21" font-weight="650" text-anchor="middle" fill="var(--text,#17211c)">A</text>
+<rect x="256" y="410" width="49" height="50" rx="6" fill="var(--hue-orange,#a95110)" fill-opacity="0.13" stroke="var(--hue-orange,#a95110)"/>
+<text x="280.5" y="443" font-size="21" font-weight="650" text-anchor="middle" fill="var(--text,#17211c)">B</text>
+<rect x="318" y="410" width="49" height="50" rx="6" fill="var(--accent,#14733a)" fill-opacity="0.13" stroke="var(--accent,#14733a)"/>
+<text x="342.5" y="443" font-size="21" font-weight="650" text-anchor="middle" fill="var(--text,#17211c)">C</text>
+<rect x="380" y="410" width="49" height="50" rx="6" fill="var(--hue-purple,#8248a4)" fill-opacity="0.13" stroke="var(--hue-purple,#8248a4)"/>
+<text x="404.5" y="443" font-size="21" font-weight="650" text-anchor="middle" fill="var(--text,#17211c)">D</text>
+<text x="196" y="394" font-size="18" font-weight="600" text-anchor="start" fill="var(--text,#17211c)">四个语言序列位置</text>
+<text x="196" y="486" font-size="17" font-weight="400" text-anchor="start" fill="var(--text-soft,#49524c)">每个位置宽度 7,168</text>
+<text x="18" y="520" font-size="16" font-weight="400" text-anchor="start" fill="var(--text-soft,#49524c)">A–D 各含四格：4 × 1,152 → 4,608 → 7,168 维。</text>
+</svg><figcaption>图 3 · 图中同色格子追踪同一空间位置。先沿时间求均值，再合并空间邻域，最后对齐语言宽度。依据 K2.5 配置与合并函数原创绘制。<span class="figure-hint">点按图解可放大查看</span></figcaption></figure>
+<p>随后，<code>KimiK25ForConditionalGeneration.forward</code> 将投影结果放到媒体占位符对应的位置，调整注意力掩码和位置编号，再调用语言模型。这样，模型可以一边读提示里的「按钮」，一边读取截图里的位置特征。进入单步解码后，已有图像信息随语言层历史一起保留，代码不会在每生成一个汉字时重新编码全部画面。代价在预填充期间已经发生：视觉塔要处理原始补丁，视觉位置也占用语言上下文；视频越细、越长，这两笔成本越值得分别核算。<a href="https://huggingface.co/moonshotai/Kimi-K2.5/blob/94b44e57fb4797fde1c1872bed70aef3c93a07f6/modeling_kimi_k25.py#L1044">官方多模态 forward</a></p>
+<p>加入视觉的时机也能做对照。报告表 1 固定整程视觉与文本 token 的总预算：从一开始就混入 10% 视觉数据，视觉推理得分为 43.8；在训练进度 80% 时才引入、随后把视觉比例提到 50%，对应得分为 39.0。两条方案联动改变了引入时机和后段混合比例。这支持团队选择早期联合训练，却不足以单独估计其中一个变量的贡献。<a href="https://arxiv.org/html/2602.02276v1#S2.SS1">K2.5 报告 §2.1、表 1</a></p>
+
+<h3 id="k25-parl">Agent Swarm 把等待时间花在哪里？</h3>
+<p>与视觉同时发布的还有 Agent Swarm（多智能体协作）。设想要核对四份相互独立的财报。一位助手若依次阅读，要等四次检索。K2.5 用并行智能体强化学习（Parallel-Agent Reinforcement Learning，PARL）训练调度者，让它决定何时分工、给每个子智能体什么任务、最后怎样合并证据。训练时子智能体来自固定的中间检查点，更新的是调度者。任务成败提供主要奖励，鼓励发起并行任务、鼓励子任务完成的两项辅助奖励随训练逐渐退到零。这里的「并行」发生在多次模型与环境交互之间，与一层 MoE 中同时处理多组输入属于不同的计算。<a href="https://arxiv.org/html/2602.02276v1#S3">K2.5 报告 §3，图 3</a></p>
+<p>报告用「关键步数」衡量一轮分工：主智能体用掉的步数，加上这批子任务中最长一支的步数，再对各阶段求和。假设调度花 1 步，三支分别走 2、4、7 步，这一阶段的关键步数为 <strong>1+7=8</strong>，实际总工作为 <strong>1+2+4+7=14</strong> 步。缩短等待可能要付出更多总 token 和并发资源。团队在 WideSearch 的目标 Item-F1（检索结果按条目计的 F1 分数）取 30% 至 70% 时报告，与单智能体基线相比，达到相同性能所需墙钟时间缩短到约 1/3 至 1/4.5。对必须先读完上一步反馈才能行动的任务，这种并行空间要小得多。<a href="https://arxiv.org/html/2602.02276v1#S5.SS2">报告 §5.2、图 8</a></p>
+
+<h2 id="k26-k28">K2.6、K2.7 Code 与 K2.8 Preview：三个数字，三种证据</h2>
+<p><strong>2026 年 4 月 20 日，Kimi K2.6。</strong> 官方权重说明明列其网络架构与 K2.5 相同。可核实的演进集中在长程编程、工具执行和集群调度：团队展示了一个在 Mac 上用 Zig 为 Qwen3.5-0.8B 实现推理的案例，持续超过 12 小时，调用工具超过 4,000 次，迭代 14 轮。成果约从 15 到 193 token/s，加速的是它写出的 <em>Qwen 小模型推理程序</em>。这是一件完整交付物的记录，衡量 K2.6 自身输出速度则需要另做推理测量。集群服务也把可调度子智能体上限提高到 300。训练配方中各项因素的贡献，单靠案例和相同配置无法拆开。<a href="https://www.kimi.com/en/blog/kimi-k2-6">K2.6 官方案例</a> · <a href="https://huggingface.co/moonshotai/Kimi-K2.6/blob/7eb5002f6aadc958aed6a9177b7ed26bb94011bb/README.md">模型卡 §4–5</a> · <a href="https://www.kimi.com/help/agent/agent-swarm">集群版本说明</a></p>
+<p><strong>2026 年 6 月 12 日，Kimi K2.7 Code。</strong> 公开权重名称包含 Code。模型卡明确写明基于 K2.6，架构与 K2.5、K2.6 相同，面向长程软件工程任务。在团队自建 Kimi Code Bench v2 上，K2.6 为 50.9，K2.7 Code 为 62.0。两者使用 Kimi Code CLI、思考模式、温度 1.0、top-p 0.95 和 262,144 上下文的默认测试设置。团队还报告思考 token 用量约减少 30%，这能解释相同结构下为何可能更快完成任务，但每个 token 的执行时间和完成一项任务的总时间需分别测量。<a href="https://huggingface.co/moonshotai/Kimi-K2.7-Code/blob/74797c9c62378b951a1f6fcf5c4631024e9b8bef/README.md">K2.7 Code 模型卡及评测脚注</a> · <a href="https://www.kimi.com/code/docs/en/kimi-code/whats-new.html">Kimi Code 发布记录</a></p>
+<p><strong>2026 年 9 月 11 日，K2.8 Preview 在 Kimi Code 全量上线。</strong> 当天变动最容易被调用方忽略：原有服务标识 <code>kimi-for-coding</code> 继续有效，背后已切换模型，支持最高 1M 上下文与可调思考强度。这个日期甚至晚于 K3 的公开发布。对 K2.7 Code 可以打开固定权重配置核对网络，对 K2.8 Preview，此处能核实的是服务行为；从兼容的标识无法读出层数、参数规模或 K3 的训练起点。<a href="https://www.kimi.com/code/docs/en/kimi-code/whats-new.html#k2-8-preview-september-11-2026">Kimi Code 的 9 月更新记录</a> · <a href="https://www.kimi.com/en/help/kimi-code/models">官方模型标识对照</a></p>
+<h2 id="kimi-linear">Kimi Linear：把一部分历史从逐条记录改成一张可更新的表</h2>
+<p>把一份代码库放在上下文里，模型每写出一个新 token，都可能要回到十万步以前找一个函数名。全局注意力为各个历史位置保留键和值，查询可以单独挑出某个位置；代价是历史越长，需要保留、读取的记录越多。2025 年 10 月的 Kimi Linear 从另一端尝试：多数层把过去累积进固定大小的状态，少数层保留逐位置读取能力。团队发布了基础版和指令版两个检查点，均为 48B 总参数、3B 激活参数，训练使用 5.7T token。它是独立训练的研究分支，后来 Kimi K3 采用了其中的注意力设计。<a href="https://arxiv.org/abs/2510.26692">Kimi Linear 技术报告</a> · <a href="https://huggingface.co/moonshotai/Kimi-Linear-48B-A3B-Instruct/blob/e1df551a447157d4658b573f9a695d57658590e9/README.md">发布方模型卡</a> · <a href="https://arxiv.org/abs/2607.24653">Kimi K3 技术报告</a></p>
+<h3 id="kimi-delta">一次写入，为什么要先算「已经记住了多少」？</h3>
+<p>Kimi Delta Attention（KDA，Kimi 增量注意力）继承了 Gated DeltaNet 的纠错写入。设一个注意力头的状态为矩阵 <i>S</i>，每行对应一个键通道，每列对应一个值通道。对于当前的键向量 <i>k</i>，用 <i>S</i><sup>⊤</sup><i>k</i> 就能读出状态对这个键已有的预测。如果实际的值是 <i>v</i>，直接把 <i>v</i> 再累加一遍，重复内容也会越记越强。增量规则转而写回「目标值减去已有预测」的差量；相同的键已经能准确读出目标时，这次纠错自然变成零。</p>
+<p>KDA 把遗忘的粒度细化到<strong>每个键通道</strong>。图中的保留率 α 可让第一行衰减、一旁的第二行保持原样。先对旧状态逐行缩放，得到 <i>S′</i>；随后用键读取 <i>S′</i>，计算要纠正的差量。β 是本位置、本头的写入步长；用键与差量的外积，就能把这份修改分配回矩阵的对应方向。最后用当前查询 <i>q</i> 读取更新好的状态。公式中 <i>k</i>、<i>q</i> 长为 <i>dₖ</i>，<i>v</i> 长为 <i>dᵥ</i>，<i>S</i> 的形状始终是 <i>dₖ × dᵥ</i>。<a href="https://arxiv.org/html/2510.26692v1#S3.E1">报告 §3，公式 1</a></p>
+<figure><svg xmlns="http://www.w3.org/2000/svg" role="img" viewBox="0 0 520 344" aria-labelledby="kimi-delta-title kimi-delta-desc" font-family="system-ui, 'Microsoft YaHei', sans-serif">
+<title id="kimi-delta-title">一次 Kimi Delta Attention 状态更新</title><desc id="kimi-delta-desc">例子只遗忘第一行的一半。用键一零读取第一行，目标值减掉预测后，再写入差量的一半，第一行从一零变成二一，第二行保持零三。</desc>
+<rect width="520" height="344" rx="14" fill="var(--bg,#fff)"/>
+<g fill="var(--text,#162b35)"><text x="18" y="34" font-weight="700" font-size="22">同一个键，如何只写入新的信息？</text><text x="18" y="63" font-size="16">键 k = (1, 0)　目标 v = (3, 2)　步长 β = ½</text></g>
+<path d="M18 80H502 M18 241H502" stroke="var(--border,#9eafb4)" stroke-width="1.6"/>
+<g text-anchor="middle" font-size="17" fill="var(--text,#162b35)"><text x="81" y="111">旧状态 S</text><text x="260" y="111">逐行遗忘 S′</text><text x="439" y="111">纠错后 Sₜ</text></g>
+<g fill="var(--surface-muted,#e7f0ea)" stroke="var(--border,#9eafb4)" stroke-width="1.5"><rect x="23" y="125" width="116" height="88" rx="8"/><rect x="202" y="125" width="116" height="88" rx="8"/><rect x="381" y="125" width="116" height="88" rx="8"/></g>
+<g fill="none" stroke="var(--text-soft,#596970)" stroke-width="2"><path d="M149 170h39m-8 -6 8 6 -8 6 M328 170h39m-8 -6 8 6 -8 6"/></g>
+<g text-anchor="middle" font-size="23" font-family="monospace" font-weight="600" fill="var(--text,#162b35)"><text x="81" y="160">2　0</text><text x="81" y="196">0　3</text><text x="260" y="160">1　0</text><text x="260" y="196">0　3</text><text x="439" y="160">2　1</text><text x="439" y="196">0　3</text></g>
+<g fill="var(--text,#162b35)" font-size="17"><text x="18" y="270">读取第一行　(1, 0)</text><text x="18" y="297">目标减预测　(3, 2) − (1, 0) = (2, 2)</text><text x="18" y="324">写入一半　　第一行变为 (1, 0) + (1, 1) = (2, 1)</text></g>
+</svg><figcaption>图 4 · 原创状态更新示意。每个矩阵只有 2 × 2；真实检查点中每个 KDA 头的递推矩阵为 128 × 128。例子省略短卷积、查询缩放与输出门控。</figcaption></figure>
+<details><summary>展开核算这次写入的 NumPy 代码</summary>
+<pre><code class="language-python">import numpy as np
+
+state = np.array([[2., 0.], [0., 3.]])
+alpha = np.array([0.5, 1.0])       # 两个键通道的保留率
+k, v = np.array([1., 0.]), np.array([3., 2.])
+beta = 0.5
+decayed = alpha[:, None] * state    # 对行缩放，形状仍为 [2, 2]
+error = v - decayed.T @ k
+updated = decayed + beta * np.outer(k, error)
+np.testing.assert_allclose(updated, [[2., 1.], [0., 3.]])</code></pre>
+<p>已在 CPU 上执行这段代数检查。一个形状固定的表可以被反复修改，也可能因新旧键重叠而产生干扰。模型保留全局注意力层，就为需要按原位置区分的细节留下了另一条路径。</p></details>
+<h3 id="kimi-linear-forward">沿官方指令版权重走一遍：提示词、两种缓存与下一个词</h3>
+<p>这里读取 Moonshot AI 随权重提供的 Hugging Face 适配，固定提交 <code>e1df551</code>；底层线性注意力会调用 Flash Linear Attention（FLA）的内核。以下形状按无填充输入给出。<i>B</i> 是批量，<i>T</i> 是本次输入的位置数，<i>N</i> 是含历史在内的总位置数。官方模型卡先调用 <code>tokenizer.apply_chat_template</code>，模板给提问和助手回答起点添加角色标记，<code>TikTokenTokenizer</code> 将序列切成整数 ID。形状为 [B,T] 的 ID 经 <code>embed_tokens</code> 查表后成为 [B,T,2304]，随后逐层进入 <code>KimiDecoderLayer</code>。<a href="https://huggingface.co/moonshotai/Kimi-Linear-48B-A3B-Instruct/blob/e1df551a447157d4658b573f9a695d57658590e9/README.md#L74">官方生成示例</a> · <a href="https://huggingface.co/moonshotai/Kimi-Linear-48B-A3B-Instruct/blob/e1df551a447157d4658b573f9a695d57658590e9/chat_template.jinja">对话模板</a> · <a href="https://huggingface.co/moonshotai/Kimi-Linear-48B-A3B-Instruct/blob/e1df551a447157d4658b573f9a695d57658590e9/tokenization_kimi.py#L159">分词入口</a></p>
+<p>在 27 层中，第 4、8、12、16、20、24、27 层使用全局多头潜在注意力（MLA），其余 20 层使用 KDA。论文中的 3∶1 是设计比例，最后一组因总层数而缩短。进每一层时先保存残差并归一化。若走 KDA，查询、键、值各自经线性投影和宽度为 4 的因果短卷积，再把最后一维拆开，得到 [B,T,32,128]。这里的 32 是头数，128 是一个头的通道数。递推内核归一化查询与键，并更新每个头各自的矩阵。输出经逐头归一化和输出门控，拼回 32 个头，投影回 2304 维，才能与本层输入逐项相加。<a href="https://huggingface.co/moonshotai/Kimi-Linear-48B-A3B-Instruct/blob/e1df551a447157d4658b573f9a695d57658590e9/config.json">实际层表与维度</a> · <a href="https://huggingface.co/moonshotai/Kimi-Linear-48B-A3B-Instruct/blob/e1df551a447157d4658b573f9a695d57658590e9/modeling_kimi.py#L444">KimiDeltaAttention</a></p>
+<p>长提示词第一次进入模型时，多个新位置可以分块计算，块与块通过状态衔接。下一步解码只有一个新位置，直接取出前一步的矩阵与短卷积状态，做一次更新即可。具体代码按<strong>本次输入长度</strong>选内核：推理时 <code>q_len &lt;= 64</code> 走 <code>fused_recurrent_kda</code>，较长的输入走 <code>chunk_kda</code>。所以很短的提示词也可能走递推路径。KDA 每层的逻辑矩阵为 [B,32,128,128]，另有查询、键、值三份短卷积状态；两类状态的尺寸都与累计历史长度无关。<a href="https://huggingface.co/moonshotai/Kimi-Linear-48B-A3B-Instruct/blob/e1df551a447157d4658b573f9a695d57658590e9/modeling_kimi.py#L519">内核选择、读取与写回</a></p>
+<p>到了全局 MLA 层，缓存的语义变了。在这份适配里，<code>kv_a_proj_with_mqa</code> 先投影出 512 + 64 个分量，前 512 个经过归一化后展开成逐头的键和值。<code>transpose(1, 2)</code> 把位置轴移到头轴之后，便于注意力沿着历史位置计算。实际交给 <code>KimiDynamicCache.update</code> 的键形状为 [B,32,T,192]，值为 [B,32,T,128]，沿第 2 轴追加到长度 <i>N</i>。配置里的 <code>mla_use_nope</code> 已启用，这条路径保留名为 <code>k_rot</code> 的分量，实际只扩展、拼接它，未对它施加旋转。由此也能看到表示设计和物理实现的区别：主干具有低秩投影，这份公开适配仍然缓存展开后的 K/V。估算部署显存时，必须看所用后端在哪里写入缓存。<a href="https://huggingface.co/moonshotai/Kimi-Linear-48B-A3B-Instruct/blob/e1df551a447157d4658b573f9a695d57658590e9/modeling_kimi.py#L380">KimiMLAAttention.forward</a> · <a href="https://huggingface.co/moonshotai/Kimi-Linear-48B-A3B-Instruct/blob/e1df551a447157d4658b573f9a695d57658590e9/modeling_kimi.py#L155">缓存追加</a></p>
+<p>注意力的残差相加后，层内还有一次归一化和前馈变换。第一层是稠密前馈，其余 26 层各有 256 个路由专家，每个 token 选 8 个，另外再加 1 个共享专家的输出。参考实现先把 [B,T,2304] 的位置摊平，把选中同一专家的 token 排到一起，专家分别计算后再按原顺序、各自权重汇合。最终归一化的隐藏状态经过 <code>lm_head</code> 映到大小为 163840 的词表。生成循环取末位置的一行分数 [B,163840]，贪心设置选择最大项，采样设置按处理后的分布抽取，再将所选 ID 作为下一步输入；生成结束后把输出 ID 解码成文本。这条路径来自源码静态核对。<code>KimiSparseMoeBlock.forward</code> 的训练分支直接抛出异常，仓库这里提供的是推理适配。<a href="https://huggingface.co/moonshotai/Kimi-Linear-48B-A3B-Instruct/blob/e1df551a447157d4658b573f9a695d57658590e9/modeling_kimi.py#L733">专家分发与回收</a> · <a href="https://huggingface.co/moonshotai/Kimi-Linear-48B-A3B-Instruct/blob/e1df551a447157d4658b573f9a695d57658590e9/modeling_kimi.py#L1085">词表输出头</a> · <a href="https://github.com/huggingface/transformers/blob/v4.57.1/src/transformers/generation/utils.py#L2800">Transformers 4.57.1 选取下一个 token</a></p>
+<h3 id="kimi-linear-evidence">读性能数字，先看是否比较同一批模型</h3>
+<p>报告表 4 的对照组都预训练了 1.4T token，再使用同一套监督微调配方。MMLU-Pro 上，全 MLA 的指令模型得分 65.7，混合 Gated DeltaNet 为 64.8，Kimi Linear 为 67.4。论文另外给出了速度口径：图 7 的批量为 1，§6.3 给出的百万上下文解码加速约 2.3 倍；作者把节省缓存后可放大批量的收益也计入时，才给出最高约 6.3 倍的估算。两者回答的是不同部署问题。对于实际服务，提示词长短、请求能否凑成批和使用哪个缓存内核都会改变结果。<a href="https://arxiv.org/html/2510.26692v1#S5.T4">报告表 4</a> · <a href="https://arxiv.org/html/2510.26692v1#S5.F7">图 7 的批量条件</a> · <a href="https://arxiv.org/html/2510.26692v1#S6.SS3">§6.3 的解码开销分析</a></p>
+<h2 id="k3">Kimi K3：沿着序列、深度和专家三条路径读一个 token</h2>
+<p id="k3-intro">假设工程助手已经读过 200 个源文件，现在要在最后一行补全一次调用。它既要记起开头定义的接口，又要保留刚修改过的局部状态。如果 93 层都在每个解码步重新细读全部历史，文档越长，每写一个字就越贵。2026 年 7 月 16 日发布的 Kimi K3 采用一个有分工的主干：多数层滚动更新短小的状态，部分层保留逐位置读取历史的能力。它还修改了同一个位置在层与层之间传递信息的方式，以及这个位置要交给哪些专家处理。<a href="https://www.kimi.com/en/blog/kimi-k3">K3 发布说明</a> · <a href="https://arxiv.org/pdf/2607.24653v2">K3 技术报告 §2、图 2</a></p>
+
+<p>先走一遍公开实现。纯文本经分词得到形状为 [B,T] 的 ID，B 是批量，T 是输入长度。查嵌入表后，每个位置变成一个 7,168 维向量。如果带图，27 层 MoonViT-V2 提取视觉特征，按 2×2 合并空间相邻的视觉 token，再由投影器把它们送到相同的语言表示空间。合并后，以下文的 T 表示实际送入语言主干的位置数。K3 从预训练起就用下一 token 目标联合优化视觉和语言部分。图文路径进入同一个主干，也使工程助手可以在看过渲染截图后继续写代码。<a href="https://huggingface.co/moonshotai/Kimi-K3/blob/c7945ea0e737dcaddd22c68ddb7639b1407c081c/modeling_kimi_k3.py#L1145">官方实现：文本嵌入与图像特征合并</a> · <a href="https://arxiv.org/abs/2607.24653">技术报告 §2.4、§3.3</a></p>
+
+<figure class="kimi-figure"><svg xmlns="http://www.w3.org/2000/svg" role="img" viewBox="0 0 450 337" font-family="system-ui, sans-serif"><title>K3 序列注意力、深度残差与专家选择</title><desc>三种计算读取的候选集合、返回对象和选择方式不同。</desc><rect width="450" height="337" rx="14" fill="var(--bg)" stroke="var(--border)"/><text x="16" y="36" fill="var(--text)" font-size="22" font-weight="650">K3 的一个位置，面对三种候选集合</text><path d="M16 65H432" stroke="var(--border)"/><text x="16" y="93" fill="var(--hue-blue)" font-size="18" font-weight="650">沿序列</text><text x="100" y="93" fill="var(--text)" font-size="19" font-weight="600">读到哪个过去的位置？</text><text x="16" y="126" fill="var(--text-soft)" font-size="16" font-weight="400">当前查询</text><text x="100" y="126" fill="var(--text)" font-size="16" font-weight="400">→  历史 token 或递推状态</text><text x="319" y="126" fill="var(--hue-blue)" font-size="16" font-weight="400">→ 历史信息</text><path d="M16 154H432" stroke="var(--border)"/><text x="16" y="182" fill="var(--hue-purple)" font-size="18" font-weight="650">沿深度</text><text x="100" y="182" fill="var(--text)" font-size="19" font-weight="600">读回哪一段网络的输出？</text><text x="16" y="215" fill="var(--text-soft)" font-size="16" font-weight="400">层内查询</text><text x="100" y="215" fill="var(--text)" font-size="16" font-weight="400">→  此前深度块的表示</text><text x="319" y="215" fill="var(--hue-purple)" font-size="16" font-weight="400">→ 残差输入</text><path d="M16 243H432" stroke="var(--border)"/><text x="16" y="271" fill="var(--hue-orange)" font-size="18" font-weight="650">沿专家</text><text x="100" y="271" fill="var(--text)" font-size="19" font-weight="600">由哪组参数加工？</text><text x="16" y="304" fill="var(--text-soft)" font-size="16" font-weight="400">当前表示</text><text x="100" y="304" fill="var(--text)" font-size="16" font-weight="400">→  896 个候选路由专家</text><text x="319" y="304" fill="var(--hue-orange)" font-size="16" font-weight="400">→ 16 个专家</text></svg><figcaption>图 5 · 序列注意力聚合过去的信息，分块注意力残差聚合同一位置不同深度的表示，专家路由决定由哪些前馈参数加工。下方依次跟踪三条路径。依据 K3 报告 §2 原创绘制。<span class="figure-hint">点按图解可放大查看</span></figcaption></figure>
+<h3 id="k3-history-cache">第一条路径：每写一个 token，哪些层还要读完整历史？</h3>
+<p>从第 1 层开始计数，前 92 层将「三层 Kimi Delta Attention（KDA）＋一层带门控的多头潜在注意力（Gated MLA）」重复 23 次，第 93 层再做一次 Gated MLA。合计 69 层 KDA、24 层 Gated MLA。每层选一种注意力，随后接前馈计算；第一个前馈是稠密网络，其余使用专家路由。KDA 层通过按通道遗忘、按差量写入来更新每头 128×128 的状态矩阵，再从中读出当前查询。旧 token 的影响已经混进状态里，局部短卷积另有少量缓存。Gated MLA 则可以逐位置取回历史信息，并按当前输入调节输出通道。它没有给查询和键加旋转位置编码，KDA 的顺序递推仍使整个模型对词序敏感。<a href="https://huggingface.co/moonshotai/Kimi-K3/blob/c7945ea0e737dcaddd22c68ddb7639b1407c081c/config.json">官方配置 · 两组层号、头数和维度</a> · <a href="https://arxiv.org/abs/2607.24653">技术报告 §2.1</a></p>
+<p>K3 对 Kimi Linear 的递推还做过一处与硬件直接相关的修改。分块计算需要用到多个保留系数之积的倒数；连续几个系数都太小时，倒数就可能溢出。K3 将单步保留系数 α 的对数限制在 −5 到 0 之间。一个 16-token 小块里，倒数便小于 e<sup>80</sup>，落在 BF16 的数值范围内。团队据此将先前需要逐位置对处理的对角小块也交给矩阵乘法单元。限制的是单步遗忘强度，这一限制换来了更规整的块内计算。<a href="https://arxiv.org/pdf/2607.24653v2#page=5">技术报告式（5）、图 3</a></p>
+<p>预填充会批量处理输入位置，KDA 可在块内并行、在块间传递状态。逐 token 解码时，KDA 只推进一步；24 层全局 MLA 仍要面对渐长的历史。实际服务还要解决前缀复用：两个请求即使有相同的开头，也需要在同一位置同时取回 MLA 的逐位置缓存和 KDA 的整块状态快照，才能从那里接着算。报告图 12 给出一个例子，2,800 个相同前缀 token 落在 6,144-token 物理块内，服务可恢复到第 2,560 个位置的 512-token 检查边界，只重算余下 240 个。这里的 512 是该服务的前缀检查粒度。<a href="https://arxiv.org/pdf/2607.24653v2#page=23">技术报告 §5.4.1、图 12</a></p>
+
+<h3 id="k3-depth">第二条路径：当前位置该沿用哪一层的表示？</h3>
+<p>普通残差连接反复执行「旧表示＋本层改动」。深层收到的是许多次更新的总和。如果它此时需要靠近输入端的那一份信息，单凭一个总和很难把各次贡献重新拆开。K3 的分块注意力残差（Block Attention Residuals，AttnRes）把深度方向也变成可选择的来源。每 12 个主干层组成一个块，在块内累加更新。后续子层能看到输入嵌入、已经完成的块摘要，以及当前块积累到此处的部分和。一次读取得到的仍是一个 7,168 维向量，可以直接交给注意力或前馈子层。<a href="https://arxiv.org/abs/2607.24653">技术报告 §2.2，式（8）至（10）</a></p>
+<p>固定一个 token，记候选向量为 b₁…bₘ。当前子层有一个学得的查询向量 w。先用 w 与每个经过均方根归一化的 bⱼ 点积，再沿<strong>深度来源</strong>做 softmax，得到权重 αⱼ。归一化用在打分侧，参与加权求和的值仍是原 bⱼ。这既能避免某个块只因向量幅度太大就垄断分数，又保留了被选表示本身的尺度。若两个来源得分相同，它们各占一半；若同一段文本有一百个位置，每个位置分别计算这组层间权重。官方函数把批量和位置压成 N=B×T，将候选堆成 [N,m,7168]，打分得到 [N,m]，再加权还原为 [N,7168]。保留块摘要减少了长期留存的中间表示，代价是块内已累加的单层更新不能逐一检索。<a href="https://huggingface.co/moonshotai/Kimi-K3/blob/c7945ea0e737dcaddd22c68ddb7639b1407c081c/modeling_kimi_linear.py#L1075">官方实现 · _apply_attn_res</a></p>
+
+<h3 id="k3-moe">第三条路径：为什么给专家发送半宽的向量？</h3>
+<p>K3 全模型约 2.8 万亿参数，每个 token 激活约 1,040 亿。沿用 K2 的全宽专家设计，同时把入选专家数从 8 翻倍到 16，跨设备分发便要发送更多份隐藏状态。K3 的 Stable LatentMoE 将路由专家放进较窄的空间：先由完整的 7,168 维输入确定 896 个专家中的 16 个，再把输入投影到 3,584 维；每个入选专家的内部宽度为 3,072，返回 3,584 维。各路加权合并，经 RMSNorm 后投影回 7,168 维，与两个共享专家处理全宽输入的结果相加。相同精度、相同入选数下，每份分发给路由专家的向量元素数减半；真实通信时间还取决于专家放在哪些设备以及负载是否均匀。<a href="https://huggingface.co/moonshotai/Kimi-K3/blob/c7945ea0e737dcaddd22c68ddb7639b1407c081c/modeling_kimi_linear.py#L815">官方实现 · KimiSparseMoeBlock.forward</a> · <a href="https://arxiv.org/abs/2607.24653">报告式（11）、表 1</a></p>
+<p>这里会出现和 GLM-5.4 门控一节相通的数值问题：由不同专家合成的结果，坐标幅度可以相差很大。K3 在升回全宽之前归一化，并把专家内部两个相乘的分支分别平滑限幅。使用报告中的上限 4 和 25，SiTU-GLU 激活的单个乘积坐标绝对值不超过 100。到下一次线性投影时仍会发生缩放，这个界只对该激活的输出成立。它和 GLM-5.4 在两轮循环之间调节残差写入，保护的是两段不同的计算。<a href="https://arxiv.org/pdf/2607.24653v2#page=7">报告 §2.3、图 4</a> · <a href="glm-family.html#glm54-forward">GLM-5.4 的逐轮写回</a></p>
+<p>负载均衡还得问另一个问题：某个专家要多高的路由偏置，才会得到大致公平的份额？训练时有 m 个 token，每个分 16 路，平均每个专家应接 m×16/896 份。K3 记录各 token 的第 17 名分数作为入围门槛，用每个专家相对这些门槛的分差分布，估算下一步需要的偏置。偏置影响谁入围，最终加权仍用入围者未加偏置的原始分数归一化。推理时冻结偏置，单个用户的请求无需等待全局统计。<a href="https://arxiv.org/pdf/2607.24653v2#page=8">报告 §2.3.3，Quantile Balancing</a></p>
+<p>走完 93 层和最终归一化，语言模型头将表示映射到 163,840 个词表分数。只生成下一步时，官方参考实现可以只把最后一个位置送入输出头，得到 [B,1,163840]。解码器按采样设置选出下一个 ID 并串回序列，才开始下一次前向。注意参考实现的 MLA 为了通用计算会展开各头的 K、V 再更新缓存；优化后的服务可以保留潜表示，复用的数学关系相同，两者物理显存账单要分开计算。<a href="https://huggingface.co/moonshotai/Kimi-K3/blob/c7945ea0e737dcaddd22c68ddb7639b1407c081c/modeling_kimi_linear.py#L426">参考实现 · MLA 的展开与缓存</a> · <a href="https://huggingface.co/moonshotai/Kimi-K3/blob/c7945ea0e737dcaddd22c68ddb7639b1407c081c/modeling_kimi_linear.py#L1236">语言模型输出头</a></p>
+
+<h3 id="k3-training">长任务的另一笔成本，是等待最后一个样本跑完</h3>
+<p>主干决定一次前向如何计算，模型是否会耐心跑完任务，还受后训练奖励影响。K3 先做监督微调，再按任务领域与思考预算训练专长策略，最后由九个教师策略指导同一个学生。在多教师在策略蒸馏（Multi-Teacher On-Policy Distillation）中，学生先走出自己的轨迹，训练时再问相应教师：在学生真正走到的这个前缀上，刚选出的 token 有多合适？这样即使学生已经偏离示范答案，后续每步仍有反馈。这九个教师参与训练，与前馈层里每步选出的 16 个路由专家是两个层次。<a href="https://arxiv.org/pdf/2607.24653v2#page=12">报告 §4.1、式（15）</a></p>
+<p>任务长短差距很大时，每批都要等最慢的一条会浪费资源。报告的 partial rollout 方案允许本轮在一定比例的轨迹完成时暂停其余轨迹，下一轮优先恢复。等同一提示的成组答案齐备，再提交策略更新。代价是部分轨迹可能跨过几次策略更新，采样它们的旧策略与当前策略之间出现偏差。报告中另一条常被引用的数字是训练规模律的约 2.5 倍：图 7 比较 K2 与 K3 的拟合曲线，考察达到相同验证损失需要多少训练计算，其中同时包含架构、数据和训练配方的改动。它没有给出用户线上生成速度的同倍提升。<a href="https://arxiv.org/pdf/2607.24653v2#page=13">报告 §4.1.2</a> · <a href="https://arxiv.org/pdf/2607.24653v2#page=11">训练规模律图 7</a></p>
+
+<h2 id="k31">Kimi K3.1 Pro：仍然有 93 层，全局读取却变了</h2>
+<p>K3.1 Pro 的模型表和 K3 很像：约 2.8 万亿总参数、1,040 亿激活参数、1,048,576 个上下文位置。发布方称它从 K3 延续后训练，明显扩大了跨领域联合强化学习的计算投入。再看权重配置，还能找到一处会改变每一步解码成本的字段 <code>dsa_config</code>。它恰好出现在原先负责全局读取的 24 个层号上。产品在 2026 年 10 月下旬上线（Kimi Code 英文更新日志标 10 月 23 日），北京时间 11 月 5 日官方宣布开放模型权重。Highspeed 是同期提供的高速服务档，公开的 Pro 权重给出了可以逐字段检查的研究对象。<a href="https://www.kimi.com/en/blog/kimi-k3-1-pro">官方发布说明 · K3 的后训练与 Highspeed</a> · <a href="https://www.kimi.com/code/docs/en/kimi-code/whats-new.html">Kimi Code 版本日志</a> · <a href="https://x.com/Kimi_Moonshot/status/2118010528123773297">权重发布公告</a></p>
+
+<h3 id="k31-index">先让 32 个小头找地址，再让 96 个主头精读</h3>
+<p>把历史长度记为 H。K3 的 Gated MLA 每个查询都能直接给 H 个可见位置打注意力分数。K3.1 Pro 给每个这样的层加了独立的索引器，形成带门控的 DeepSeek Sparse Attention（Gated DSA）。当前 token 形成 32 个 128 维索引查询，历史各位置保存一个 128 维索引键。轻量索引器遍历可见位置，选出至多 2,048 个地址；同一层的 96 个主注意力头在这些位置上读取原来的 MLA 表示。下一层有自己的查询和索引选择。若历史只有一千个位置，稀疏上限还未截掉候选；若已有 131,072 个位置，主注意力最多精读其中 1/64，而索引器仍要扫描历史。<a href="https://huggingface.co/moonshotai/Kimi-K3.1-Pro/blob/80aff651e9b2d2f5b9f70f92a0a7a77054418e16/config.json">K3.1 Pro 固定配置 · dsa_config</a> · <a href="https://github.com/vllm-project/vllm/blob/b26e0840134ea4b4c87c34bd5a0e0aa61397c638/vllm/models/kimi_k3/nvidia/dsa.py#L421">vLLM 实现 · KimiK3DSAAttention</a></p>
+<p>TokenSpeed 团队测量了这一步的实际耗时。他们在 MI350X、8 路张量并行的设置下，取 16 个请求，每个请求有 4 个待验证位置，测量单卡上一层 MLA 的解码注意力时间。16K 上下文时，K3.1 的索引加稀疏读取仅有 K3 全量读取的 0.80 倍速度；32K 起反超；到 256K 及以上，约为 2.4 倍。索引扫描、稀疏收集各有固定开销，69 层 KDA 和专家计算也仍然要执行。这个交叉点属于该实现、硬件与负载。Highspeed 的线上服务速度则是另一个测量口径。<a href="https://lightseek.org/blog/tokenspeed-kimi-k3-1">TokenSpeed 实现团队 · 图 3、测量条件与内核拆解</a></p>
+
+<h3 id="k31-evidence">一组受控的对比：给同一模型工具，三维重建会怎样？</h3>
+<p>架构解释了 5,000 行代码如何进入模型，长程任务的成绩还受训练、工具和运行环境影响。BenchCAD 给出物体的多个视图，要模型生成 CAD 代码重建它。指标是体素交并比，即生成形状与目标形状相交的体素数除以二者并集。Moonshot 从 17,900 个案例中随机抽取 1,000 个，用最高思考档评测 K3.1 Pro：按官方提示单次直接生成得 72.8%，接入 Claude Code 工具环境得 92.7%。两者相差 19.9 个百分点。这个差值让我们看到同一检查点在两套执行条件下交付的东西差多少；要把增益进一步分配给 DSA、强化学习或某一种工具，还需要分别控制这些变量。<a href="https://www.kimi.com/en/blog/kimi-k3-1-pro">K3.1 Pro 官方技术博客 · 3D Modeling、评测脚注 8</a></p>
+<h2 id="comparison">回到那套旧手册：三种省计算的方法</h2>
+<p>现在可以更精确地回答开头的问题了。假设旧手册对某个函数有一句关键说明。用 <strong>MoBA</strong>，这句话还以逐位置键值保留在缓存里，但如果所在段落的平均键没有入选，这一层的查询就读不到它。用 <strong>KDA</strong>，这句话对递推层的贡献已经写进定长状态，后续读出取决于写入、遗忘和其他信息的干扰；混合网络保留的全局层则提供另一条路径。到 <strong>K3.1 Pro 的稀疏 MLA 层</strong>，索引器先挑具体位置，主注意力在较小的集合里精读。三个方案都能节省部分工作，一处关键细节被错过的原因却不同。<a href="https://arxiv.org/html/2502.13189v1#S2">MoBA 的块选择</a> · <a href="https://arxiv.org/html/2510.26692v1#S3">KDA 状态更新</a> · <a href="https://huggingface.co/moonshotai/Kimi-K3.1-Pro/blob/80aff651e9b2d2f5b9f70f92a0a7a77054418e16/config.json">K3.1 Pro 配置</a></p>
+<p>和另外两篇对读，两个联系最有启发。DeepSeek 的 MLA 把「每个旧位置要存多少」拆成潜变量与位置部分，K2 采用了这条思路；Kimi Linear 又把问题往前推了一步，询问「哪些层还需要为每个旧位置单独留记录」，这条线也走到了 GLM-5.3-Flash。另一种容易混淆的“多想一会儿”发生在完全不同的轴上：k1.5 可以把一个解法展开成更长的输出序列，GLM-5.4 则在决定同一个 token 前重复执行中间 28 层。比较两者的成本，要同时知道解码了多少个位置、每个位置跑了多少计算。<a href="deepseek-family.html">DeepSeek 的 MLA 与稀疏注意力演进</a> · <a href="glm-family.html#kda">GLM-5.3-Flash 的 KDA</a> · <a href="glm-family.html#glm54-loop">GLM-5.4 的循环深度</a></p>
+<p>手册和截图都能读进去，还只是开工。模型最后能不能交付修复，取决于它是否找对了那行证据、能否在测试失败后修正判断，以及工具是否给了它验证的机会。沿着这三个环节去读一次真实任务的轨迹，比把上下文长度、生成速度和任务完成率压成一个分数，更容易发现下一代究竟进步在什么地方。</p>
+<section class="references-section" aria-label="原始资料"><h3 id="sources">原始报告与实现入口</h3>
+<ul><li>查版本定位、上线日期与服务标识，可对读<a href="https://www.kimi.com/en/blog/">月之暗面研究档案</a>、<a href="https://www.kimi.com/code/docs/en/kimi-code/whats-new.html">Kimi Code 更新日志</a>和<a href="https://huggingface.co/moonshotai">官方开放权重目录</a>。</li>
+<li>查训练目标与对照实验，从 <a href="https://arxiv.org/abs/2501.12599">k1.5</a>、<a href="https://arxiv.org/abs/2507.20534">K2</a>、<a href="https://arxiv.org/abs/2602.02276">K2.5</a> 三份报告入手。</li>
+<li>查长上下文结构，按<a href="https://arxiv.org/abs/2510.26692">Kimi Linear</a>、<a href="https://arxiv.org/abs/2607.24653">K3</a>、<a href="https://www.kimi.com/en/blog/kimi-k3-1-pro">K3.1 Pro 技术博客</a>的顺序读。正文中的文件链接固定了所分析的版本。</li></ul>
+<p class="src">资料核对至 2026 年 11 月 26 日。文中性能数字取自注明的发布方实验；代码路径按公开源文件静态追踪。KDA 的小矩阵示例在 CPU 上做过数值检查，未加载旗舰模型或独立测量服务吞吐。</p></section></section><section class="comments-section" id="comments" aria-label="Discussion">
+<div class="comments-header">
+<h2>Discussion</h2>
+</div>
+<div id="utterances-container" class="utterances-container">
+</div>
+<noscript>请启用 JavaScript 后查看评论区。</noscript>
+</section></article></div></main><script>
+const sections=[...document.querySelectorAll('.post-page-content h2')];
+const toc=document.querySelector('#toc-links');
+function headingLink(heading) {
+    const link=document.createElement('a');
+    link.href='#'+heading.id;
+    link.textContent=heading.textContent;
+    return link;
+}
+let group;
+document.querySelectorAll('.post-page-content h2, .post-page-content h3').forEach((heading,i)=>{
+    if (!heading.id) heading.id='section-'+(i+1);
+    if (heading.tagName==='H2') {
+        toc.append(headingLink(heading));
+        group=null;
+        return;
+    }
+    if (!group) {
+        group=document.createElement('details');
+        const summary=document.createElement('summary');
+        summary.textContent='本章小节';
+        group.append(summary);
+        toc.append(group);
+    }
+    group.append(headingLink(heading));
+});
+if('IntersectionObserver'in window){const io=new IntersectionObserver(es=>es.forEach(e=>{if(e.isIntersecting){document.querySelectorAll('#toc-links a').forEach(a=>a.classList.toggle('active',a.hash==='#'+e.target.id))}}),{rootMargin:'-5% 0px -70% 0px'});sections.forEach(s=>io.observe(s))}
+const viewer=document.createElement('dialog');viewer.className='figure-dialog';viewer.innerHTML='<div class="figure-tools"><span>结构图 · 可滚动查看</span><div><button id="figure-size">原始尺寸</button> <button id="figure-close">关闭</button></div></div><div class="figure-canvas"></div>';document.body.append(viewer);
+const canvas=viewer.querySelector('.figure-canvas');
+document.querySelectorAll('figure>svg').forEach(svg=>{svg.setAttribute('tabindex','0');svg.setAttribute('aria-label',(svg.querySelector('title')?.textContent||'结构图')+'；点击放大');function show(){const clone=svg.cloneNode(true);clone.removeAttribute('tabindex');clone.removeAttribute('aria-labelledby');clone.querySelectorAll('[id]').forEach(el=>el.removeAttribute('id'));canvas.replaceChildren(clone);canvas.classList.toggle('actual',innerWidth<800);viewer.querySelector('#figure-size').textContent=canvas.classList.contains('actual')?'适合屏幕':'原始尺寸';viewer.showModal();canvas.scrollTop=0;canvas.scrollLeft=0}svg.addEventListener('click',show);svg.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();show()}})});
+viewer.querySelector('#figure-close').onclick=()=>viewer.close();viewer.querySelector('#figure-size').onclick=()=>{canvas.classList.toggle('actual');viewer.querySelector('#figure-size').textContent=canvas.classList.contains('actual')?'适合屏幕':'原始尺寸'};viewer.addEventListener('click',e=>{if(e.target===viewer)viewer.close()});
+</script><script src="../../app.js?v=50">
+</script><script>(() => {
+  const picker = document.querySelector('#moba-query');
+  const blocks = [...document.querySelectorAll('.kimi-block[data-key]')];
+  function updateReadSet() {
+    const q = picker.value.split(',').map(Number);
+    const scores = blocks.map(block => {
+      const key = block.dataset.key.split(',').map(Number);
+      return q[0] * key[0] + q[1] * key[1];
+    });
+    const selected = scores.indexOf(Math.max(...scores));
+    blocks.forEach((block, i) => {
+      block.dataset.read = selected === i ? 'yes' : 'no';
+      block.querySelector('small').textContent = '分数 ' + scores[i] + (selected === i ? ' · 选中' : ' · 跳过');
+    });
+    document.querySelector('.kimi-answer').textContent =
+        '本次精读位置 ' + (selected * 2 + 1) + '、' + (selected * 2 + 2) + '、7。';
+  }
+  picker.addEventListener('change', updateReadSet);
+  updateReadSet();
+})();</script></body></html>
